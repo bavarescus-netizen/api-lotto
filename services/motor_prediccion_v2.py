@@ -5,6 +5,10 @@ from sqlalchemy import text
 import pandas as pd
 
 print("🚀 MOTOR V2 CARGADO")
+print("🔥 MOTOR EJECUTANDOSE")
+
+async def generar_prediccion(db):
+    print("📊 CONSULTANDO BASE DE DATOS")
 
 # ==============================
 # CONFIGURACIÓN DE PESOS
