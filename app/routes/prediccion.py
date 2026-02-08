@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from db import get_db
-from app.services.motor_prediccion_v2 import generar_prediccion
+from services.motor_prediccion_v2 import generar_prediccion
 
 router = APIRouter()
 
