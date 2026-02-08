@@ -57,6 +57,7 @@ async def generar_prediccion(db):
 
     hoy_df = df[df["fecha"] == pd.Timestamp(hoy)]
     hoy_freq = hoy_df["animalito"].value_counts()
+print("📊 Consultando Neon...")
 
     # ==============================
     # 3️⃣ SCORE COMBINADO
