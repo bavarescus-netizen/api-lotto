@@ -16,6 +16,8 @@ app = FastAPI(title="API Lotto Activo 🚀")
 app.include_router(prediccion_router)
 app.include_router(historico_router)
 
+from app.routes.metricas import router as metricas_router
+app.include_router(metricas_router)
 
 # =========================
 # ENDPOINTS NORMALES
