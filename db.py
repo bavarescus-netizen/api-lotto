@@ -1,29 +1,19 @@
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from dotenv import load_dotenv
-
-load_dotenv()
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# 🔥 FIX NEON + ASYNC
-if DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("sslmode=require", "")
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-
 engine = create_async_engine(
     DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True
+    echo=False
 )
 
-AsyncSessionLocal = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
+SessionLocal = async_sessionmaker(
+    engine,
     expire_on_commit=False
 )
 
-
 async def get_db():
-    async with AsyncSessionLocal() as session:
+    async with SessionLocal() as session:
         yield session
+
