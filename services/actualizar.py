@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 import pandas as pd
-import requests
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 from dotenv import load_dotenv
@@ -15,70 +14,56 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 
 
 # =========================================
-# 1️⃣ OBTENER ÚLTIMA FECHA EN NEON
-# =========================================
-async def obtener_ultima_fecha(conn):
-    res = await conn.execute(text("SELECT MAX(fecha) FROM historico"))
-    fecha = res.scalar()
-
-    if fecha is None:
-        return datetime(2025, 1, 1).date()  # inicio si está vacío
-
-    return fecha
-
-
-# =========================================
-# 2️⃣ DESCARGAR DATOS WEB (histórico real)
-# =========================================
-def descargar_dia(fecha):
-    fecha_str = fecha.strftime("%Y-%m-%d")
-
-    url = f"https://loteriadehoy.com/animalito/lottoactivo/historico/{fecha_str}/{fecha_str}/"
-
-    tablas = pd.read_html(url)
-
-    df = tablas[0]
-    df.columns = ["hora", "animalito"]
-
-    df["fecha"] = fecha
-    df["loteria"] = "Lotto Activo"
-
-    return df[["fecha", "hora", "animalito", "loteria"]]
-
-
-# =========================================
-# 3️⃣ WORKER PRINCIPAL
+# FUNCION PRINCIPAL (INCREMENTAL REAL)
 # =========================================
 async def actualizar():
 
+    print("🔎 Buscando última fecha en Neon...")
+
     async with engine.begin() as conn:
 
-        ultima = await obtener_ultima_fecha(conn)
-        hoy = datetime.now().date()
+        # 1️⃣ última fecha guardada
+        result = await conn.execute(
+            text("SELECT MAX(fecha) FROM historico")
+        )
+        ultima_fecha = result.scalar()
 
-        print("Última fecha:", ultima)
+    if not ultima_fecha:
+        print("⚠️ BD vacía, usar histórico completo")
+        ultima_fecha = datetime(2024, 1, 1).date()
 
-        fecha_actual = ultima + timedelta(days=1)
+    print("📅 Última fecha:", ultima_fecha)
 
-        todos = []
+    # =========================================
+    # 2️⃣ DESCARGAR SOLO NUEVOS DATOS
+    # =========================================
+    # 👉 aquí conectas tu scraper real
+    # Por ahora leemos el Excel actualizado
 
-        while fecha_actual <= hoy:
-            try:
-                df = descargar_dia(fecha_actual)
-                todos.append(df)
-                print("✔ Descargado:", fecha_actual)
-            except:
-                print("⚠ Sin datos:", fecha_actual)
+    df = pd.read_excel("data/historial.xlsx")
 
-            fecha_actual += timedelta(days=1)
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce").dt.date
+    df = df.dropna(subset=["fecha"])
 
-        if not todos:
-            print("Nada nuevo para actualizar")
-            return
+    # SOLO registros nuevos
+    df = df[df["fecha"] >= ultima_fecha]
 
-        df_final = pd.concat(todos)
+    if df.empty:
+        print("✅ No hay datos nuevos")
+        return
 
-        registros = df_final.to_dict(orient="records")
+    print(f"⬆ Nuevos registros encontrados: {len(df)}")
+
+    df["hora"] = df["hora"].astype(str).str.strip()
+    df["animalito"] = df["animalito"].astype(str).str.strip()
+    df["loteria"] = df["loteria"].astype(str).str.strip()
+
+    registros = df.to_dict(orient="records")
+
+    # =========================================
+    # 3️⃣ INSERTAR SIN DUPLICADOS
+    # =========================================
+    async with engine.begin() as conn:
 
         await conn.execute(text("""
             INSERT INTO historico (fecha, hora, animalito, loteria)
@@ -86,7 +71,4 @@ async def actualizar():
             ON CONFLICT (fecha, hora, loteria) DO NOTHING
         """), registros)
 
-        print("🚀 Nuevos registros insertados:", len(registros))
-
-
-asyncio.run(actualizar())
+    print("🚀 Actualización completada")
