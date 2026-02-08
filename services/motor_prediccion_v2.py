@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 import pandas as pd
 
+print("🚀 MOTOR V2 CARGADO")
 
 # ==============================
 # CONFIGURACIÓN DE PESOS
