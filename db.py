@@ -4,13 +4,16 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL no está configurada")
+    raise ValueError("DATABASE_URL no configurada")
 
-# ✅ SOLO cambiar driver a asyncpg (NO tocar parámetros de Neon)
+# ✅ driver async
 DATABASE_URL = DATABASE_URL.replace(
     "postgresql://",
     "postgresql+asyncpg://"
 )
+
+# ✅ quitar params incompatibles de Neon
+DATABASE_URL = DATABASE_URL.split("?")[0] + "?ssl=require"
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -23,6 +26,11 @@ SessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False
 )
+
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
 
 async def get_db():
     async with SessionLocal() as session:
