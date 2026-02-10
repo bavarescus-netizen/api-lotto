@@ -11,14 +11,14 @@ async def obtener_metricas(db):
 
     row = result.first()
 
-    total = row.total or 0
-    aciertos = row.aciertos or 0
+    total = int(row.total or 0)
+    aciertos = int(row.aciertos or 0)
 
-    porcentaje = round((aciertos / total) * 100, 2) if total else 0
+    precision = round((aciertos / total) * 100, 2) if total else 0
 
     return {
         "total_registros": total,
         "aciertos": aciertos,
         "fallos": total - aciertos,
-        "precision": porcentaje
+        "precision": precision
     }
