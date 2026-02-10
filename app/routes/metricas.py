@@ -7,4 +7,3 @@ router = APIRouter()
 @router.get("/metricas")
 async def metricas(db=Depends(get_db)):
     return await obtener_metricas(db)
-
