@@ -5,23 +5,20 @@ async def obtener_metricas(db):
     result = await db.execute(text("""
         SELECT
             COUNT(*) as total,
-            SUM(CASE WHEN acierto=1 THEN 1 ELSE 0 END) as aciertos
+            COALESCE(SUM(acierto),0) as aciertos
         FROM metricas
     """))
 
     row = result.first()
 
-    if not row or row.total == 0:
-        return {
-            "total": 0,
-            "aciertos": 0,
-            "porcentaje": 0
-        }
+    total = row.total or 0
+    aciertos = row.aciertos or 0
 
-    porcentaje = round((row.aciertos / row.total) * 100, 2)
+    porcentaje = round((aciertos / total) * 100, 2) if total else 0
 
     return {
-        "total": row.total,
-        "aciertos": row.aciertos,
-        "porcentaje": porcentaje
+        "total_registros": total,
+        "aciertos": aciertos,
+        "fallos": total - aciertos,
+        "precision": porcentaje
     }
