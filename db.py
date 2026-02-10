@@ -27,12 +27,7 @@ SessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
+# Solo una definición de get_db
 async def get_db():
     async with SessionLocal() as session:
         yield session
-
-
-async def get_db():
-    async with SessionLocal() as session:
-        yield session
-
