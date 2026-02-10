@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from db import get_db
-from services.metricas_service import obtener_metricas
+from app.services.metricas_service import obtener_metricas
+
 
 router = APIRouter()
 
