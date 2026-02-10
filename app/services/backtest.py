@@ -1,18 +1,15 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
+# app/services/backtest.py
 
-from db import get_db
-from app.services.backtest import entrenar_modelo
+from sqlalchemy import text
 
-router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
+async def entrenar_modelo(db):
 
+    # ejemplo simple
+    await db.execute(text("""
+        INSERT INTO metricas(total, aciertos, errores, precision)
+        VALUES (0,0,0,0)
+    """))
 
-@router.get("/")
-async def entrenar(background_tasks: BackgroundTasks,
-                   db: AsyncSession = Depends(get_db)):
+    await db.commit()
 
-    background_tasks.add_task(entrenar_modelo, db)
-
-    return {
-        "status": "Entrenamiento iniciado en background 🚀"
-    }
+    return {"ok": True}
