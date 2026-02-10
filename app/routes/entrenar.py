@@ -1,37 +1,19 @@
-# app/services/backtest.py
+from fastapi import APIRouter, Depends, BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import text
-from datetime import datetime
+from db import get_db
+from app.services.backtest import entrenar_modelo
 
-async def entrenar_modelo(db):
+# 👇 ESTE NOMBRE ES OBLIGATORIO
+router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
 
-    print("🔥 Entrenamiento iniciado...")
 
-    # ejemplo simple (ajusta con tu lógica real)
-    result = await db.execute(text("""
-        SELECT animalito
-        FROM historico
-        ORDER BY fecha DESC
-        LIMIT 500
-    """))
+@router.get("/")
+async def entrenar(background_tasks: BackgroundTasks,
+                   db: AsyncSession = Depends(get_db)):
 
-    data = result.fetchall()
+    background_tasks.add_task(entrenar_modelo, db)
 
-    total = len(data)
-
-    # simulación de entrenamiento
-    score = total * 0.1
-
-    await db.execute(text("""
-        INSERT INTO metricas(total, aciertos, errores, precision)
-        VALUES (:t, :a, :e, :p)
-    """), {
-        "t": total,
-        "a": int(score),
-        "e": total - int(score),
-        "p": score / total if total else 0
-    })
-
-    await db.commit()
-
-    print("✅ Entrenamiento finalizado")
+    return {
+        "status": "Entrenamiento iniciado en background 🚀"
+    }
