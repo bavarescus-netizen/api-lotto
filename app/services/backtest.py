@@ -1,41 +1,18 @@
-from collections import Counter
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
 
-async def entrenar_modelo(db):
+from db import get_db
+from app.services.backtest import entrenar_modelo
 
-    res = await db.execute(text("""
-        SELECT animalito
-        FROM historico
-        ORDER BY fecha, hora
-    """))
+router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
 
-    rows = [r[0] for r in res.fetchall()]
 
-    historial = []
-    aciertos = 0
-    total = 0
+@router.get("/")
+async def entrenar(background_tasks: BackgroundTasks,
+                   db: AsyncSession = Depends(get_db)):
 
-    for real in rows:
-
-        if len(historial) < 200:
-            historial.append(real)
-            continue
-
-        conteo = Counter(historial)
-        pred = conteo.most_common(1)[0][0]
-
-        if pred == real:
-            aciertos += 1
-
-        total += 1
-        historial.append(real)
-
-    precision = (aciertos / total) * 100
+    background_tasks.add_task(entrenar_modelo, db)
 
     return {
-        "total": total,
-        "aciertos": aciertos,
-        "fallos": total - aciertos,
-        "precision": round(precision, 2)
+        "status": "Entrenamiento iniciado en background 🚀"
     }
-
