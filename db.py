@@ -6,7 +6,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada")
 
-# ✅ SOLO esto
+# ✅ SOLO cambiar driver a asyncpg (NO tocar parámetros de Neon)
 DATABASE_URL = DATABASE_URL.replace(
     "postgresql://",
     "postgresql+asyncpg://"
@@ -28,8 +28,3 @@ async def get_db():
     async with SessionLocal() as session:
         yield session
 
-)
-
-async def get_db():
-    async with SessionLocal() as session:
-        yield session
