@@ -26,3 +26,7 @@ async def root(db: AsyncSession = Depends(get_db)):
 async def health(db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("SELECT 1"))
     return {"db": "ok"}
+
+from app.routes.stats import router as stats_router
+app.include_router(stats_router)
+
