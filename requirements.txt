@@ -7,5 +7,6 @@ pandas
 matplotlib
 streamlit
 httpx
+jinja2
 
 
