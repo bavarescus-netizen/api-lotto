@@ -3,5 +3,9 @@ uvicorn
 sqlalchemy
 asyncpg
 python-dotenv
+pandas
+matplotlib
+streamlit
+httpx
 
 
