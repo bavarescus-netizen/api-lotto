@@ -8,5 +8,7 @@ matplotlib
 streamlit
 httpx
 jinja2
+psycopg2
+
 
 
