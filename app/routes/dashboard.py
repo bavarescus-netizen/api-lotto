@@ -5,10 +5,9 @@ from pathlib import Path
 
 router = APIRouter()
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
-
