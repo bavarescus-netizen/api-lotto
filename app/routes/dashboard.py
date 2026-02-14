@@ -1,16 +1,18 @@
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+import os
 from pathlib import Path
+from fastapi.templating import Jinja2Templates
 
-router = APIRouter()
+# 1. Obtenemos la ruta de este archivo (dashboard.py)
+current_file = Path(__file__).resolve()
 
-# .parents[0] es 'routes'
-# .parents[1] es 'app'
-# .parents[2] es la raíz del proyecto (donde está 'templates')
-BASE_DIR = Path(__file__).resolve().parents[2]
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+# 2. Buscamos la carpeta raíz del proyecto (donde está 'app' y 'templates')
+# Subimos dos niveles: de 'routes' a 'app', y de 'app' a la raíz.
+BASE_DIR = current_file.parents[2]
 
-@router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+# 3. Construimos la ruta a la carpeta de plantillas
+templates_path = os.path.join(BASE_DIR, "templates")
+
+# Debug: Esto imprimirá en los logs de Render la ruta exacta que se está usando
+print(f"DEBUG: Buscando plantillas en: {templates_path}")
+
+templates = Jinja2Templates(directory=templates_path)
