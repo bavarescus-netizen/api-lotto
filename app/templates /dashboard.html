@@ -1,2 +1,63 @@
-templates
-/dashboard.html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Lotto AI Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body style="font-family: Arial; padding:40px">
+
+<h2>📊 Lotto AI Dashboard</h2>
+
+<button onclick="entrenar()">Entrenar</button>
+<button onclick="prediccion()">Predicción</button>
+
+<pre id="out"></pre>
+
+<h3>Precisión por hora</h3>
+<canvas id="chart" width="900" height="400"></canvas>
+
+<script>
+
+async function entrenar(){
+    let r = await fetch("/entrenar/");
+    let j = await r.json();
+    document.getElementById("out").innerText = JSON.stringify(j,null,2);
+}
+
+async function prediccion(){
+    let r = await fetch("/prediccion");
+    let j = await r.json();
+    document.getElementById("out").innerText = JSON.stringify(j,null,2);
+}
+
+async function cargarStats(){
+
+    let r = await fetch("/stats");
+    let data = await r.json();
+
+    let horas = [];
+    let precision = [];
+
+    for (let h in data.hora_stats){
+        horas.push(h);
+        precision.push(data.hora_stats[h].precision);
+    }
+
+    new Chart(document.getElementById("chart"), {
+        type: 'bar',
+        data: {
+            labels: horas,
+            datasets: [{
+                label: 'Precisión',
+                data: precision
+            }]
+        }
+    });
+}
+
+cargarStats();
+
+</script>
+</body>
+</html>
