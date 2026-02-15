@@ -1,91 +1,56 @@
-<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: white; padding:20px">
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V4 PRO - Rentabilidad</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-white p-4">
+    <div class="max-w-md mx-auto">
+        <h1 class="text-blue-400 text-center font-bold text-xl mb-4">🧠 MOTOR V4 ADAPTATIVO</h1>
+        
+        <div class="flex gap-2 mb-6">
+            <button onclick="entrenar()" class="flex-1 bg-slate-800 p-3 rounded-lg border border-slate-700 text-sm">ENTRENAR</button>
+            <button onclick="predecir()" class="flex-1 bg-blue-600 p-3 rounded-lg font-bold">PREDECIR</button>
+        </div>
 
-<div style="max-width: 900px; margin: auto;">
-    <h2 style="color: #38bdf8; text-align: center;">📊 Terminal de Inteligencia V4</h2>
-    
-    <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
-        <button onclick="entrenar()" style="background: #1e293b; color: white; border: 1px solid #38bdf8; padding: 10px 20px; border-radius: 8px; cursor: pointer;">🧠 Re-Entrenar Cerebro</button>
-        <button onclick="prediccion()" style="background: #38bdf8; color: #0f172a; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold;">🎯 Obtener Predicción</button>
+        <div id="status" class="bg-slate-900 p-4 rounded-xl border-l-4 border-blue-500 mb-6 text-center">
+            <div class="text-xs text-slate-500 uppercase">Estado del Mercado</div>
+            <div id="dec-text" class="text-2xl font-black py-2">---</div>
+            <div id="top3-lista" class="space-y-3 mt-4"></div>
+        </div>
     </div>
 
-    <div id="decision-box" style="background: #1e293b; padding: 20px; border-radius: 12px; border-left: 5px solid #38bdf8; margin-bottom: 20px; text-align: center;">
-        <h3 id="label-decision" style="margin: 0; color: #94a3b8; font-size: 0.9em;">ESTADO DEL MERCADO</h3>
-        <div id="valor-decision" style="font-size: 1.8em; font-weight: bold; margin: 10px 0;">Esperando Comando...</div>
-        <div id="top3-lista" style="color: #38bdf8; letter-spacing: 2px; font-size: 1.2em;"></div>
-    </div>
-
-    <div style="background: white; border-radius: 12px; padding: 15px;">
-        <h3 style="color: #0f172a; margin-top: 0;">📈 Precisión por Franja Horaria</h3>
-        <canvas id="chart"></canvas>
-    </div>
-
-    <pre id="out" style="background: #000; color: #0f0; padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 12px; overflow-x: auto; max-height: 150px;"></pre>
-</div>
-
-<script>
-async function prediccion(){
-    const out = document.getElementById("out");
-    const divVal = document.getElementById("valor-decision");
-    const divTop = document.getElementById("top3-lista");
-    
-    divVal.innerText = "Consultando 29,000 registros...";
-    
-    let r = await fetch("/prediccion");
-    let j = await r.json();
-    
-    // Mostramos el JSON técnico abajo
-    out.innerText = JSON.stringify(j, null, 2);
-
-    // LÓGICA VISUAL V4
-    if(j.decision) {
-        divVal.innerText = j.decision;
-        divVal.style.color = j.decision.includes("JUGAR") ? "#4ade80" : "#fbbf24";
-        // Mostramos el Top 3 de forma elegante
-        divTop.innerText = "RECOMENDADOS: " + j.top3.map(a => a.animal).join(" - ");
-    }
-}
-
-async function entrenar(){
-    document.getElementById("out").innerText = "Iniciando aprendizaje profundo...";
-    let r = await fetch("/entrenar/");
-    let j = await r.json();
-    document.getElementById("out").innerText = "¡Cerebro Actualizado!\n" + JSON.stringify(j, null, 2);
-    cargarStats(); // Recargamos gráfico
-}
-
-async function cargarStats(){
-    let r = await fetch("/stats");
-    let data = await r.json();
-
-    let horas = [];
-    let precision = [];
-
-    // Ordenar horas para que el gráfico sea coherente (9AM a 7PM)
-    for (let h in data.hora_stats){
-        horas.push(h);
-        precision.push(data.hora_stats[h].precision);
-    }
-
-    // Si ya existe un chart, lo destruimos para actualizar
-    if(window.myChart) window.myChart.destroy();
-
-    window.myChart = new Chart(document.getElementById("chart"), {
-        type: 'bar',
-        data: {
-            labels: horas,
-            datasets: [{
-                label: 'Fuerza del Patrón (%)',
-                data: precision,
-                backgroundColor: '#38bdf8'
-            }]
-        },
-        options: {
-            responsive: true,
-            scales: { y: { beginAtZero: true, max: 1 } }
+    <script>
+        async function predecir() {
+            const res = await fetch('/prediccion');
+            const data = await res.json();
+            document.getElementById('dec-text').innerText = data.decision;
+            
+            const lista = document.getElementById('top3-lista');
+            lista.innerHTML = "";
+            
+            data.top3.forEach(item => {
+                lista.innerHTML += `
+                    <div class="flex items-center bg-slate-800 p-3 rounded-xl border border-slate-700">
+                        <img src="${item.imagen}" class="w-14 h-14 rounded-lg bg-white mr-4">
+                        <div class="flex-grow">
+                            <div class="text-blue-400 text-xs font-bold">№ ${item.numero}</div>
+                            <div class="text-lg font-bold">${item.animal}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-green-400 font-bold">${item.porcentaje}</div>
+                            <div class="text-[10px] text-slate-500">CONFIANZA</div>
+                        </div>
+                    </div>
+                `;
+            });
         }
-    });
-}
-
-cargarStats();
-</script>
+        async function entrenar() {
+            alert("Entrenamiento iniciado en segundo plano...");
+            await fetch('/entrenar/');
+        }
+    </script>
 </body>
+</html>
