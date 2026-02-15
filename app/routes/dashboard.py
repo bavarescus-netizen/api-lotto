@@ -6,18 +6,32 @@ from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
 
-# 1. Obtenemos la ruta de la carpeta 'app' de forma segura
-# Como este archivo está en app/routes/, subimos un nivel para llegar a app/
-BASE_DIR = Path(__file__).resolve().parent.parent
+# 1. Buscamos la raíz del proyecto de forma dinámica
+BASE_DIR = Path(__file__).resolve().parents[2]
 
-# 2. Ahora le decimos a Jinja2 que busque las plantillas directamente en 'app'
-# donde acabas de mover el archivo HTML
-templates = Jinja2Templates(directory=str(BASE_DIR))
+# 2. Función para encontrar la carpeta 'templates' donde sea que esté
+def find_templates_dir(root):
+    for path in root.rglob('templates'):
+        if path.is_dir():
+            return str(path)
+    return str(root) # Si no la encuentra, usa la raíz
 
-print(f"DEBUG: Buscando archivos HTML en: {BASE_DIR}")
+templates_path = find_templates_dir(BASE_DIR)
+print(f"DEBUG: Jinja2 usará esta ruta: {templates_path}")
+
+templates = Jinja2Templates(directory=templates_path)
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    # IMPORTANTE: Asegúrate de que el nombre sea exacto (minúsculas/mayúsculas)
-    # según cómo lo veas en GitHub. Si es 'Dashboard.html', cámbialo aquí.
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    # 3. Lista los archivos para ver qué nombre tienen realmente (Mayúsculas/Minúsculas)
+    archivos_reales = os.listdir(templates_path)
+    print(f"DEBUG: Archivos encontrados en la carpeta: {archivos_reales}")
+    
+    # Buscamos el archivo ignorando mayúsculas
+    nombre_archivo = "dashboard.html"
+    for f in archivos_reales:
+        if f.lower() == "dashboard.html":
+            nombre_archivo = f
+            break
+            
+    return templates.TemplateResponse(nombre_archivo, {"request": request})
