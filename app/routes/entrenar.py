@@ -1,24 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-import os
 import sys
+import os
 
-# Forzar que el directorio raíz sea visible
-root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if root_path not in sys.path:
-    sys.path.insert(0, root_path)
+# Esto le dice a Python que mire en /opt/render/project/src
+sys.path.append(os.getcwd())
 
 try:
+    # Intentamos la importación directa desde la raíz
     import bd
     from bd import get_db
     from app.services.motor_v4 import entrenar_modelo_v4
 except ImportError as e:
-    # Si falla, intentamos importar como modulo de app
-    try:
-        from app.bd import get_db
-    except:
-        print(f"Error persistente en rutas: {e}")
-        raise
+    print(f"DEBUG: No se encontró bd.py. Archivos en raíz: {os.listdir(os.getcwd())}")
+    raise HTTPException(status_code=500, detail=f"Error de configuración: {str(e)}")
 
 router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
 
