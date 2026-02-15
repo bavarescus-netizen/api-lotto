@@ -1,102 +1,65 @@
 from sqlalchemy import text
 from datetime import datetime
-import random
 
 async def generar_prediccion(db):
     ahora = datetime.now()
     hora_actual = ahora.strftime("%I:00 %p")
     
-    # 1️⃣ OBTENER EL ÚLTIMO RESULTADO PARA LA TRANSICIÓN (MARKOV)
-    # Esto es lo que querías: saber qué salió a la 1 para predecir las 2
+    # 1️⃣ IDENTIFICAR EL ÚLTIMO RESULTADO (EL DISPARADOR)
     res_ultimo = await db.execute(text("""
         SELECT animalito FROM historico 
-        ORDER BY fecha DESC, hora DESC LIMIT 1
+        ORDER BY fecha DESC, id DESC LIMIT 1
     """))
     ultimo_animal = res_ultimo.scalar()
 
-    # 2️⃣ EL CEREBRO SQL: PROCESAR 29,000 REGISTROS EN MILISEGUNDOS
-    # Esta query calcula: Frecuencia por hora, Atraso y Transición
-    query_maestra = text("""
-        WITH 
-        FrecuenciaHora AS (
-            SELECT animalito, COUNT(*) as veces 
-            FROM historico WHERE hora = :hora GROUP BY animalito
-        ),
-        Atraso AS (
-            SELECT animalito, 
-            (SELECT COUNT(*) FROM historico) - MAX(id) as sorteos_sin_salir
-            FROM historico GROUP BY animalito
-        ),
-        Transicion AS (
-            SELECT siguiente, COUNT(*) as fuerza
-            FROM (
-                SELECT animalito, LEAD(animalito) OVER (ORDER BY id) as siguiente
-                FROM historico
-            ) AS secuencia
-            WHERE animalito = :ultimo
-            GROUP BY siguiente
-        )
-        SELECT 
-            a.animalito,
-            COALESCE(fh.veces, 0) as peso_hora,
-            COALESCE(atr.sorteos_sin_salir, 0) as peso_atraso,
-            COALESCE(tr.fuerza, 0) as peso_transicion
-        FROM (SELECT DISTINCT animalito FROM historico) a
-        LEFT JOIN FrecuenciaHora fh ON a.animalito = fh.animalito
-        LEFT JOIN Atraso atr ON a.animalito = atr.animalito
-        LEFT JOIN Transicion tr ON a.animalito = tr.siguiente
+    if not ultimo_animal:
+        return {"error": "No hay datos históricos para iniciar"}
+
+    # 2️⃣ CONSULTAR EL CONOCIMIENTO APRENDIDO (MARKOV + FRECUENCIA)
+    # Buscamos en la tabla de entrenamiento qué es lo más probable después de 'ultimo_animal'
+    query_inteligente = text("""
+        SELECT proximo_probable, fuerza 
+        FROM conocimiento_v4 
+        WHERE animal_actual = :ultimo AND hora = :hora
+        ORDER BY fuerza DESC LIMIT 3
     """)
+    
+    res = await db.execute(query_inteligente, {"ultimo": ultimo_animal, "hora": hora_actual})
+    patrones = res.fetchall()
 
-    res = await db.execute(query_maestra, {
-        "hora": hora_actual, 
-        "ultimo": ultimo_animal
-    })
-    filas = res.fetchall()
+    # 3️⃣ CÁLCULO DE CONFIANZA PARA RENTABILIDAD
+    # Si no hay patrones fuertes (> 5 ocurrencias), el sistema sugiere precaución
+    max_fuerza = patrones[0].fuerza if patrones else 0
+    
+    if max_fuerza >= 8:
+        decision = "🟢 JUGAR - ALTA CONFIANZA"
+    elif max_fuerza >= 5:
+        decision = "🟡 JUGAR - CONFIANZA MEDIA"
+    else:
+        decision = "🔴 ESPERAR - PATRÓN DÉBIL"
 
-    # 3️⃣ ALGORITMO DE PUNTUACIÓN (SCORING)
-    # Aquí aplicamos la lógica de "Jugador"
-    candidatos = []
-    for r in filas:
-        nombre, p_hora, p_atraso, p_trans = r
-        
-        # Fórmula Maestra: 
-        # (Frecuencia en esta hora * 0.4) + (Fuerza de lo que salió antes * 0.4) + (Bono por Atraso * 0.2)
-        score = (p_hora * 0.4) + (p_trans * 0.4) + (p_atraso * 0.01)
-        
-        candidatos.append({
-            "animal": nombre,
-            "score": round(score, 2),
-            "detalles": {"hora": p_hora, "trans": p_trans, "atraso": p_atraso}
+    # 4️⃣ FORMATEAR TOP 3 PARA EL DASHBOARD
+    top3 = []
+    for p in patrones:
+        top3.append({
+            "animal": p.proximo_probable,
+            "score": p.fuerza,
+            "probabilidad": f"Basado en {p.fuerza} repeticiones"
         })
 
-    # 4️⃣ DECISIÓN DE OPERAR (TU FILTRO DE RENTABILIDAD)
-    # Ordenamos por score
-    ranking = sorted(candidatos, key=lambda x: x["score"], reverse=True)
-    top3 = ranking[:3]
-    
-    # Calculamos la "Brecha de Confianza"
-    # Si el 1ero es mucho mejor que el 4to, hay patrón claro.
-    brecha = top3[0]["score"] - ranking[3]["score"]
-    
-    decision = "ESPERAR"
-    if brecha > 2.0: # Umbral ajustable según aprendizaje
-        decision = "JUGAR (ALTA CONFIANZA)"
-    elif brecha > 1.0:
-        decision = "OPERACIÓN MODERADA"
-
-    # 5️⃣ GUARDAR EN TABLA DE PREDICCIONES PARA APRENDER LUEGO
-    for p in top3:
-        await db.execute(text("""
-            INSERT INTO predicciones (fecha, hora, animal, score, acertado)
-            VALUES (CURRENT_DATE, :hora, :animal, :score, NULL)
-        """), {"hora": hora_actual, "animal": p["animal"], "score": p["score"]})
-    
-    await db.commit()
+    # Si no hay suficientes patrones, rellenamos con frecuencia general de la hora
+    if len(top3) < 3:
+        res_respaldo = await db.execute(text("""
+            SELECT animalito, COUNT(*) as c FROM historico 
+            WHERE hora = :hora GROUP BY animalito ORDER BY c DESC LIMIT :lim
+        """), {"hora": hora_actual, "lim": 3 - len(top3)})
+        for r in res_respaldo:
+            top3.append({"animal": r[0], "score": r[1], "probabilidad": "Frecuencia Hora"})
 
     return {
         "hora": hora_actual,
-        "ultimo_resultado": ultimo_animal,
+        "despues_de": ultimo_animal,
         "decision": decision,
-        "confianza_gap": round(brecha, 2),
+        "fuerza_patron": max_fuerza,
         "top3": top3
     }
