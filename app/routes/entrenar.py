@@ -1,8 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+import sys
+import os
 
-from db import get_db
-from app.services.motor_v4 import entrenar_modelo_v4
+# Forzar detección de db.py en la raíz
+sys.path.append(os.getcwd())
+
+try:
+    from db import get_db
+    from app.services.motor_v4 import entrenar_modelo_v4
+except ImportError as e:
+    print(f"❌ Error en entrenar.py: {e}")
+    raise
 
 router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
 
