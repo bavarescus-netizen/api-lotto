@@ -1,11 +1,9 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from db import get_db
+from fastapi import APIRouter
 from app.services.motor_v4 import analizar_estadisticas
 
-router = APIRouter(prefix="/stats", tags=["Stats"])
-
+router = APIRouter(prefix="/stats", tags=["Estadísticas"])
 
 @router.get("/")
-async def stats(db: AsyncSession = Depends(get_db)):
-    return await analizar_estadisticas(db)
+async def get_stats():
+    data = await analizar_estadisticas()
+    return data
