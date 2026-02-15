@@ -3,13 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 import os
 
-# Parche para que este archivo "vea" la raíz
+# Aseguramos que el archivo sepa dónde está la raíz
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-# Imports absolutos
+# IMPORTANTE: Importamos 'bd' directamente desde la raíz
 from bd import get_db
+# Importamos el motor desde la carpeta services
 from app.services.motor_v4 import generar_prediccion
 
 router = APIRouter(prefix="/prediccion", tags=["Predicciones"])
