@@ -25,11 +25,11 @@ def limpiar_nombre(nombre):
 async def generar_prediccion(db: AsyncSession):
     try:
         # Analizamos datos desde 2019
-        query = text("SELECT animalito FROM historico WHERE fecha >= '2019-01-01'")
+        query = text("SELECT animalito FROM historico WHERE fecha >= '2018-01-01'")
         res = await db.execute(query)
         data = res.fetchall()
         
-        analisis = "Basado en Big Data 2019-2026."
+        analisis = "Basado en Big Data 2018-2026."
         
         # Lógica de selección (Top o Azar si falla DB)
         if not data:
