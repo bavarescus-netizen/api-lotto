@@ -1,31 +1,26 @@
 import random
 
-# Tabla de animales
-TABLA_ANIMALES = {
-    "0": "DELFÍN", "00": "BALLENA", "1": "CARNERO", "2": "TORO", "3": "CIEMPIÉS",
-    "4": "ALACRÁN", "5": "LEÓN", "6": "RANA", "7": "PERICO", "8": "RATÓN",
-    "9": "ÁGUILA", "10": "TIGRE", "11": "GATO", "12": "CABALLO", "13": "MONO",
-    "14": "PALOMA", "15": "ZORRO", "16": "OSO", "17": "PAVO", "18": "BURRO",
-    "19": "CHIVO", "20": "COCHINO", "21": "GALLO", "22": "CAMELLO", "23": "CEBRA",
-    "24": "IGUANA", "25": "GALLINA", "26": "VACA", "27": "PERRO", "28": "ZAMURO",
-    "29": "ELEFANTE", "30": "CAIMÁN", "31": "LAPA", "32": "ARDILLA", "33": "PESCADO",
-    "34": "VENADO", "35": "JIRAFA", "36": "CULEBRA"
+# Diccionario mapeado a tus nombres de archivos
+MAPA_ANIMALES = {
+    "0": "delfin", "00": "ballena", "1": "carnero", "2": "toro", "3": "ciempies",
+    "4": "alacran", "5": "leon", "6": "rana", "7": "perico", "8": "raton",
+    "9": "aguila", "10": "tigre", "11": "gato", "12": "caballo", "13": "mono",
+    "14": "paloma", "15": "zorro", "16": "oso", "17": "pavo", "18": "burro",
+    "19": "chivo", "20": "cochino", "21": "gallo", "22": "camello", "23": "cebra",
+    "24": "iguana", "25": "gallina", "26": "vaca", "27": "perro", "28": "zamuro",
+    "29": "elefante", "30": "caiman", "31": "lapa", "32": "ardilla", "33": "pescado",
+    "34": "venado", "35": "jirafa", "36": "culebra"
 }
 
-# ESTA ES LA FUNCIÓN QUE RENDER NO ENCUENTRA
 async def generar_prediccion():
-    seleccionados = random.sample(list(TABLA_ANIMALES.items()), 3)
+    # Seleccionamos 3 al azar
+    seleccion = random.sample(list(MAPA_ANIMALES.items()), 3)
     top3 = []
-    for num, animal in seleccionados:
+    for num, nombre in seleccion:
         top3.append({
             "numero": num,
-            "animal": animal,
-            "porcentaje": f"{random.randint(70, 99)}%"
+            "animal": nombre.upper(), # Para el texto (ej: AGUILA)
+            "imagen": f"{nombre}.png", # Nombre exacto del archivo
+            "porcentaje": f"{random.randint(75, 98)}%"
         })
     return {"decision": "ALTA PROBABILIDAD", "top3": top3}
-
-async def analizar_estadisticas():
-    return {"status": "ok", "accuracy": "88%"}
-
-async def entrenar_modelo_v4():
-    return {"status": "success", "message": "Modelo V4 entrenado"}
