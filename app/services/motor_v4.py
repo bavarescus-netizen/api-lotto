@@ -1,14 +1,14 @@
 from sqlalchemy import text
 from datetime import datetime
 
-# Mapeo oficial de Lotto Activo
+# Diccionario basado exactamente en tu imagen oficial
 ANIMALES_INFO = {
-    "delfin": {"num": "0", "img": "delfin.png"}, "ballena": {"num": "00", "img": "ballena.png"},
-    "carnero": {"num": "1", "img": "carnero.png"}, "toro": {"num": "2", "img": "toro.png"},
-    "ciempies": {"num": "3", "img": "ciempies.png"}, "alacran": {"num": "4", "img": "alacran.png"},
-    "leon": {"num": "5", "img": "leon.png"}, "rana": {"num": "6", "img": "rana.png"},
-    "perico": {"num": "7", "img": "perico.png"}, "raton": {"num": "8", "img": "raton.png"},
-    "aguila": {"num": "9", "img": "aguila.png"}, "tigre": {"num": "10", "img": "tigre.png"},
+    "ballena": {"num": "00", "img": "ballena.png"}, "delfin": {"num": "0", "img": "delfin.png"},
+    "carnero": {"num": "01", "img": "carnero.png"}, "toro": {"num": "02", "img": "toro.png"},
+    "ciempies": {"num": "03", "img": "ciempies.png"}, "alacran": {"num": "04", "img": "alacran.png"},
+    "leon": {"num": "05", "img": "leon.png"}, "rana": {"num": "06", "img": "rana.png"},
+    "perico": {"num": "07", "img": "perico.png"}, "raton": {"num": "08", "img": "raton.png"},
+    "aguila": {"num": "09", "img": "aguila.png"}, "tigre": {"num": "10", "img": "tigre.png"},
     "gato": {"num": "11", "img": "gato.png"}, "caballo": {"num": "12", "img": "caballo.png"},
     "mono": {"num": "13", "img": "mono.png"}, "paloma": {"num": "14", "img": "paloma.png"},
     "zorro": {"num": "15", "img": "zorro.png"}, "oso": {"num": "16", "img": "oso.png"},
@@ -28,11 +28,11 @@ async def generar_prediccion(db):
     ahora = datetime.now()
     hora_actual = ahora.strftime("%I:00 %p")
     
-    # 1. Obtener último resultado
+    # Obtener el último animalito que salió para buscar la transición
     res_ultimo = await db.execute(text("SELECT animalito FROM historico ORDER BY id DESC LIMIT 1"))
     ultimo = res_ultimo.scalar()
 
-    # 2. Consultar Conocimiento V4 (Markov + Frecuencia)
+    # Consultar patrones en la tabla de conocimiento
     query = text("""
         SELECT proximo_probable, fuerza 
         FROM conocimiento_v4 
@@ -42,23 +42,29 @@ async def generar_prediccion(db):
     res = await db.execute(query, {"u": ultimo, "h": hora_actual})
     patrones = res.fetchall()
 
+    # Si no hay patrones, usar frecuencia por hora como respaldo
+    if not patrones:
+        res = await db.execute(text("""
+            SELECT animalito, COUNT(*) as fuerza FROM historico 
+            WHERE hora = :h GROUP BY animalito ORDER BY fuerza DESC LIMIT 3
+        """), {"h": hora_actual})
+        patrones = res.fetchall()
+
     total_fuerza = sum(p.fuerza for p in patrones) if patrones else 1
     
-    # 3. Formatear resultados visuales
     top3_visual = []
     for p in patrones:
-        info = ANIMALES_INFO.get(p.proximo_probable, {"num": "??", "img": "default.png"})
+        info = ANIMALES_INFO.get(p[0].lower(), {"num": "??", "img": "default.png"})
         porcentaje = round((p.fuerza / total_fuerza) * 100, 1)
         top3_visual.append({
-            "animal": p.proximo_probable.upper(),
+            "animal": p[0].upper(),
             "numero": info["num"],
-            "imagen": f"/static/images/{info['img']}",
-            "porcentaje": f"{porcentaje}%",
-            "fuerza": p.fuerza
+            "imagen": f"/static/imagenes/{info['img']}", # Según tu carpeta 'imagenes' en la captura
+            "porcentaje": f"{porcentaje}%"
         })
 
-    # Decision de rentabilidad
+    # Lógica de semáforo
     fuerza_max = patrones[0].fuerza if patrones else 0
-    decision = "🟢 JUGAR (ALTA)" if fuerza_max > 7 else "🟡 MODERADO" if fuerza_max > 4 else "🔴 ESPERAR"
+    decision = "🟢 JUGAR" if fuerza_max > 7 else "🟡 MODERADO" if fuerza_max > 3 else "🔴 ESPERAR"
 
-    return {"hora": hora_actual, "ultimo": ultimo, "decision": decision, "top3": top3_visual}
+    return {"hora": hora_actual, "decision": decision, "top3": top3_visual}
