@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 import os
 
-# Forzar detección de db.py en la raíz
+# Forzar detección de la raíz
 sys.path.append(os.getcwd())
 
 try:
