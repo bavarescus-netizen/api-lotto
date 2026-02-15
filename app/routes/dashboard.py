@@ -6,19 +6,21 @@ from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
 
-# 1. BASE_DIR apunta a la raíz del proyecto (/opt/render/project/src)
-BASE_DIR = Path(__file__).resolve().parents[2]
-templates_path = os.path.join(BASE_DIR, "templates")
-
-templates = Jinja2Templates(directory=templates_path)
+# 1. Forzamos la ruta a la misma carpeta donde está ESTE archivo .py
+CURRENT_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(CURRENT_DIR))
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    # Listamos para estar seguros de qué hay en la raíz
-    print(f"DEBUG: Buscando en {templates_path}")
-    if os.path.exists(templates_path):
-        print(f"DEBUG: Contenido de templates: {os.listdir(templates_path)}")
-    else:
-        print("DEBUG: La carpeta templates NO EXISTE en la raíz")
+    # 2. Verificamos qué archivos hay aquí realmente para el log
+    archivos_aqui = os.listdir(CURRENT_DIR)
+    print(f"DEBUG: Archivos en la carpeta routes: {archivos_aqui}")
+    
+    # 3. Buscamos el archivo ignorando si tiene mayúsculas o minúsculas
+    archivo_a_cargar = "dashboard.html"
+    for f in archivos_aqui:
+        if f.lower() == "dashboard.html":
+            archivo_a_cargar = f
+            break
 
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse(archivo_a_cargar, {"request": request})
