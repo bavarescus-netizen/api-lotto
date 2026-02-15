@@ -1,26 +1,23 @@
-dfrom fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 import os
 
-# Esto le dice a Python que mire en /opt/render/project/src
+# Forzar detección de db.py en la raíz
 sys.path.append(os.getcwd())
 
 try:
-    # Intentamos la importación directa desde la raíz
-    import db
     from db import get_db
-    from app.services.motor_v4 import entrenar_modelo_v4
+    from app.services.motor_v4 import generar_prediccion
 except ImportError as e:
-    print(f"DEBUG: No se encontró bd.py. Archivos en raíz: {os.listdir(os.getcwd())}")
-    raise HTTPException(status_code=500, detail=f"Error de configuración: {str(e)}")
+    print(f"❌ Error en prediccion.py: {e}")
+    raise
 
-router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
+router = APIRouter(prefix="/prediccion", tags=["Predicciones"])
 
-@router.get("/procesar")
-async def api_entrenar(db: AsyncSession = Depends(get_db)):
+@router.get("/generar")
+async def api_generar(db: AsyncSession = Depends(get_db)):
     try:
-        return await entrenar_modelo_v4(db)
+        return await generar_prediccion(db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-        
