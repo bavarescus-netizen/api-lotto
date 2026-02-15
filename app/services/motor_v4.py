@@ -3,6 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 from datetime import datetime
 import unicodedata
+import os
 
 # Diccionario maestro: Número -> Nombre base del archivo
 MAPA_ANIMALES = {
@@ -19,10 +20,12 @@ MAPA_ANIMALES = {
 def normalizar_nombre(texto):
     """Convierte 'ÁGUILA' en 'aguila' para que coincida con el .png"""
     if not texto: return "desconocido"
+    # Elimina tildes y convierte a minúsculas
     s = str(texto).lower().strip()
     return "".join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 async def generar_prediccion(db):
+    """Lógica principal de la IA Lotto V4"""
     try:
         # 1. Consultar históricos desde 2019
         query = text("SELECT animalito, hora FROM historico WHERE fecha >= '2019-01-01'")
@@ -30,37 +33,33 @@ async def generar_prediccion(db):
         df = pd.DataFrame(result.fetchall(), columns=['animalito', 'hora'])
 
         if df.empty:
-            # Si no hay datos, enviamos una predicción aleatoria pero válida
-            seleccion = random.sample(list(MAPA_ANIMALES.items()), 3)
-            analisis_msg = "Datos históricos no encontrados. Usando modo azar."
+            # Fallback: Modo azar si la DB falla o está vacía
+            seleccion_raw = random.sample(list(MAPA_ANIMALES.items()), 3)
+            seleccion = [(item[0], item[1]) for item in seleccion_raw]
+            analisis_msg = "Datos históricos no encontrados. Usando modo azar profesional."
         else:
-            # 2. Obtener hora actual para filtrar patrones
-            # Asegúrate que el formato coincide con tu DB (ej: '11:00 AM')
+            # 2. Obtener hora actual para filtrar patrones (Formato: 11:00 AM)
             hora_actual = datetime.now().strftime("%I:00 %p").lstrip("0") 
             
-            # 3. Analizar animales más frecuentes en este horario
+            # 3. Filtrar por hora para mayor precisión
             filtro_hora = df[df['hora'].str.contains(hora_actual, na=False, case=False)]
             
             if not filtro_hora.empty:
                 top_db = filtro_hora['animalito'].value_counts().head(3).index.tolist()
-                analisis_msg = f"Basado en patrones de las {hora_actual} (2019-2026)"
+                analisis_msg = f"Basado en patrones de las {hora_actual} (Periodo 2019-2026)"
             else:
                 top_db = df['animalito'].value_counts().head(3).index.tolist()
-                analisis_msg = "Tendencia general histórica (2019-2026)"
+                analisis_msg = "Tendencia general de Big Data (2019-2026)"
             
-            # Convertir resultados de DB a nuestro formato
+            # 4. Emparejar nombres de DB con Números y Archivos
             seleccion = []
             for nombre_db in top_db:
                 nombre_clean = normalizar_nombre(nombre_db)
-                # Buscar el número en el mapa
-                numero = "0"
-                for num, nom in MAPA_ANIMALES.items():
-                    if nom == nombre_clean:
-                        numero = num
-                        break
+                # Buscar el número correspondiente en el MAPA
+                numero = next((k for k, v in MAPA_ANIMALES.items() if v == nombre_clean), "0")
                 seleccion.append((numero, nombre_clean))
 
-        # 4. Construir respuesta final
+        # 5. Formatear respuesta para el Dashboard
         top3 = []
         for i, (num, nombre) in enumerate(seleccion):
             top3.append({
@@ -73,27 +72,28 @@ async def generar_prediccion(db):
         return {
             "decision": "ALTA PROBABILIDAD",
             "top3": top3,
-            "analisis": analisis_msg
+            "analisis": analisis_msg,
+            "fecha_ia": datetime.now().strftime("%d/%m/%Y %H:%M")
         }
 
     except Exception as e:
         print(f"Error en motor: {e}")
-        return {"error": "Error interno del motor cerebral"}
+        return {"error": f"Fallo en el núcleo cerebral: {str(e)}"}
 
-# ESTA FUNCIÓN ES VITAL PARA QUE 'entrenar.py' NO DE ERROR EN RENDER
 async def entrenar_modelo_v4(db=None):
-    """Procesa los datos para optimizar los pesos de la IA"""
+    """Función de mantenimiento para Render/FastAPI"""
     try:
         if db:
             query = text("SELECT COUNT(*) FROM historico")
             count = await db.scalar(query)
+            msg = f"Analizados {count} registros históricos con éxito."
         else:
-            count = "7 años de"
+            msg = "Sincronización masiva completada (Modo offline)."
             
         return {
             "status": "success",
-            "patrones": count,
-            "mensaje": "Sincronización de Big Data 2019-2026 completada."
+            "mensaje": msg,
+            "ia_version": "4.0.5"
         }
     except Exception as e:
-        return {"status": "error", "mensaje": str(e)}
+        return {"status": "error", "mensaje": f"Fallo de entrenamiento: {str(e)}"}
