@@ -1,21 +1,8 @@
-# app/routes/entrenar.py
-
-from fastapi import APIRouter, Depends, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from db import get_db
-from app.services.backtest import entrenar_modelo
+from fastapi import APIRouter
+from app.services.motor_v4 import entrenar_modelo_v4
 
 router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
 
-
-@router.get("/")
-async def entrenar(
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
-):
-
-    background_tasks.add_task(entrenar_modelo, db)
-
-    return {"status": "Entrenamiento iniciado 🚀"}
-
+@router.post("/")
+async def post_entrenar():
+    return await entrenar_modelo_v4()
