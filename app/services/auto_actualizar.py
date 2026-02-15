@@ -1,4 +1,3 @@
-import asyncio
 import os
 from datetime import datetime
 import pandas as pd
@@ -10,27 +9,40 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    connect_args={"ssl": True}
-)
+engine = create_async_engine(DATABASE_URL, echo=False)
 
-async def actualizar():
-    # Aquí cambia la lógica de scraping / API real de tus datos
-    datos_nuevos = {
-        "fecha": datetime.now().date(),
-        "hora": datetime.now().strftime("%I:%M %p"),
-        "animalito": "???",   # remplazar con scraping real
-        "loteria": "Lotto Activo"
-    }
+async def actualizar_incremental():
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT MAX(fecha) FROM historico")
+        )
+        ultima_fecha = result.scalar()
+
+    if not ultima_fecha:
+        ultima_fecha = datetime(2024, 1, 1).date()
+
+    df = pd.read_excel("data/historial.xlsx")
+
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce").dt.date
+    df = df.dropna(subset=["fecha"])
+
+    df = df[df["fecha"] >= ultima_fecha]
+
+    if df.empty:
+        return 0
+
+    df["hora"] = df["hora"].astype(str).str.strip()
+    df["animalito"] = df["animalito"].astype(str).str.strip()
+    df["loteria"] = df["loteria"].astype(str).str.strip()
+
+    registros = df.to_dict(orient="records")
 
     async with engine.begin() as conn:
         await conn.execute(text("""
-            INSERT INTO sorteos (fecha, hora, animalito, loteria)
+            INSERT INTO historico (fecha, hora, animalito, loteria)
             VALUES (:fecha, :hora, :animalito, :loteria)
-        """), datos_nuevos)
+            ON CONFLICT (fecha, hora, loteria) DO NOTHING
+        """), registros)
 
-    print("🕐 Registro nuevo guardado:", datos_nuevos)
-
-asyncio.run(actualizar())
+    return len(registros)
