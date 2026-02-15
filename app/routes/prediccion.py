@@ -1,14 +1,10 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from db import get_db
-from app.services.motor_v4 import generar_prediccion # <--- Solo V4
+from fastapi import APIRouter
+from app.services.motor_v4 import generar_prediccion
 
-router = APIRouter()
+router = APIRouter(prefix="/prediccion", tags=["Predicciones"])
 
-@router.get("/prediccion")
-async def obtener_prediccion(db: AsyncSession = Depends(get_db)):
-    # Ejecutamos la lógica de alto rendimiento
-    resultado = await generar_prediccion(db)
+@router.get("/")
+async def obtener_prediccion():
+    resultado = await generar_prediccion()
     return resultado
-
 
