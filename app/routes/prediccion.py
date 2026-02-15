@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+dfrom fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 import os
@@ -8,7 +8,7 @@ sys.path.append(os.getcwd())
 
 try:
     # Intentamos la importación directa desde la raíz
-    import bd
+    import db
     from db import get_db
     from app.services.motor_v4 import entrenar_modelo_v4
 except ImportError as e:
