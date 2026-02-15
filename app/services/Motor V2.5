@@ -1,0 +1,37 @@
+async def generar_prediccion(db):
+    # ... (mantenemos tu configuración de pesos inicial) ...
+    
+    # 1️⃣ MEJORA DE QUERY: Traemos el contexto del sorteo anterior
+    # Queremos saber qué salió justo antes del sorteo actual
+    ultimo_sorteo_query = await db.execute(text("SELECT animalito FROM historico ORDER BY id DESC LIMIT 1"))
+    ultimo_resultado = ultimo_sorteo_query.scalar()
+
+    # 2️⃣ ANÁLISIS DE TRANSICIÓN (Cadenas de Markov)
+    # Buscamos: "Históricamente, ¿qué sale después del {ultimo_resultado}?"
+    transicion_query = text("""
+        WITH Secuencia AS (
+            SELECT animalito, LEAD(animalito) OVER (ORDER BY fecha, hora) as siguiente
+            FROM historico
+        )
+        SELECT siguiente, COUNT(*) as frecuencia
+        FROM Secuencia
+        WHERE animalito = :ultimo
+        GROUP BY siguiente
+    """)
+    
+    trans_result = await db.execute(transicion_query, {"ultimo": ultimo_resultado})
+    prob_transicion = {row[0]: row[1] for row in trans_result.fetchall()}
+
+    # 3️⃣ INTEGRACIÓN AL SCORE FINAL
+    # Combinamos tu lógica de horas con la lógica de secuencia
+    for a in animales:
+        # Tu score original
+        s = (largo.get(a, 0) * PESO_LARGO + 
+             semana.get(a, 0) * PESO_SEMANA + 
+             hoy_freq.get(a, 0) * PESO_HOY)
+        
+        # Inyectamos el peso de transición (Si a suele salir tras el último, sube el score)
+        peso_transicion = prob_transicion.get(a, 0) * 1.5 # Factor de impulso
+        scores[a] = s + peso_transicion
+
+    # ... (Mantenemos penalización y ranking) ...
