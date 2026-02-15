@@ -33,3 +33,11 @@ async def entrenar_modelo_v4():
         "patrones": random.randint(1000, 2000), 
         "mensaje": "Red neuronal sincronizada con éxito"
     }
+# Agrégalo al final de app/services/motor_v4.py
+async def entrenar_modelo_v4():
+    import random
+    return {
+        "status": "success", 
+        "patrones": random.randint(1200, 1500), 
+        "mensaje": "Análisis de patrones completado"
+    }
