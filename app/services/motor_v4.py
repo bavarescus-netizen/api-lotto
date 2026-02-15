@@ -1,65 +1,64 @@
 from sqlalchemy import text
 from datetime import datetime
 
+# Mapeo oficial de Lotto Activo
+ANIMALES_INFO = {
+    "delfin": {"num": "0", "img": "delfin.png"}, "ballena": {"num": "00", "img": "ballena.png"},
+    "carnero": {"num": "1", "img": "carnero.png"}, "toro": {"num": "2", "img": "toro.png"},
+    "ciempies": {"num": "3", "img": "ciempies.png"}, "alacran": {"num": "4", "img": "alacran.png"},
+    "leon": {"num": "5", "img": "leon.png"}, "rana": {"num": "6", "img": "rana.png"},
+    "perico": {"num": "7", "img": "perico.png"}, "raton": {"num": "8", "img": "raton.png"},
+    "aguila": {"num": "9", "img": "aguila.png"}, "tigre": {"num": "10", "img": "tigre.png"},
+    "gato": {"num": "11", "img": "gato.png"}, "caballo": {"num": "12", "img": "caballo.png"},
+    "mono": {"num": "13", "img": "mono.png"}, "paloma": {"num": "14", "img": "paloma.png"},
+    "zorro": {"num": "15", "img": "zorro.png"}, "oso": {"num": "16", "img": "oso.png"},
+    "pavo": {"num": "17", "img": "pavo.png"}, "burro": {"num": "18", "img": "burro.png"},
+    "chivo": {"num": "19", "img": "chivo.png"}, "cochino": {"num": "20", "img": "cochino.png"},
+    "gallo": {"num": "21", "img": "gallo.png"}, "camello": {"num": "22", "img": "camello.png"},
+    "cebra": {"num": "23", "img": "cebra.png"}, "iguana": {"num": "24", "img": "iguana.png"},
+    "gallina": {"num": "25", "img": "gallina.png"}, "vaca": {"num": "26", "img": "vaca.png"},
+    "perro": {"num": "27", "img": "perro.png"}, "zamuro": {"num": "28", "img": "zamuro.png"},
+    "elefante": {"num": "29", "img": "elefante.png"}, "caiman": {"num": "30", "img": "caiman.png"},
+    "lapa": {"num": "31", "img": "lapa.png"}, "ardilla": {"num": "32", "img": "ardilla.png"},
+    "pescado": {"num": "33", "img": "pescado.png"}, "venado": {"num": "34", "img": "venado.png"},
+    "jirafa": {"num": "35", "img": "jirafa.png"}, "culebra": {"num": "36", "img": "culebra.png"}
+}
+
 async def generar_prediccion(db):
     ahora = datetime.now()
     hora_actual = ahora.strftime("%I:00 %p")
     
-    # 1️⃣ IDENTIFICAR EL ÚLTIMO RESULTADO (EL DISPARADOR)
-    res_ultimo = await db.execute(text("""
-        SELECT animalito FROM historico 
-        ORDER BY fecha DESC, id DESC LIMIT 1
-    """))
-    ultimo_animal = res_ultimo.scalar()
+    # 1. Obtener último resultado
+    res_ultimo = await db.execute(text("SELECT animalito FROM historico ORDER BY id DESC LIMIT 1"))
+    ultimo = res_ultimo.scalar()
 
-    if not ultimo_animal:
-        return {"error": "No hay datos históricos para iniciar"}
-
-    # 2️⃣ CONSULTAR EL CONOCIMIENTO APRENDIDO (MARKOV + FRECUENCIA)
-    # Buscamos en la tabla de entrenamiento qué es lo más probable después de 'ultimo_animal'
-    query_inteligente = text("""
+    # 2. Consultar Conocimiento V4 (Markov + Frecuencia)
+    query = text("""
         SELECT proximo_probable, fuerza 
         FROM conocimiento_v4 
-        WHERE animal_actual = :ultimo AND hora = :hora
+        WHERE animal_actual = :u AND hora = :h
         ORDER BY fuerza DESC LIMIT 3
     """)
-    
-    res = await db.execute(query_inteligente, {"ultimo": ultimo_animal, "hora": hora_actual})
+    res = await db.execute(query, {"u": ultimo, "h": hora_actual})
     patrones = res.fetchall()
 
-    # 3️⃣ CÁLCULO DE CONFIANZA PARA RENTABILIDAD
-    # Si no hay patrones fuertes (> 5 ocurrencias), el sistema sugiere precaución
-    max_fuerza = patrones[0].fuerza if patrones else 0
+    total_fuerza = sum(p.fuerza for p in patrones) if patrones else 1
     
-    if max_fuerza >= 8:
-        decision = "🟢 JUGAR - ALTA CONFIANZA"
-    elif max_fuerza >= 5:
-        decision = "🟡 JUGAR - CONFIANZA MEDIA"
-    else:
-        decision = "🔴 ESPERAR - PATRÓN DÉBIL"
-
-    # 4️⃣ FORMATEAR TOP 3 PARA EL DASHBOARD
-    top3 = []
+    # 3. Formatear resultados visuales
+    top3_visual = []
     for p in patrones:
-        top3.append({
-            "animal": p.proximo_probable,
-            "score": p.fuerza,
-            "probabilidad": f"Basado en {p.fuerza} repeticiones"
+        info = ANIMALES_INFO.get(p.proximo_probable, {"num": "??", "img": "default.png"})
+        porcentaje = round((p.fuerza / total_fuerza) * 100, 1)
+        top3_visual.append({
+            "animal": p.proximo_probable.upper(),
+            "numero": info["num"],
+            "imagen": f"/static/images/{info['img']}",
+            "porcentaje": f"{porcentaje}%",
+            "fuerza": p.fuerza
         })
 
-    # Si no hay suficientes patrones, rellenamos con frecuencia general de la hora
-    if len(top3) < 3:
-        res_respaldo = await db.execute(text("""
-            SELECT animalito, COUNT(*) as c FROM historico 
-            WHERE hora = :hora GROUP BY animalito ORDER BY c DESC LIMIT :lim
-        """), {"hora": hora_actual, "lim": 3 - len(top3)})
-        for r in res_respaldo:
-            top3.append({"animal": r[0], "score": r[1], "probabilidad": "Frecuencia Hora"})
+    # Decision de rentabilidad
+    fuerza_max = patrones[0].fuerza if patrones else 0
+    decision = "🟢 JUGAR (ALTA)" if fuerza_max > 7 else "🟡 MODERADO" if fuerza_max > 4 else "🔴 ESPERAR"
 
-    return {
-        "hora": hora_actual,
-        "despues_de": ultimo_animal,
-        "decision": decision,
-        "fuerza_patron": max_fuerza,
-        "top3": top3
-    }
+    return {"hora": hora_actual, "ultimo": ultimo, "decision": decision, "top3": top3_visual}
