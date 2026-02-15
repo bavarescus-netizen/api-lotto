@@ -10,7 +10,10 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 app = FastAPI(title="Lotto AI V4")
+from fastapi.staticfiles import StaticFiles
 
+# Esto le dice a Render: "Cuando alguien pida /static, busca dentro de la carpeta imagenes"
+app.mount("/static", StaticFiles(directory="imagenes"), name="static")
 # Importación de routers
 from app.routes import prediccion, entrenar, historico, stats
 
