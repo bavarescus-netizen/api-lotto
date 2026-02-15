@@ -1,29 +1,30 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from bd import get_db
+import sys
+import os
+
+# === PARCHE DEFENSIVO DE RUTAS ===
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+try:
+    if os.path.exists(os.path.join(BASE_DIR, "bd.py")):
+        from bd import get_db
+    else:
+        from db import get_db
+        
+    # Importamos tu función de estadísticas
+    from app.services.motor_v4 import analizar_estadisticas
+except ImportError as e:
+    print(f"Error importando en stats.py: {e}")
+    raise
 
 router = APIRouter(prefix="/stats", tags=["Estadísticas"])
 
-@router.get("/precision")
-async def get_precision(db: AsyncSession = Depends(get_db)):
-    # Lógica para calcular efectividad por día
-    query = text("""
-        SELECT 
-            EXTRACT(DOW FROM fecha) as dia_semana,
-            COUNT(*) as total_sorteos
-        FROM historico 
-        WHERE fecha >= '2019-01-01'
-        GROUP BY dia_semana
-    """)
-    result = await db.execute(query)
-    
-    # Mapeo de días (0=Domingo, 1=Lunes...)
-    dias = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"]
-    stats = {dias[int(row.dia_semana)]: row.total_sorteos for row in result}
-    
-    return {
-        "resumen": "Días con mayor volumen de datos analizados",
-        "data": stats,
-        "mejor_dia": max(stats, key=stats.get) if stats else "N/A"
-    }
+@router.get("/analisis")
+async def api_stats(db: AsyncSession = Depends(get_db)):
+    try:
+        return await analizar_estadisticas(db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
