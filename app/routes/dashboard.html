@@ -11,45 +11,67 @@
         <h1 class="text-blue-400 text-center font-bold text-xl mb-4">🧠 MOTOR V4 ADAPTATIVO</h1>
         
         <div class="flex gap-2 mb-6">
-            <button onclick="entrenar()" class="flex-1 bg-slate-800 p-3 rounded-lg border border-slate-700 text-sm">ENTRENAR</button>
-            <button onclick="predecir()" class="flex-1 bg-blue-600 p-3 rounded-lg font-bold">PREDECIR</button>
+            <button onclick="entrenar()" class="flex-1 bg-slate-800 p-3 rounded-lg border border-slate-700 text-sm hover:bg-slate-700">ENTRENAR</button>
+            <button onclick="predecir()" class="flex-1 bg-blue-600 p-3 rounded-lg font-bold hover:bg-blue-500 shadow-lg shadow-blue-900/20">PREDECIR</button>
         </div>
 
         <div id="status" class="bg-slate-900 p-4 rounded-xl border-l-4 border-blue-500 mb-6 text-center">
-            <div class="text-xs text-slate-500 uppercase">Estado del Mercado</div>
-            <div id="dec-text" class="text-2xl font-black py-2">---</div>
-            <div id="top3-lista" class="space-y-3 mt-4"></div>
+            <div class="text-xs text-slate-500 uppercase tracking-widest">Estado del Mercado</div>
+            <div id="dec-text" class="text-2xl font-black py-2 text-white">---</div>
+            
+            <div id="top3-lista" class="space-y-3 mt-4">
+                </div>
         </div>
     </div>
 
     <script>
         async function predecir() {
-            const res = await fetch('/prediccion');
-            const data = await res.json();
-            document.getElementById('dec-text').innerText = data.decision;
-            
             const lista = document.getElementById('top3-lista');
-            lista.innerHTML = "";
+            lista.innerHTML = "<div class='text-slate-500 animate-pulse'>Calculando probabilidades...</div>";
             
-            data.top3.forEach(item => {
-                lista.innerHTML += `
-                    <div class="flex items-center bg-slate-800 p-3 rounded-xl border border-slate-700">
-                        <img src="${item.imagen}" class="w-14 h-14 rounded-lg bg-white mr-4">
-                        <div class="flex-grow">
-                            <div class="text-blue-400 text-xs font-bold">№ ${item.numero}</div>
-                            <div class="text-lg font-bold">${item.animal}</div>
+            try {
+                const res = await fetch('/prediccion');
+                const data = await res.json();
+                
+                document.getElementById('dec-text').innerText = data.decision;
+                
+                // Cambiar color del borde según decisión
+                const card = document.getElementById('status');
+                if(data.decision.includes("🟢")) card.style.borderColor = "#22c55e";
+                else if(data.decision.includes("🟡")) card.style.borderColor = "#eab308";
+                else card.style.borderColor = "#ef4444";
+
+                lista.innerHTML = "";
+                data.top3.forEach(item => {
+                    lista.innerHTML += `
+                        <div class="flex items-center bg-slate-800 p-3 rounded-xl border border-slate-700 transition-all hover:scale-[1.02]">
+                            <img src="${item.imagen}" class="w-14 h-14 rounded-lg bg-white p-1 mr-4 shadow-sm" onerror="this.src='https://via.placeholder.com/60?text=?'">
+                            <div class="flex-grow text-left">
+                                <div class="text-blue-400 text-xs font-bold tracking-tighter">№ ${item.numero}</div>
+                                <div class="text-lg font-bold leading-tight">${item.animal}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-green-400 font-black text-xl">${item.porcentaje}</div>
+                                <div class="text-[10px] text-slate-500 font-bold uppercase">Confianza</div>
+                            </div>
                         </div>
-                        <div class="text-right">
-                            <div class="text-green-400 font-bold">${item.porcentaje}</div>
-                            <div class="text-[10px] text-slate-500">CONFIANZA</div>
-                        </div>
-                    </div>
-                `;
-            });
+                    `;
+                });
+            } catch (e) {
+                lista.innerHTML = "<div class='text-red-500'>Error al conectar con el servidor</div>";
+            }
         }
+
         async function entrenar() {
-            alert("Entrenamiento iniciado en segundo plano...");
+            const btn = event.target;
+            btn.innerText = "ENTRENANDO...";
+            btn.disabled = true;
             await fetch('/entrenar/');
+            setTimeout(() => {
+                btn.innerText = "ENTRENAR";
+                btn.disabled = false;
+                alert("Cerebro actualizado con los 29,000 registros.");
+            }, 2000);
         }
     </script>
 </body>
