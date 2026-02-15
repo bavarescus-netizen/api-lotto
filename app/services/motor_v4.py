@@ -18,14 +18,15 @@ MAPA_ANIMALES = {
 }
 
 def limpiar_nombre(nombre):
+    """Normaliza texto para comparaciones seguras."""
     if not nombre: return "0"
     n = str(nombre).lower().strip()
     return "".join(c for c in unicodedata.normalize('NFD', n) if unicodedata.category(c) != 'Mn')
 
 async def generar_prediccion(db: AsyncSession):
     try:
-        # --- A. ANALIZAR EFECTIVIDAD RECIENTE ---
-        # Filtramos solo registros procesados (acierto no es NULL)
+        # --- A. CÁLCULO DE EFECTIVIDAD REAL ---
+        # Consultamos los últimos 20 resultados procesados para ajustar la confianza
         query_rendimiento = text("""
             SELECT acierto FROM auditoria_ia 
             WHERE acierto IS NOT NULL 
@@ -34,71 +35,70 @@ async def generar_prediccion(db: AsyncSession):
         res_r = await db.execute(query_rendimiento)
         recientes = res_r.fetchall()
         
-        # Base de efectividad: si no hay datos, empezamos en 45% por defecto
-        efectividad = (sum(1 for r in recientes if r[0]) / len(recientes) * 100) if recientes else 45.0
+        # Si no hay datos, iniciamos con una base optimista del 45%
+        efectividad_base = (sum(1 for r in recientes if r[0]) / len(recientes) * 100) if recientes else 45.0
         
-        # --- B. BUSCAR COINCIDENCIAS HISTÓRICAS ---
+        # --- B. BÚSQUEDA DE PATRONES POR HORA ---
         hora_actual = datetime.now().strftime("%I:00 %p")
-        query = text("""
+        query_hist = text("""
             SELECT animalito FROM historico 
             WHERE hora = :hora AND fecha >= '2018-01-01'
         """)
-        res = await db.execute(query, {"hora": hora_actual})
-        data = res.fetchall()
+        res_h = await db.execute(query_hist, {"hora": hora_actual})
+        data = res_h.fetchall()
 
         if not data:
-            analisis = "Modo Exploración (Sin coincidencias históricas)."
-            # Selección aleatoria de respaldo
+            analisis_msg = "Modo Exploración: Sin registros para esta hora."
+            # Selección aleatoria balanceada
             items_random = random.sample(list(MAPA_ANIMALES.items()), 3)
             seleccion = [(k, v) for k, v in items_random]
         else:
             df = pd.DataFrame(data, columns=['animalito'])
-            # Obtenemos los 3 más frecuentes para esta hora
             top = df['animalito'].value_counts().head(3).index.tolist()
             seleccion = []
             for t in top:
                 name = limpiar_nombre(t)
                 num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "0")
                 seleccion.append((num, name))
-            analisis = f"Patrón detectado en {len(data)} registros previos."
+            analisis_msg = f"Basado en {len(data)} coincidencias históricas."
 
-        # --- C. REGISTRAR EN AUDITORÍA ---
+        # --- C. REGISTRO AUTOMÁTICO EN AUDITORÍA ---
         fecha_hoy = datetime.now().date()
         for i, item in enumerate(seleccion):
             ins_query = text("""
                 INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
                 VALUES (:fecha, :hora, :animal, :conf, :patron)
             """)
-            # La confianza baja un poco para el 2do y 3er lugar
-            confianza_item = max(int(efectividad) - (i * 10), 10)
+            # Confianza ponderada (Piso mínimo de 10% para evitar negativos)
+            conf_ponderada = max(int(efectividad_base) - (i * 12), 10)
             
             await db.execute(ins_query, {
                 "fecha": fecha_hoy,
                 "hora": hora_actual,
                 "animal": item[1],
-                "conf": confianza_item,
-                "patron": "Neural Pattern V4 (Frecuencia)"
+                "conf": conf_ponderada,
+                "patron": "Neural Pattern V4.2"
             })
         await db.commit()
 
-        # --- D. FORMATEAR RESPUESTA PARA EL FRONTEND ---
+        # --- D. FORMATEO PARA INTERFAZ QUANTUM ---
         top3 = []
         for i, (num, name) in enumerate(seleccion):
-            # Evitamos que el porcentaje sea menor a 15% para mantener la estética
-            porcentaje_visual = max(int(efectividad) - (i * 12), 15)
+            # Probabilidad visual (Nunca menor a 15% para el Radar)
+            prob_visual = max(int(efectividad_base) - (i * 15), 15)
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
                 "imagen": f"{name}.png",
-                "porcentaje": f"{porcentaje_visual}%"
+                "porcentaje": f"{prob_visual}%"
             })
 
-        decision = "ALTA PROBABILIDAD" if efectividad >= 45 else "OBSERVAR - PATRÓN INESTABLE"
+        decision = "ALTA PROBABILIDAD" if efectividad_base >= 45 else "OBSERVAR - PATRÓN INESTABLE"
         
         return {
             "decision": decision, 
             "top3": top3, 
-            "analisis": f"Efectividad IA: {int(efectividad)}% | {analisis}"
+            "analisis": f"Efectividad IA: {int(efectividad_base)}% | {analisis_msg}"
         }
 
     except Exception as e:
@@ -107,12 +107,12 @@ async def generar_prediccion(db: AsyncSession):
 
 async def entrenar_modelo_v4(db: AsyncSession):
     """
-    Esta función es el CEREBRO DE CALIBRACIÓN.
-    Cruza las predicciones hechas con los resultados reales del histórico.
+    CEREBRO DE CALIBRACIÓN: Cruza predicciones vs resultados reales.
+    Esto es lo que llena tus gráficas en la pestaña 'DATA'.
     """
     try:
-        # Sincronizamos la tabla auditoria_ia con los resultados reales de historico
-        query_update = text("""
+        # Actualizamos la auditoría comparando con el histórico real
+        query_calibrar = text("""
             UPDATE auditoria_ia
             SET resultado_real = h.animalito,
                 acierto = (LOWER(TRIM(auditoria_ia.animal_predicho)) = LOWER(TRIM(h.animalito)))
@@ -122,22 +122,22 @@ async def entrenar_modelo_v4(db: AsyncSession):
               AND auditoria_ia.acierto IS NULL
         """)
         
-        result = await db.execute(query_update)
+        res = await db.execute(query_calibrar)
         await db.commit()
         
-        count = result.rowcount
         return {
             "status": "success", 
-            "mensaje": f"Calibración exitosa. {count} registros actualizados.",
-            "logs": "Sincronización de patrones completada."
+            "mensaje": f"Sincronización Exitosa: {res.rowcount} resultados calibrados.",
+            "detalle": "IA actualizada con datos 2018-2026."
         }
     except Exception as e:
         await db.rollback()
         return {"status": "error", "mensaje": str(e)}
 
 async def analizar_estadisticas(db: AsyncSession):
-    """Retorna los datos para las gráficas de barras."""
+    """Alimenta los gráficos de barras y de eficiencia."""
     try:
+        # Top 10 animales más frecuentes para el gráfico de barras
         query = text("""
             SELECT animalito, COUNT(*) as conteo 
             FROM historico 
@@ -147,7 +147,7 @@ async def analizar_estadisticas(db: AsyncSession):
         res = await db.execute(query)
         filas = res.fetchall()
         
-        labels_data = {f[0].capitalize(): f[1] for f in filas} if filas else {"Sin Datos": 0}
+        labels_data = {f[0].capitalize(): f[1] for f in filas} if filas else {"Cargando...": 0}
         return {"status": "success", "data": labels_data}
     except Exception:
         return {"status": "error", "data": {}}
