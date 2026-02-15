@@ -5,5 +5,4 @@ router = APIRouter(prefix="/stats", tags=["Estadísticas"])
 
 @router.get("/")
 async def get_stats():
-    data = await analizar_estadisticas()
-    return data
+    return await analizar_estadisticas()
