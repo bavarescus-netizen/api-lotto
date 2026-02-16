@@ -4,21 +4,23 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL no configurada")
+    raise ValueError("❌ ERROR: DATABASE_URL no configurada en las variables de entorno.")
 
-# ✅ driver async
-DATABASE_URL = DATABASE_URL.replace(
-    "postgresql://",
-    "postgresql+asyncpg://"
-)
+# ✅ Convertir a driver async si es necesario
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# ✅ quitar params incompatibles de Neon
+# ✅ Limpieza de parámetros para compatibilidad con Neon
 DATABASE_URL = DATABASE_URL.split("?")[0] + "?ssl=require"
 
+# ✅ Configuración del Motor (Optimizado para carga de datos masiva)
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_pre_ping=True
+    pool_pre_ping=True,      # Verifica la conexión antes de usarla
+    pool_size=10,            # Máximo de conexiones abiertas
+    max_overflow=20,         # Conexiones extra en picos de tráfico
+    pool_recycle=3600        # Reinicia conexiones cada hora para evitar bloqueos
 )
 
 SessionLocal = async_sessionmaker(
@@ -27,7 +29,10 @@ SessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
-# Solo una definición de get_db
+# Inyección de dependencia para FastAPI
 async def get_db():
     async with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await session.close()
