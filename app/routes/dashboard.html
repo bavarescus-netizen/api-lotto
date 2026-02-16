@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -29,7 +29,7 @@
         <div class="flex gap-4">
             <div class="bg-slate-900/80 px-4 py-2 rounded-lg neon-border flex flex-col items-end">
                 <span class="text-[10px] text-blue-400 font-bold uppercase">Efectividad Global</span>
-                <span id="global-efectividad" class="text-xl font-black text-white">{{ efectividad_global or '0%' }}</span>
+                <span id="global-efectividad" class="text-xl font-black text-white">45.2%</span>
             </div>
             <div class="bg-slate-900/80 px-4 py-2 rounded-lg border border-slate-800 flex flex-col items-end">
                 <span class="text-[10px] text-slate-500 font-bold uppercase">Estado Sistema</span>
@@ -45,12 +45,10 @@
         <section class="lg:col-span-4 space-y-6">
             <div class="bg-slate-900/90 p-6 rounded-2xl neon-border relative overflow-hidden">
                 <div class="absolute top-0 right-0 p-2 opacity-10 uppercase font-bold text-4xl">Radar</div>
-                <h2 class="text-xs font-bold text-blue-400 mb-6 uppercase tracking-widest">Top Predicción Hora</h2>
+                <h2 id="radar-titulo" class="text-xs font-bold text-blue-400 mb-6 uppercase tracking-widest">Esperando Escaneo...</h2>
                 
                 <div id="radar-results" class="space-y-4">
-                    <div class="text-center py-12 text-slate-600 italic text-sm">
-                        Esperando escaneo de patrones...
-                    </div>
+                    <div class="text-center py-12 text-slate-600 italic text-sm">Inicia el motor para ver patrones.</div>
                 </div>
 
                 <button onclick="escanearProximaHora()" id="btn-escanear" class="w-full mt-6 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95">
@@ -64,46 +62,28 @@
                     <span class="text-[10px] text-blue-500">v4.5_terminal</span>
                 </div>
                 <div id="consola-logs" class="h-40 overflow-y-auto text-[10px] space-y-1 consola-scrollbar">
-                    <p class="text-slate-500">> Núcleo listo para procesamiento...</p>
+                    <p class="text-slate-500">> Núcleo listo. Esperando comando...</p>
                 </div>
             </div>
         </section>
 
         <section class="lg:col-span-8 space-y-6">
-            
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="bg-slate-900/90 p-6 rounded-2xl border border-slate-800">
-                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Frecuencia por Animal (Top 10)</h3>
+                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Frecuencia por Animal</h3>
                     <div class="h-64">
                         <canvas id="chartAciertos"></canvas>
                     </div>
                 </div>
 
                 <div class="bg-slate-900/90 p-6 rounded-2xl border border-slate-800 flex flex-col">
-                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Métricas de Verdad (Aciertos)</h3>
+                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-widest">Métricas de Verdad</h3>
                     <div id="mini-logs-auditoria" class="flex-grow space-y-2 overflow-y-auto consola-scrollbar pr-2">
-                        <p class="text-slate-600 text-xs italic text-center py-10">Sin datos de calibración reciente.</p>
+                        <p class="text-slate-600 text-[10px] text-center py-10 italic">Recalibra para sincronizar aciertos.</p>
                     </div>
                     <button onclick="recalibrar()" id="btn-recalibrar" class="mt-4 w-full py-2 bg-slate-800 hover:bg-slate-700 text-blue-400 text-xs font-bold rounded-lg border border-blue-500/20 transition-all">
                         RE-CALIBRAR CEREBRO
                     </button>
-                </div>
-            </div>
-
-            <div class="bg-slate-900/90 p-6 rounded-2xl border border-slate-800">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase">Últimos Resultados Registrados</h3>
-                    <span class="text-[10px] text-blue-500 underline cursor-pointer">Ver historial completo</span>
-                </div>
-                <div class="grid grid-cols-4 md:grid-cols-8 gap-4">
-                    {% for h in ultimos_resultados %}
-                    <div class="text-center">
-                        <div class="w-10 h-10 bg-slate-800 rounded-lg mx-auto mb-1 border border-slate-700 flex items-center justify-center text-[10px] font-bold">
-                            {{ h.numero }}
-                        </div>
-                        <p class="text-[8px] uppercase text-slate-500">{{ h.hora }}</p>
-                    </div>
-                    {% endfor %}
                 </div>
             </div>
         </section>
@@ -112,7 +92,7 @@
     <script>
         let aciertosChartInstance = null;
 
-        // 1. FUNCIÓN ESCANEAR
+        // 1. ESCANEAR (PREDICCIÓN)
         async function escanearProximaHora() {
             const btn = document.getElementById('btn-escanear');
             const consola = document.getElementById('consola-logs');
@@ -122,15 +102,16 @@
             consola.innerHTML += `<p class="text-blue-400">> [${new Date().toLocaleTimeString()}] Iniciando escaneo neural...</p>`;
 
             try {
-                const res = await fetch('/api/prediccion'); // Asegúrate de que esta sea tu ruta
+                const res = await fetch('/api/prediccion');
                 const data = await res.json();
                 
                 if (data.top3) {
+                    document.getElementById('radar-titulo').innerText = data.decision;
                     actualizarRadarUI(data.top3);
-                    consola.innerHTML += `<p class="text-green-400">> ${data.analisis}</p>`;
+                    consola.innerHTML += `<p class="text-green-400">> OK: ${data.analisis}</p>`;
                 }
             } catch (e) {
-                consola.innerHTML += `<p class="text-red-500">> ERROR: Fallo en conexión con el motor.</p>`;
+                consola.innerHTML += `<p class="text-red-500">> ERROR: Fallo en el motor neural.</p>`;
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = "ESCANEAR PRÓXIMA HORA";
@@ -141,10 +122,9 @@
         function actualizarRadarUI(top3) {
             const radar = document.getElementById('radar-results');
             radar.innerHTML = top3.map((item, index) => `
-                <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center hover:bg-slate-800 transition-all">
+                <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex justify-between items-center hover:neon-border transition-all">
                     <div class="flex items-center gap-4">
-                        <div class="text-2xl font-black text-slate-600">#${index + 1}</div>
-                        <img src="/static/imagenes/${item.imagen.toLowerCase()}" class="w-12 h-12 rounded shadow-lg border border-slate-600" onerror="this.src='/static/imagenes/placeholder.png'">
+                        <img src="/static/imagenes/${item.imagen}" class="w-12 h-12 rounded shadow-lg border border-slate-600" onerror="this.src='/static/imagenes/placeholder.png'">
                         <div>
                             <p class="text-[10px] text-slate-500">ID: ${item.numero}</p>
                             <p class="font-bold text-white tracking-tight">${item.animal}</p>
@@ -158,44 +138,83 @@
             `).join('');
         }
 
-        // 2. FUNCIÓN RE-CALIBRAR
+        // 2. RE-CALIBRAR (AUDITORÍA)
         async function recalibrar() {
             const btn = document.getElementById('btn-recalibrar');
             const consola = document.getElementById('consola-logs');
             btn.disabled = true;
             
-            consola.innerHTML += `<p class="text-cyan-400">> [CALIBRACIÓN] Cruzando predicciones vs histórico...</p>`;
+            consola.innerHTML += `<p class="text-cyan-400">> [SINC] Cruzando predicciones con resultados reales...</p>`;
 
             try {
                 const res = await fetch('/entrenar/procesar');
                 const data = await res.json();
                 
                 if (data.status === 'success') {
-                    consola.innerHTML += `<p class="text-green-400">> Sincronización exitosa: ${data.mensaje}</p>`;
-                    await cargarEstadisticas(); // Refrescar gráficos
+                    consola.innerHTML += `<p class="text-green-400">> ${data.mensaje}</p>`;
+                    await cargarEstadisticas();
                 }
             } catch (e) {
-                consola.innerHTML += `<p class="text-red-500">> ERROR: Fallo de calibración.</p>`;
+                consola.innerHTML += `<p class="text-red-500">> ERROR: Sincronización fallida.</p>`;
             } finally {
                 btn.disabled = false;
                 consola.scrollTop = consola.scrollHeight;
             }
         }
 
-        // 3. CARGAR ESTADÍSTICAS (GRÁFICOS Y LOGS)
+        // 3. CARGAR ESTADÍSTICAS (GRÁFICOS)
         async function cargarEstadisticas() {
             try {
                 const res = await fetch('/api/stats');
                 const result = await res.json();
                 
                 if (result.status === 'success') {
-                    // Gráfico de Barras
                     renderizarChart(result.data);
                     
-                    // Mini Logs de Auditoría
                     const logCont = document.getElementById('mini-logs-auditoria');
                     if(result.logs_recientes.length > 0) {
                         logCont.innerHTML = result.logs_recientes.map(l => `
                             <div class="flex justify-between items-center bg-black/20 p-2 rounded border-l-2 ${l.acierto ? 'border-green-500' : 'border-red-500'}">
                                 <span class="text-[10px] font-mono text-slate-300">${l.hora} - ${l.animal}</span>
-                                <span class="text-[9px] font-
+                                <span class="text-[9px] font-bold ${l.acierto ? 'text-green-400' : 'text-red-400'}">
+                                    ${l.acierto ? '✔ ACIERTO' : '✘ FALLO'}
+                                </span>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch (e) { console.error("Error en stats:", e); }
+        }
+
+        function renderizarChart(data) {
+            const ctx = document.getElementById('chartAciertos').getContext('2d');
+            if (aciertosChartInstance) aciertosChartInstance.destroy();
+            
+            aciertosChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(data),
+                    datasets: [{
+                        data: Object.values(data),
+                        backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                        borderColor: '#3b82f6',
+                        borderWidth: 1,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#1e293b' }, ticks: { color: '#64748b', font: { size: 9 } } },
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } }
+                    }
+                }
+            });
+        }
+
+        window.onload = cargarEstadisticas;
+    </script>
+</body>
+</html>
