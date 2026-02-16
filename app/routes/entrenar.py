@@ -1,10 +1,18 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from db import get_db
+from app.services.motor_v4 import entrenar_modelo_v4
+
+router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
+
 @router.get("/procesar")
 async def api_entrenar(db: AsyncSession = Depends(get_db)):
     try:
-        # 1. PASO PESADO: Aprender de los 28,709 registros
-        # Esto calcula qué animales salen más por hora y detecta tendencias
+        # 1. Borrar memoria vieja
         await db.execute(text("TRUNCATE TABLE probabilidades_hora"))
-        
+
+        # 2. APRENDIZAJE: Analizar 28,709 registros (60% peso a lo reciente)
         query_aprendizaje = text("""
             INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia)
             WITH stats_global AS (
@@ -24,14 +32,13 @@ async def api_entrenar(db: AsyncSession = Depends(get_db)):
         """)
         await db.execute(query_aprendizaje)
         
-        # 2. PASO DE AUDITORÍA: Sincronizar aciertos pasados
-        resultado_calib = await entrenar_modelo_v4(db)
+        # 3. Calibrar aciertos
+        aciertos_sinc = await entrenar_modelo_v4(db)
         
         await db.commit()
         return {
             "status": "success",
-            "mensaje": "Cerebro Re-Calibrado con 28,709 registros.",
-            "logs": "Tablas de probabilidad y auditoría sincronizadas."
+            "mensaje": f"Cerebro entrenado con 28,709 registros. {aciertos_sinc} aciertos calibrados."
         }
     except Exception as e:
         await db.rollback()
