@@ -42,3 +42,167 @@
     </header>
 
     <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <div class="lg:col-span-4 space-y-8">
+            <div class="bg-slate-900/80 p-6 rounded-2xl neon-border relative overflow-hidden backdrop-blur-sm">
+                <h2 class="text-xs font-bold text-blue-400 mb-8 uppercase tracking-widest border-l-2 border-blue-500 pl-3">Top Predicción Hora</h2>
+                <div id="radar-results" class="space-y-4">
+                    <div class="text-center py-16 text-slate-600 italic text-sm border-2 border-dashed border-slate-800 rounded-xl">
+                        Inicia el motor para ver patrones.
+                    </div>
+                </div>
+                <button onclick="escanearProximaHora()" id="btn-escanear" class="w-full mt-8 py-5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all shadow-lg active:scale-95">
+                    ESCANEAR PRÓXIMA HORA
+                </button>
+            </div>
+
+            <div class="bg-black/90 rounded-2xl border border-slate-800 p-5 font-mono shadow-2xl">
+                <div class="flex justify-between items-center mb-3 border-b border-slate-800 pb-3">
+                    <span class="text-[10px] text-slate-500">v4.5_terminal</span>
+                    <span id="reloj-terminal" class="text-[10px] text-blue-500/80">00:00:00</span>
+                </div>
+                <div id="consola-logs" class="h-48 overflow-y-auto text-[11px] space-y-2 consola-scrollbar leading-relaxed">
+                    <p class="text-slate-500">> Sistema iniciado. Conexión con Neon establecida.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-8 space-y-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-slate-900/80 p-6 rounded-2xl border border-slate-800/50 backdrop-blur-sm">
+                    <h3 class="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest">Frecuencia por Animal (Top 10)</h3>
+                    <div class="h-64 relative">
+                        <canvas id="chartFrecuencia"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/80 p-6 rounded-2xl border border-slate-800/50 backdrop-blur-sm flex flex-col min-h-[350px]">
+                    <h3 class="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest">Métricas de Verdad</h3>
+                    <div id="mini-logs-auditoria" class="flex-grow space-y-3 overflow-y-auto consola-scrollbar pr-2">
+                        <p class="text-slate-600 text-[10px] text-center py-20 italic">Recalibra para sincronizar aciertos.</p>
+                    </div>
+                    <button onclick="recalibrar()" id="btn-recalibrar" class="mt-6 w-full py-3 bg-slate-800/50 hover:bg-slate-700 text-blue-400 text-[11px] font-bold rounded-xl border border-blue-500/20 transition-all">
+                        RE-CALIBRAR CEREBRO
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let chartInstance = null;
+
+        // Reloj
+        setInterval(() => {
+            document.getElementById('reloj-terminal').innerText = new Date().toLocaleTimeString();
+        }, 1000);
+
+        // 1. CARGAR ESTADÍSTICAS (LOS 28K DATOS)
+        async function cargarEstadisticas() {
+            try {
+                const res = await fetch('/api/stats');
+                const result = await res.json();
+                
+                if (result.status === 'success') {
+                    if (result.efectividad) document.getElementById('global-efectividad').innerText = result.efectividad + '%';
+                    
+                    // Dibujar Gráfica
+                    const ctx = document.getElementById('chartFrecuencia').getContext('2d');
+                    if (chartInstance) chartInstance.destroy();
+                    chartInstance = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: Object.keys(result.data),
+                            datasets: [{
+                                data: Object.values(result.data),
+                                backgroundColor: 'rgba(59, 130, 246, 0.4)',
+                                borderColor: '#3b82f6',
+                                borderWidth: 2,
+                                borderRadius: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } } },
+                                x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } }
+                            }
+                        }
+                    });
+
+                    // Llenar Auditoría
+                    const logCont = document.getElementById('mini-logs-auditoria');
+                    if(result.logs_recientes && result.logs_recientes.length > 0) {
+                        logCont.innerHTML = result.logs_recientes.map(l => `
+                            <div class="flex justify-between items-center bg-slate-800/30 p-3 rounded-lg border-l-4 ${l.acierto ? 'border-green-500' : 'border-red-500'}">
+                                <span class="text-[11px] font-bold text-slate-300 uppercase">${l.hora} - <span class="text-white">${l.animal}</span></span>
+                                <span class="text-[9px] font-black ${l.acierto ? 'text-green-400' : 'text-red-400'}">
+                                    ${l.acierto ? '✔ ACIERTO' : '✘ FALLO'}
+                                </span>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch (e) { console.error("Error al cargar datos de Neon:", e); }
+        }
+
+        // 2. ESCANEAR
+        async function escanearProximaHora() {
+            const btn = document.getElementById('btn-escanear');
+            const consola = document.getElementById('consola-logs');
+            btn.disabled = true;
+            consola.innerHTML += `<p class="text-blue-400 font-bold">> [${new Date().toLocaleTimeString()}] Iniciando escaneo neural...</p>`;
+
+            try {
+                const res = await fetch('/api/prediccion');
+                const data = await res.json();
+                
+                if (data.top3) {
+                    document.getElementById('radar-results').innerHTML = data.top3.map(item => `
+                        <div class="bg-slate-800/30 p-5 rounded-xl border border-slate-700/50 flex justify-between items-center group">
+                            <div class="flex items-center gap-5">
+                                <img src="/static/${item.imagen.toLowerCase()}" class="w-14 h-14 rounded-lg border border-slate-700" onerror="this.src='https://placehold.co/100x100?text=IA'">
+                                <div>
+                                    <p class="font-black text-lg text-white uppercase italic">${item.animal}</p>
+                                    <p class="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Probabilidad: ${item.porcentaje}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    consola.innerHTML += `<p class="text-green-400">> OK: Patrones identificados correctamente.</p>`;
+                }
+            } catch (e) {
+                consola.innerHTML += `<p class="text-red-500">> ERROR_SISTEMA: No se pudo conectar con el motor.</p>`;
+            } finally {
+                btn.disabled = false;
+                consola.scrollTop = consola.scrollHeight;
+            }
+        }
+
+        // 3. RECALIBRAR
+        async function recalibrar() {
+            const btn = document.getElementById('btn-recalibrar');
+            const consola = document.getElementById('consola-logs');
+            btn.disabled = true;
+            consola.innerHTML += `<p class="text-cyan-400">> [SINC] Cruzando predicciones con Neon...</p>`;
+
+            try {
+                const res = await fetch('/entrenar/procesar');
+                const data = await res.json();
+                consola.innerHTML += `<p class="text-green-400">> SINC_EXITOSA: ${data.mensaje}</p>`;
+                cargarEstadisticas();
+            } catch (e) {
+                consola.innerHTML += `<p class="text-red-500">> FATAL_ERR: Sincronización fallida.</p>`;
+            } finally {
+                btn.disabled = false;
+                consola.scrollTop = consola.scrollHeight;
+            }
+        }
+
+        // Carga inicial
+        window.onload = cargarEstadisticas;
+    </script>
+</body>
+</html>
