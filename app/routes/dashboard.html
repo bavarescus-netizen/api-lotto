@@ -3,29 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lotto AI | Neural Terminal v4.5</title>
+    <title>Neural Engine v4.5 PRO | Operador Maestro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'JetBrains Mono', monospace; background-color: #020617; color: #e2e8f0; }
-        .neon-border { box-shadow: 0 0 15px rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.3); }
+        .neon-border { box-shadow: 0 0 20px rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.2); }
         .pixel-grid { background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 30px 30px; }
         .consola-scrollbar::-webkit-scrollbar { width: 4px; }
         .consola-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        .card-gradient { background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(2, 6, 23, 0.9) 100%); }
     </style>
 </head>
 <body class="min-h-screen pixel-grid p-4 lg:p-8">
 
-    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <div>
-            <h1 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-300 italic">NEURAL ENGINE PRO</h1>
-            <p class="text-[10px] text-slate-500 tracking-[0.3em]">OPERADOR ÚNICO: MODO DESARROLLO</p>
+    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
+        <div class="text-center md:text-left">
+            <h1 class="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500 italic tracking-tighter">
+                NEURAL ENGINE <span class="text-white not-italic">V4.5</span>
+            </h1>
+            <div class="flex items-center gap-2 mt-1 justify-center md:justify-start">
+                <span class="relative flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <p class="text-[10px] text-slate-500 tracking-[0.4em] uppercase font-bold">Terminal de Control Único</p>
+            </div>
         </div>
+        
         <div class="flex gap-4">
-            <div class="bg-slate-900/80 p-3 rounded-lg border border-blue-500/20 text-right">
-                <span class="block text-[9px] text-blue-400 font-bold uppercase">Base de Datos (Neon)</span>
-                <span class="text-xl font-black text-white">28,709 REGS</span>
+            <div class="bg-slate-900/80 px-6 py-3 rounded-2xl border border-blue-500/20 text-center min-w-[140px]">
+                <span class="block text-[9px] text-blue-400 font-bold uppercase mb-1">Efectividad Global</span>
+                <span id="txt-efectividad" class="text-2xl font-black text-white">--%</span>
+            </div>
+            <div class="bg-slate-900/80 px-6 py-3 rounded-2xl border border-slate-700 text-center min-w-[140px]">
+                <span class="block text-[9px] text-slate-500 font-bold uppercase mb-1">Data Sincronizada</span>
+                <span class="text-xl font-black text-white italic">28,709</span>
             </div>
         </div>
     </header>
@@ -33,41 +47,69 @@
     <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         <div class="lg:col-span-4 space-y-6">
-            <div class="bg-slate-900/90 p-6 rounded-2xl neon-border">
-                <h2 class="text-xs font-bold text-blue-400 mb-6 uppercase border-l-2 border-blue-500 pl-2">Predicción de la Hora</h2>
-                <div id="radar-results" class="space-y-3 mb-6">
-                    <p class="text-center py-10 text-slate-600 text-xs italic">Esperando escaneo...</p>
+            
+            <div class="card-gradient p-6 rounded-3xl neon-border">
+                <h2 class="text-xs font-bold text-blue-400 mb-6 uppercase border-l-4 border-blue-500 pl-3">Escanear Patrones</h2>
+                <div id="radar-results" class="space-y-3 mb-6 min-h-[100px]">
+                    <p class="text-center py-6 text-slate-600 text-xs italic">Esperando instrucción...</p>
                 </div>
-                <button onclick="escanearProximaHora()" id="btn-escanear" class="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all shadow-lg active:scale-95">
-                    ESCANEAR PRÓXIMA HORA
+                <button onclick="escanearProximaHora()" id="btn-escanear" 
+                    class="w-full py-4 bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+                    <span>EJECUTAR ESCANEO HORA</span>
                 </button>
             </div>
 
-            <div class="bg-indigo-950/30 p-6 rounded-2xl border border-indigo-500/30">
-                <h2 class="text-xs font-bold text-indigo-400 mb-4 uppercase">Sala de Máquinas</h2>
-                <button onclick="ejecutarEntrenamiento()" id="btn-train" class="w-full py-3 bg-transparent border border-indigo-500 hover:bg-indigo-500 text-indigo-400 hover:text-white text-[11px] font-bold rounded-lg transition-all mb-3">
-                    RE-ENTRENAR CEREBRO (FULL DATA)
+            <div class="card-gradient p-6 rounded-3xl border border-emerald-500/20">
+                <h2 class="text-xs font-bold text-emerald-400 mb-4 uppercase border-l-4 border-emerald-500 pl-3">Sincronizar Ganador</h2>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <input type="text" id="input-animal" placeholder="Animalito..." class="bg-black border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:border-emerald-500 outline-none transition-all">
+                    <select id="input-hora" class="bg-black border border-slate-700 rounded-xl px-2 py-3 text-sm text-white focus:border-emerald-500 outline-none">
+                        <option value="09:00 AM">09:00 AM</option>
+                        <option value="10:00 AM">10:00 AM</option>
+                        <option value="11:00 AM">11:00 AM</option>
+                        <option value="12:00 PM">12:00 PM</option>
+                        <option value="01:00 PM">01:00 PM</option>
+                        <option value="04:00 PM">04:00 PM</option>
+                        <option value="07:00 PM">07:00 PM</option>
+                    </select>
+                </div>
+                <button onclick="registrarResultado()" class="w-full py-3 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-600/30 rounded-xl text-xs font-black transition-all">
+                    REGISTRAR Y CALIBRAR IA
                 </button>
-                <p class="text-[9px] text-slate-500 text-center">Usa este botón solo después de importar nuevos resultados.</p>
+            </div>
+
+            <div class="bg-black/30 p-6 rounded-3xl border border-red-900/20 text-center">
+                <button onclick="ejecutarEntrenamiento()" class="text-[10px] text-red-900 hover:text-red-500 font-bold uppercase tracking-widest transition-colors">
+                    ⚙️ Re-Entrenar Base Completa (28k Regs)
+                </button>
             </div>
         </div>
 
         <div class="lg:col-span-8 space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="bg-slate-900/80 p-6 rounded-2xl border border-slate-800">
-                    <h3 class="text-xs font-bold text-slate-400 mb-4 uppercase">Frecuencia por Animal</h3>
-                    <div class="h-64"><canvas id="chartFrecuencia"></canvas></div>
+                
+                <div class="card-gradient p-6 rounded-3xl border border-slate-800 shadow-xl">
+                    <h3 class="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest text-center">Animales Más Frecuentes</h3>
+                    <div class="h-[280px]"><canvas id="chartFrecuencia"></canvas></div>
                 </div>
 
-                <div class="bg-black/90 p-5 rounded-2xl border border-slate-800 font-mono shadow-2xl">
-                    <div class="flex justify-between mb-3 border-b border-slate-800 pb-2">
-                        <span class="text-[10px] text-blue-500">system_logs.sh</span>
-                        <span id="reloj" class="text-[10px] text-slate-600">00:00:00</span>
+                <div class="bg-black/80 p-6 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
+                    <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                        <span class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">System Output</span>
+                        <span id="reloj" class="text-[10px] text-slate-600 font-bold">00:00:00</span>
                     </div>
-                    <div id="consola-logs" class="h-56 overflow-y-auto text-[11px] space-y-2 consola-scrollbar">
-                        <p class="text-slate-500">> Núcleo estable. Esperando comando de operador...</p>
+                    <div id="consola-logs" class="h-[240px] overflow-y-auto text-[11px] space-y-3 consola-scrollbar pr-2">
+                        <p class="text-slate-600 italic">> Núcleo Neural v4.5 en línea...</p>
                     </div>
                 </div>
+
+            </div>
+
+            <div class="card-gradient p-6 rounded-3xl border border-slate-800">
+                 <div class="flex justify-between items-center">
+                     <p class="text-[10px] text-slate-500 font-bold uppercase italic">Meta Diaria: <span class="text-white">5 de 11 aciertos</span></p>
+                     <p class="text-[10px] text-slate-500 font-bold uppercase italic">Motor: <span class="text-blue-400">Bayesian Probability</span></p>
+                 </div>
             </div>
         </div>
     </main>
@@ -77,54 +119,79 @@
 
         function log(msg, color = "text-slate-500") {
             const c = document.getElementById('consola-logs');
-            c.innerHTML += `<p class="${color}">> [${new Date().toLocaleTimeString()}] ${msg}</p>`;
+            c.innerHTML += `<div class="flex gap-2"><span class="text-slate-700">#</span><p class="${color}">[${new Date().toLocaleTimeString()}] ${msg}</p></div>`;
             c.scrollTop = c.scrollHeight;
         }
 
-        // 1. ESCANEAR (UNA POR HORA)
-        async function escanearProximaHora() {
-            log("Conectando con motor neural...", "text-blue-400");
-            try {
-                const res = await fetch('/api/prediccion');
-                const data = await res.json();
-                if (data.top3) {
-                    document.getElementById('radar-results').innerHTML = data.top3.map(item => `
-                        <div class="bg-slate-800/50 p-4 rounded-xl flex justify-between items-center border border-slate-700/30">
-                            <span class="font-bold text-white uppercase italic">${item.animal}</span>
-                            <span class="text-blue-400 font-black">${item.porcentaje}</span>
-                        </div>
-                    `).join('');
-                    log("Predicción de la hora establecida.", "text-green-400");
-                }
-            } catch (e) { log("Error escaneo: " + e.message, "text-red-500"); }
-        }
-
-        // 2. ENTRENAMIENTO (PROCESA LOS 28K REGISTROS)
-        async function ejecutarEntrenamiento() {
-            const btn = document.getElementById('btn-train');
-            btn.disabled = true;
-            log("INICIANDO PROCESAMIENTO DE 28,709 REGISTROS...", "text-indigo-400");
-            
-            try {
-                const res = await fetch('/entrenar/procesar');
-                const data = await res.json();
-                log("SINC EXITOSA: " + data.mensaje, "text-green-400");
-                log("Cerebro actualizado con patrones históricos.", "text-white");
-                cargarStats(); // Recarga la gráfica tras entrenar
-            } catch (e) { log("Error entrenamiento: " + e.message, "text-red-500"); }
-            finally { btn.disabled = false; }
-        }
-
-        // 3. CARGAR ESTADÍSTICAS (PARA LA GRÁFICA)
+        // 1. CARGAR ESTADÍSTICAS E INICIALIZAR DASHBOARD
         async function cargarStats() {
             try {
                 const res = await fetch('/api/stats');
                 const result = await res.json();
                 if (result.status === 'success') {
+                    document.getElementById('txt-efectividad').innerText = result.efectividad;
                     dibujarGrafica(result.data);
-                    log("Gráficas sincronizadas con Neon.", "text-slate-600");
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) { log("Error cargando estadísticas", "text-red-500"); }
+        }
+
+        // 2. ESCANEAR PREDICCIÓN
+        async function escanearProximaHora() {
+            log("Conectando con motor de 28k registros...", "text-blue-400");
+            try {
+                const res = await fetch('/api/prediccion');
+                const data = await res.json();
+                
+                if (data.top3) {
+                    document.getElementById('radar-results').innerHTML = data.top3.map(item => `
+                        <div class="bg-slate-800/40 p-4 rounded-2xl flex justify-between items-center border-l-4 ${item.tendencia === 'Caliente' ? 'border-orange-500' : 'border-blue-500'} group hover:bg-slate-800/60 transition-all">
+                            <div class="flex items-center gap-4">
+                                <div class="bg-black w-10 h-10 rounded-lg flex items-center justify-center font-black text-xl text-white border border-slate-700">${item.numero}</div>
+                                <div>
+                                    <span class="block text-[8px] font-bold ${item.tendencia === 'Caliente' ? 'text-orange-400' : 'text-blue-400'} uppercase">${item.tendencia}</span>
+                                    <span class="text-white font-black text-lg italic tracking-tighter">${item.animal}</span>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-white font-black text-xl">${item.porcentaje}</span>
+                                <p class="text-[7px] text-slate-500 uppercase font-bold">Confianza</p>
+                            </div>
+                        </div>
+                    `).join('');
+                    log("Predicción lista para el sorteo.", "text-emerald-400");
+                }
+            } catch (e) { log("Error: Ejecute entrenamiento primero", "text-red-500"); }
+        }
+
+        // 3. REGISTRAR RESULTADO REAL
+        async function registrarResultado() {
+            const animal = document.getElementById('input-animal').value;
+            const hora = document.getElementById('input-hora').value;
+            if(!animal) return log("Escriba el animalito ganador", "text-yellow-500");
+
+            const formData = new FormData();
+            formData.append('animalito', animal);
+            formData.append('hora', hora);
+
+            try {
+                const res = await fetch('/historico/agregar', { method: 'POST', body: formData });
+                const data = await res.json();
+                log(data.mensaje, "text-emerald-400");
+                document.getElementById('input-animal').value = '';
+                cargarStats();
+            } catch (e) { log("Error al guardar historial", "text-red-500"); }
+        }
+
+        // 4. ENTRENAMIENTO PESADO
+        async function ejecutarEntrenamiento() {
+            if(!confirm("¿Iniciar aprendizaje profundo sobre 28,709 registros?")) return;
+            log("Analizando patrones de 8 años de datos...", "text-blue-400");
+            try {
+                const res = await fetch('/entrenar/procesar');
+                const data = await res.json();
+                log("SINC EXITOSA: " + data.mensaje, "text-emerald-400");
+                cargarStats();
+            } catch (e) { log("Error en procesamiento", "text-red-500"); }
         }
 
         function dibujarGrafica(data) {
@@ -134,14 +201,20 @@
                 type: 'bar',
                 data: {
                     labels: Object.keys(data),
-                    datasets: [{ data: Object.values(data), backgroundColor: '#3b82f6', borderRadius: 4 }]
+                    datasets: [{
+                        data: Object.values(data),
+                        backgroundColor: '#3b82f6',
+                        borderRadius: 6,
+                        barThickness: 12
+                    }]
                 },
                 options: {
-                    responsive: true, maintainAspectRatio: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
                     scales: {
                         y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b', font: { size: 9 } } },
-                        x: { ticks: { color: '#64748b', font: { size: 9 } } }
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 8 } } }
                     }
                 }
             });
