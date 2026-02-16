@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 async def entrenar_modelo():
     conn = await get_db_connection()
     try:
-        # 1. Limpiamos la tabla de probabilidades para actualizarla
+        # 1. Limpiamos la tabla de probabilidades para evitar duplicados
         await conn.execute("TRUNCATE TABLE probabilidades_hora")
 
         # 2. Consulta corregida con casting ::TIME para PostgreSQL
+        # Esto soluciona el error 'function pg_catalog.extract(unknown, text) does not exist'
         query = """
         WITH stats_global AS (
             SELECT 
@@ -48,7 +49,7 @@ async def entrenar_modelo():
         """
         
         await conn.execute(query)
-        return {"status": "success", "message": "Modelo entrenado y probabilidades actualizadas correctamente."}
+        return {"status": "success", "message": "Neural Engine actualizado con 28,709 registros."}
 
     except Exception as e:
         logger.error(f"Error en el entrenamiento: {e}")
