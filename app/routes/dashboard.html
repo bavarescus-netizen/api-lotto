@@ -48,7 +48,7 @@
                 <h2 id="radar-titulo" class="text-xs font-bold text-blue-400 mb-8 uppercase tracking-widest border-l-2 border-blue-500 pl-3">Top Predicción Hora</h2>
                 <div id="radar-results" class="space-y-4">
                     <div class="text-center py-16 text-slate-600 italic text-sm border-2 border-dashed border-slate-800 rounded-xl">
-                        Esperando escaneo de patrones...
+                        Inicia el motor para ver patrones.
                     </div>
                 </div>
                 <button onclick="escanearProximaHora()" id="btn-escanear" class="w-full mt-8 py-5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-xl transition-all shadow-lg active:scale-95">
@@ -62,7 +62,7 @@
                     <span id="reloj-terminal" class="text-[10px] text-blue-500/80">00:00:00</span>
                 </div>
                 <div id="consola-logs" class="h-48 overflow-y-auto text-[11px] space-y-2 consola-scrollbar leading-relaxed">
-                    <p class="text-slate-500">> Núcleo listo. Esperando comando...</p>
+                    <p class="text-slate-500">> Núcleo listo para procesamiento...</p>
                 </div>
             </div>
         </div>
@@ -70,7 +70,7 @@
         <div class="lg:col-span-8 space-y-8">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div class="bg-slate-900/80 p-6 rounded-2xl border border-slate-800/50 backdrop-blur-sm">
-                    <h3 class="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest text-center md:text-left">Frecuencia por Animal</h3>
+                    <h3 class="text-xs font-bold text-slate-400 mb-6 uppercase tracking-widest">Frecuencia por Animal</h3>
                     <div class="h-64 relative">
                         <canvas id="chartAciertos"></canvas>
                     </div>
@@ -92,29 +92,27 @@
     <script>
         let aciertosChartInstance = null;
 
-        // Actualizar reloj
         setInterval(() => {
             document.getElementById('reloj-terminal').innerText = new Date().toLocaleTimeString();
         }, 1000);
 
-        // --- FUNCIÓN 1: ESCANEAR ---
+        // 1. ESCANEAR
         async function escanearProximaHora() {
             const btn = document.getElementById('btn-escanear');
             const consola = document.getElementById('consola-logs');
             btn.disabled = true;
-            
             consola.innerHTML += `<p class="text-blue-400 font-bold">> [${new Date().toLocaleTimeString()}] Iniciando conexión con Neural Engine...</p>`;
 
             try {
-                // LLAMADA AL ENDPOINT CORREGIDO
+                // RUTA CORREGIDA SEGÚN TU MAIN.PY
                 const res = await fetch('/api/prediccion/'); 
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                
                 const data = await res.json();
                 
                 if (data.top3) {
                     actualizarRadarUI(data.top3);
-                    consola.innerHTML += `<p class="text-green-400">> OK: ${data.analisis || 'Patrones detectados'}</p>`;
+                    consola.innerHTML += `<p class="text-green-400">> OK: Efectividad IA ${data.analisis || ''}</p>`;
+                    await cargarEstadisticas(); // Actualiza gráficas tras predecir
                 }
             } catch (e) {
                 consola.innerHTML += `<p class="text-red-500">> ERROR_SISTEMA: ${e.message}</p>`;
@@ -126,10 +124,10 @@
 
         function actualizarRadarUI(top3) {
             const radar = document.getElementById('radar-results');
-            radar.innerHTML = top3.map((item, index) => `
+            radar.innerHTML = top3.map(item => `
                 <div class="bg-slate-800/30 p-5 rounded-xl border border-slate-700/50 flex justify-between items-center group hover:bg-slate-800 transition-all">
                     <div class="flex items-center gap-5">
-                        <img src="/static/${item.imagen.toLowerCase()}" class="w-14 h-14 rounded-lg shadow-xl border border-slate-700" onerror="this.src='https://placehold.co/100x100?text=Animal'">
+                        <img src="/static/${item.imagen.toLowerCase()}" class="w-14 h-14 rounded-lg shadow-xl border border-slate-700" onerror="this.src='https://placehold.co/100x100?text=AI'">
                         <div>
                             <p class="font-black text-lg text-white group-hover:text-blue-400 transition-colors uppercase italic">${item.animal}</p>
                             <p class="text-[9px] text-slate-500 font-bold uppercase mt-0.5">ID: ${item.numero}</p>
@@ -142,12 +140,11 @@
             `).join('');
         }
 
-        // --- FUNCIÓN 2: RE-CALIBRAR ---
+        // 2. RE-CALIBRAR
         async function recalibrar() {
             const btn = document.getElementById('btn-recalibrar');
             const consola = document.getElementById('consola-logs');
             btn.disabled = true;
-            
             consola.innerHTML += `<p class="text-cyan-400">> [SINC] Analizando auditoría vs histórico...</p>`;
 
             try {
@@ -158,23 +155,30 @@
                 consola.innerHTML += `<p class="text-green-400">> SINC_EXITOSA: ${data.mensaje}</p>`;
                 await cargarEstadisticas();
             } catch (e) {
-                consola.innerHTML += `<p class="text-red-500">> FATAL_ERR: ${e.message}</p>`;
+                consola.innerHTML += `<p class="text-red-500">> FATAL_ERR: No se pudo calibrar.</p>`;
             } finally {
                 btn.disabled = false;
                 consola.scrollTop = consola.scrollHeight;
             }
         }
 
-        // --- FUNCIÓN 3: CARGAR STATS ---
+        // 3. CARGAR ESTADÍSTICAS (Esto llena las gráficas vacías)
         async function cargarEstadisticas() {
             try {
-                const res = await fetch('/api/stats/');
+                const res = await fetch('/api/stats/'); // RUTA CORREGIDA
                 if (!res.ok) return;
                 const result = await res.json();
                 
                 if (result.status === 'success') {
+                    // Actualizar Porcentaje Global
+                    if(result.efectividad_actualizada) {
+                        document.getElementById('global-efectividad').innerText = result.efectividad_actualizada + '%';
+                    }
+
+                    // Dibujar Gráfica de Barras
                     renderizarChart(result.data);
                     
+                    // Llenar mini-logs
                     const logCont = document.getElementById('mini-logs-auditoria');
                     if(result.logs_recientes && result.logs_recientes.length > 0) {
                         logCont.innerHTML = result.logs_recientes.map(l => `
@@ -187,7 +191,7 @@
                         `).join('');
                     }
                 }
-            } catch (e) { console.warn("Esperando datos..."); }
+            } catch (e) { console.warn("Esperando datos de Neon..."); }
         }
 
         function renderizarChart(data) {
