@@ -1,22 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-import sys
-import os
-
-# Forzar detección de la raíz
-sys.path.append(os.getcwd())
-
+from sqlalchemy import text
 from db import get_db
 from app.services.motor_v4 import generar_prediccion
 
-# El prefijo ya es /prediccion, que combinado con /api en main.py da /api/prediccion
-router = APIRouter(prefix="/prediccion", tags=["Predicciones"])
+router = APIRouter(tags=["Predicción"])
 
-@router.get("/") # <--- CAMBIO AQUÍ: Quitamos "/generar" para que coincida con el fetch('/api/prediccion')
-async def api_generar(db: AsyncSession = Depends(get_db)):
+@router.get("/prediccion")
+async def api_obtener_prediccion(db: AsyncSession = Depends(get_db)):
+    """
+    Consulta la predicción basada en el análisis de 28,709 registros.
+    Busca cumplir la meta de 5 aciertos diarios.
+    """
     try:
-        # El motor V4 ya devuelve el JSON con top3, animal, imagen y porcentaje
-        return await generar_prediccion(db)
+        resultado = await generar_prediccion(db)
+        
+        if "error" in resultado:
+            raise HTTPException(status_code=404, detail=resultado["error"])
+            
+        return resultado
     except Exception as e:
-        print(f"❌ Error en Motor V4: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error en motor neural: {str(e)}")
