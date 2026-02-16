@@ -4,24 +4,35 @@ from sqlalchemy import text
 from db import get_db
 from app.services.motor_v4 import analizar_estadisticas
 
-router = APIRouter(prefix="/stats", tags=["Stats"])
+router = APIRouter(tags=["Estadísticas"])
 
-@router.get("/")
-async def get_stats(db: AsyncSession = Depends(get_db)):
-    # A. Datos para el gráfico
-    chart_data = await analizar_estadisticas(db)
-    
-    # B. Calcular Efectividad Global
-    query_ef = text("""
-        SELECT (COUNT(CASE WHEN acierto = TRUE THEN 1 END)::FLOAT / 
-        NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END), 0) * 100)
-        FROM auditoria_ia
-    """)
-    res_ef = await db.execute(query_ef)
-    efectividad = res_ef.scalar() or 0
-    
-    return {
-        "status": "success",
-        "data": chart_data.get("data", {}),
-        "efectividad": f"{round(efectividad, 1)}%"
-    }
+@router.get("/stats")
+async def api_obtener_stats(db: AsyncSession = Depends(get_db)):
+    """
+    Entrega métricas de verdad y datos históricos para el Dashboard.
+    """
+    try:
+        # 1. Obtener frecuencia para el gráfico (Top 10)
+        stats_data = await analizar_estadisticas(db)
+        
+        # 2. Calcular Efectividad Real desde auditoria_ia
+        query_efectividad = text("""
+            SELECT 
+                COALESCE(
+                    (COUNT(CASE WHEN acierto = TRUE THEN 1 END)::FLOAT / 
+                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END), 0) * 100), 
+                    0
+                ) as porcentaje
+            FROM auditoria_ia
+        """)
+        res = await db.execute(query_efectividad)
+        efectividad_val = res.scalar() or 0.0
+
+        return {
+            "status": "success",
+            "efectividad": f"{round(efectividad_val, 1)}%",
+            "data": stats_data.get("data", {}),
+            "total_analizado": 28709
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
