@@ -1,45 +1,57 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from db import get_db
-from app.services.motor_v4 import entrenar_modelo_v4
+from fastapi import APIRouter, HTTPException
+from app.database import get_db_connection
+import logging
 
-router = APIRouter(prefix="/entrenar", tags=["Entrenamiento"])
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/procesar")
-async def api_entrenar(db: AsyncSession = Depends(get_db)):
+async def entrenar_modelo():
+    conn = await get_db_connection()
     try:
-        # 1. Borrar memoria vieja
-        await db.execute(text("TRUNCATE TABLE probabilidades_hora"))
+        # 1. Limpiamos la tabla de probabilidades para actualizarla
+        await conn.execute("TRUNCATE TABLE probabilidades_hora")
 
-        # 2. APRENDIZAJE: Analizar 28,709 registros (60% peso a lo reciente)
-        query_aprendizaje = text("""
-            INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia)
-            WITH stats_global AS (
-                SELECT EXTRACT(HOUR FROM hora)::INT as h, animalito, COUNT(*) as c
-                FROM historico GROUP BY 1, 2
-            ),
-            stats_reciente AS (
-                SELECT EXTRACT(HOUR FROM hora)::INT as h, animalito, COUNT(*) as c
-                FROM historico WHERE fecha >= CURRENT_DATE - INTERVAL '15 days' GROUP BY 1, 2
-            )
-            SELECT g.h, g.animalito, g.c,
-                   ((g.c * 0.4) + (COALESCE(r.c, 0) * 0.6)) as peso,
-                   CASE WHEN COALESCE(r.c, 0) > 0 THEN 'Caliente' ELSE 'Frío' END
-            FROM stats_global g
-            LEFT JOIN stats_reciente r ON g.h = r.h AND g.animalito = r.animalito
-            WHERE g.h BETWEEN 9 AND 19
-        """)
-        await db.execute(query_aprendizaje)
+        # 2. Consulta corregida con casting ::TIME para PostgreSQL
+        query = """
+        WITH stats_global AS (
+            SELECT 
+                EXTRACT(HOUR FROM hora::TIME)::INT as h, 
+                animalito, 
+                COUNT(*) as c
+            FROM historico 
+            GROUP BY 1, 2
+        ),
+        stats_reciente AS (
+            SELECT 
+                EXTRACT(HOUR FROM hora::TIME)::INT as h, 
+                animalito, 
+                COUNT(*) as c
+            FROM historico 
+            WHERE fecha >= CURRENT_DATE - INTERVAL '15 days' 
+            GROUP BY 1, 2
+        )
+        INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia)
+        SELECT 
+            g.h, 
+            g.animalito, 
+            g.c,
+            -- Calculamos un peso: 40% historia total, 60% racha reciente
+            ROUND(((g.c * 0.4) + (COALESCE(r.c, 0) * 0.6))::numeric, 2) as peso,
+            CASE 
+                WHEN COALESCE(r.c, 0) > 0 THEN 'Caliente' 
+                ELSE 'Frio' 
+            END
+        FROM stats_global g
+        LEFT JOIN stats_reciente r ON g.h = r.h AND g.animalito = r.animalito
+        WHERE g.h BETWEEN 9 AND 19;
+        """
         
-        # 3. Calibrar aciertos
-        aciertos_sinc = await entrenar_modelo_v4(db)
-        
-        await db.commit()
-        return {
-            "status": "success",
-            "mensaje": f"Cerebro entrenado con 28,709 registros. {aciertos_sinc} aciertos calibrados."
-        }
+        await conn.execute(query)
+        return {"status": "success", "message": "Modelo entrenado y probabilidades actualizadas correctamente."}
+
     except Exception as e:
-        await db.rollback()
+        logger.error(f"Error en el entrenamiento: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await conn.close()
