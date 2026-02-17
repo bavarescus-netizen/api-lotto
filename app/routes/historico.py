@@ -7,6 +7,7 @@ import pytz
 
 router = APIRouter(prefix="/historico", tags=["Historial"])
 
+
 @router.post("/agregar")
 async def agregar_resultado(
     animalito: str = Form(...),
