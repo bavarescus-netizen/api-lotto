@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from db import get_db
+# Importamos respetando tu estructura: carpeta app, archivo db, funcion get_db
+from app.db import get_db 
 import logging
 
 router = APIRouter()
@@ -7,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 @router.get("/procesar")
 async def entrenar_modelo():
-    conn = await get_db_connection()
+    # Usamos tu función de conexión original
+    conn = await get_db()
     try:
-        # 1. Limpiamos la tabla de probabilidades para evitar duplicados
+        # Limpieza de tabla antes de actualizar
         await conn.execute("TRUNCATE TABLE probabilidades_hora")
 
-        # 2. Consulta corregida con casting ::TIME para PostgreSQL
-        # Esto soluciona el error 'function pg_catalog.extract(unknown, text) does not exist'
+        # Consulta SQL con el fix de casting (::TIME) para evitar el error 500 en Render
         query = """
         WITH stats_global AS (
             SELECT 
@@ -37,7 +38,6 @@ async def entrenar_modelo():
             g.h, 
             g.animalito, 
             g.c,
-            -- Calculamos un peso: 40% historia total, 60% racha reciente
             ROUND(((g.c * 0.4) + (COALESCE(r.c, 0) * 0.6))::numeric, 2) as peso,
             CASE 
                 WHEN COALESCE(r.c, 0) > 0 THEN 'Caliente' 
@@ -49,10 +49,11 @@ async def entrenar_modelo():
         """
         
         await conn.execute(query)
-        return {"status": "success", "message": "Neural Engine actualizado con 28,709 registros."}
+        return {"status": "success", "message": "Motor V4.5 PRO Sincronizado correctamente."}
 
     except Exception as e:
-        logger.error(f"Error en el entrenamiento: {e}")
+        logger.error(f"Error en el entrenamiento del motor: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
+        # Cerramos la conexión según tu estándar
         await conn.close()
