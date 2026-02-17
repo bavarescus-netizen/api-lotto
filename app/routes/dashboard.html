@@ -3,226 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neural Engine v4.5 PRO | Operador Maestro</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <title>Lotto AI V4.5 PRO - Neural Engine</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: 'JetBrains Mono', monospace; background-color: #020617; color: #e2e8f0; }
-        .neon-border { box-shadow: 0 0 20px rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.2); }
-        .pixel-grid { background-image: radial-gradient(#1e293b 1px, transparent 1px); background-size: 30px 30px; }
-        .consola-scrollbar::-webkit-scrollbar { width: 4px; }
-        .consola-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-        .card-gradient { background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(2, 6, 23, 0.9) 100%); }
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Segoe UI', Roboto, sans-serif; }
+        .card { background-color: #1e293b; border: 1px solid #334155; transition: transform 0.3s ease; }
+        .card:hover { transform: translateY(-5px); border-color: #3b82f6; }
+        .btn-engine { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border: none; font-weight: bold; padding: 12px; }
+        .btn-prediccion { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); border: none; font-weight: bold; padding: 12px; }
+        .header-gradient { background: linear-gradient(90deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .status-dot { height: 10px; width: 10px; background-color: #22c55e; border-radius: 50%; display: inline-block; margin-right: 5px; box-shadow: 0 0 8px #22c55e; }
     </style>
 </head>
-<body class="min-h-screen pixel-grid p-4 lg:p-8">
+<body>
 
-    <header class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-10 gap-6">
-        <div class="text-center md:text-left">
-            <h1 class="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500 italic tracking-tighter">
-                NEURAL ENGINE <span class="text-white not-italic">V4.5</span>
-            </h1>
-            <div class="flex items-center gap-2 mt-1 justify-center md:justify-start">
-                <span class="relative flex h-2 w-2">
-                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-                <p class="text-[10px] text-slate-500 tracking-[0.4em] uppercase font-bold">Terminal de Control Único</p>
-            </div>
-        </div>
-        
-        <div class="flex gap-4">
-            <div class="bg-slate-900/80 px-6 py-3 rounded-2xl border border-blue-500/20 text-center min-w-[140px]">
-                <span class="block text-[9px] text-blue-400 font-bold uppercase mb-1">Efectividad Global</span>
-                <span id="txt-efectividad" class="text-2xl font-black text-white">--%</span>
-            </div>
-            <div class="bg-slate-900/80 px-6 py-3 rounded-2xl border border-slate-700 text-center min-w-[140px]">
-                <span class="block text-[9px] text-slate-500 font-bold uppercase mb-1">Data Sincronizada</span>
-                <span class="text-xl font-black text-white italic">28,709</span>
-            </div>
+<div class="container py-5">
+    <header class="text-center mb-5">
+        <h1 class="display-4 fw-bold header-gradient">Lotto AI V4.5 PRO</h1>
+        <div class="d-flex justify-content-center align-items-center gap-3">
+            <p class="lead mb-0">Neural Engine v4.5 | 28,709 Registros</p>
+            <span class="badge bg-dark border border-success text-success mt-1">
+                <span class="status-dot"></span> Online
+            </span>
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        <div class="lg:col-span-4 space-y-6">
-            
-            <div class="card-gradient p-6 rounded-3xl neon-border">
-                <h2 class="text-xs font-bold text-blue-400 mb-6 uppercase border-l-4 border-blue-500 pl-3">Escanear Patrones</h2>
-                <div id="radar-results" class="space-y-3 mb-6 min-h-[100px]">
-                    <p class="text-center py-6 text-slate-600 text-xs italic">Esperando instrucción...</p>
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="card h-100 shadow-lg">
+                <div class="card-body">
+                    <h5 class="card-title mb-3"><i class="fas fa-microchip text-primary me-2"></i>Motor de Entrenamiento</h5>
+                    <p class="card-text text-secondary small">
+                        <strong>Función:</strong> Sincroniza la base de datos y recalcula pesos. <br><br>
+                        Aplica una lógica de 40% histórico y 60% racha reciente (últimos 15 días) para identificar qué números están "calientes".
+                    </p>
+                    <a href="/api/entrenar/procesar" target="_blank" class="btn btn-engine w-100 mt-auto">
+                        <i class="fas fa-sync-alt me-2"></i>Ejecutar Procesamiento
+                    </a>
                 </div>
-                <button onclick="escanearProximaHora()" id="btn-escanear" 
-                    class="w-full py-4 bg-gradient-to-br from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
-                    <span>EJECUTAR ESCANEO HORA</span>
-                </button>
-            </div>
-
-            <div class="card-gradient p-6 rounded-3xl border border-emerald-500/20">
-                <h2 class="text-xs font-bold text-emerald-400 mb-4 uppercase border-l-4 border-emerald-500 pl-3">Sincronizar Ganador</h2>
-                <div class="grid grid-cols-2 gap-3 mb-3">
-                    <input type="text" id="input-animal" placeholder="Animalito..." class="bg-black border border-slate-700 rounded-xl px-4 py-3 text-sm text-white focus:border-emerald-500 outline-none transition-all">
-                    <select id="input-hora" class="bg-black border border-slate-700 rounded-xl px-2 py-3 text-sm text-white focus:border-emerald-500 outline-none">
-                        <option value="09:00 AM">09:00 AM</option>
-                        <option value="10:00 AM">10:00 AM</option>
-                        <option value="11:00 AM">11:00 AM</option>
-                        <option value="12:00 PM">12:00 PM</option>
-                        <option value="01:00 PM">01:00 PM</option>
-                        <option value="04:00 PM">04:00 PM</option>
-                        <option value="07:00 PM">07:00 PM</option>
-                    </select>
-                </div>
-                <button onclick="registrarResultado()" class="w-full py-3 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-600/30 rounded-xl text-xs font-black transition-all">
-                    REGISTRAR Y CALIBRAR IA
-                </button>
-            </div>
-
-            <div class="bg-black/30 p-6 rounded-3xl border border-red-900/20 text-center">
-                <button onclick="ejecutarEntrenamiento()" class="text-[10px] text-red-900 hover:text-red-500 font-bold uppercase tracking-widest transition-colors">
-                    ⚙️ Re-Entrenar Base Completa (28k Regs)
-                </button>
             </div>
         </div>
 
-        <div class="lg:col-span-8 space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                <div class="card-gradient p-6 rounded-3xl border border-slate-800 shadow-xl">
-                    <h3 class="text-xs font-bold text-slate-500 mb-6 uppercase tracking-widest text-center">Animales Más Frecuentes</h3>
-                    <div class="h-[280px]"><canvas id="chartFrecuencia"></canvas></div>
+        <div class="col-md-4">
+            <div class="card h-100 shadow-lg border-primary">
+                <div class="card-body">
+                    <h5 class="card-title mb-3 text-primary"><i class="fas fa-brain me-2"></i>Predicción IA</h5>
+                    <p class="card-text text-secondary small">
+                        <strong>Función:</strong> Genera la sugerencia ganadora actual.<br><br>
+                        Analiza la hora actual del servidor y consulta la tabla de probabilidades calculada para entregarte el animalito con mayor tasa de éxito.
+                    </p>
+                    <a href="/api/prediccion" target="_blank" class="btn btn-prediccion w-100 mt-auto shadow">
+                        <i class="fas fa-magic me-2"></i>Generar Sugerencia
+                    </a>
                 </div>
-
-                <div class="bg-black/80 p-6 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
-                    <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
-                        <span class="text-[10px] font-bold text-indigo-500 uppercase tracking-tighter">System Output</span>
-                        <span id="reloj" class="text-[10px] text-slate-600 font-bold">00:00:00</span>
-                    </div>
-                    <div id="consola-logs" class="h-[240px] overflow-y-auto text-[11px] space-y-3 consola-scrollbar pr-2">
-                        <p class="text-slate-600 italic">> Núcleo Neural v4.5 en línea...</p>
-                    </div>
-                </div>
-
-            </div>
-
-            <div class="card-gradient p-6 rounded-3xl border border-slate-800">
-                 <div class="flex justify-between items-center">
-                     <p class="text-[10px] text-slate-500 font-bold uppercase italic">Meta Diaria: <span class="text-white">5 de 11 aciertos</span></p>
-                     <p class="text-[10px] text-slate-500 font-bold uppercase italic">Motor: <span class="text-blue-400">Bayesian Probability</span></p>
-                 </div>
             </div>
         </div>
-    </main>
 
-    <script>
-        let myChart = null;
+        <div class="col-md-4">
+            <div class="card h-100 shadow-lg">
+                <div class="card-body">
+                    <h5 class="card-title mb-3 text-info"><i class="fas fa-chart-bar me-2"></i>Estadísticas Pro</h5>
+                    <p class="card-text text-secondary small">
+                        <strong>Función:</strong> Auditoría de datos en tiempo real.<br><br>
+                        Muestra el ranking de frecuencia por franja horaria y permite auditar si el motor está operando con datos actualizados de Neon.
+                    </p>
+                    <a href="/api/stats" target="_blank" class="btn btn-outline-info w-100 mt-auto">
+                        <i class="fas fa-eye me-2"></i>Ver Gráficas y Datos
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        function log(msg, color = "text-slate-500") {
-            const c = document.getElementById('consola-logs');
-            c.innerHTML += `<div class="flex gap-2"><span class="text-slate-700">#</span><p class="${color}">[${new Date().toLocaleTimeString()}] ${msg}</p></div>`;
-            c.scrollTop = c.scrollHeight;
-        }
+    <div class="mt-5">
+        <div class="card bg-dark border-warning overflow-hidden">
+            <div class="row g-0">
+                <div class="col-md-8 p-4">
+                    <h6 class="text-warning fw-bold mb-2"><i class="fas fa-tools me-2"></i>Consola de Mantenimiento y API Docs</h6>
+                    <p class="text-secondary small mb-0">
+                        Utiliza esta sección para <strong>agregar nuevos resultados</strong> (POST historico/agregar) o realizar calibraciones manuales en los servicios de los motores V2 y V4.
+                    </p>
+                </div>
+                <div class="col-md-4 d-flex align-items-center justify-content-center p-3" style="background: rgba(255,193,7,0.05);">
+                    <a href="/docs" target="_blank" class="btn btn-outline-warning">
+                        Abrir Documentación Swagger <i class="fas fa-external-link-alt ms-2"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        // 1. CARGAR ESTADÍSTICAS E INICIALIZAR DASHBOARD
-        async function cargarStats() {
-            try {
-                const res = await fetch('/api/stats');
-                const result = await res.json();
-                if (result.status === 'success') {
-                    document.getElementById('txt-efectividad').innerText = result.efectividad;
-                    dibujarGrafica(result.data);
-                }
-            } catch (e) { log("Error cargando estadísticas", "text-red-500"); }
-        }
+    <footer class="text-center mt-5">
+        <p class="text-muted small">Estructura Raíz: app/core | app/routes | app/services | app/db.py</p>
+    </footer>
+</div>
 
-        // 2. ESCANEAR PREDICCIÓN
-        async function escanearProximaHora() {
-            log("Conectando con motor de 28k registros...", "text-blue-400");
-            try {
-                const res = await fetch('/api/prediccion');
-                const data = await res.json();
-                
-                if (data.top3) {
-                    document.getElementById('radar-results').innerHTML = data.top3.map(item => `
-                        <div class="bg-slate-800/40 p-4 rounded-2xl flex justify-between items-center border-l-4 ${item.tendencia === 'Caliente' ? 'border-orange-500' : 'border-blue-500'} group hover:bg-slate-800/60 transition-all">
-                            <div class="flex items-center gap-4">
-                                <div class="bg-black w-10 h-10 rounded-lg flex items-center justify-center font-black text-xl text-white border border-slate-700">${item.numero}</div>
-                                <div>
-                                    <span class="block text-[8px] font-bold ${item.tendencia === 'Caliente' ? 'text-orange-400' : 'text-blue-400'} uppercase">${item.tendencia}</span>
-                                    <span class="text-white font-black text-lg italic tracking-tighter">${item.animal}</span>
-                                </div>
-                            </div>
-                            <div class="text-right">
-                                <span class="text-white font-black text-xl">${item.porcentaje}</span>
-                                <p class="text-[7px] text-slate-500 uppercase font-bold">Confianza</p>
-                            </div>
-                        </div>
-                    `).join('');
-                    log("Predicción lista para el sorteo.", "text-emerald-400");
-                }
-            } catch (e) { log("Error: Ejecute entrenamiento primero", "text-red-500"); }
-        }
-
-        // 3. REGISTRAR RESULTADO REAL
-        async function registrarResultado() {
-            const animal = document.getElementById('input-animal').value;
-            const hora = document.getElementById('input-hora').value;
-            if(!animal) return log("Escriba el animalito ganador", "text-yellow-500");
-
-            const formData = new FormData();
-            formData.append('animalito', animal);
-            formData.append('hora', hora);
-
-            try {
-                const res = await fetch('/historico/agregar', { method: 'POST', body: formData });
-                const data = await res.json();
-                log(data.mensaje, "text-emerald-400");
-                document.getElementById('input-animal').value = '';
-                cargarStats();
-            } catch (e) { log("Error al guardar historial", "text-red-500"); }
-        }
-
-        // 4. ENTRENAMIENTO PESADO
-        async function ejecutarEntrenamiento() {
-            if(!confirm("¿Iniciar aprendizaje profundo sobre 28,709 registros?")) return;
-            log("Analizando patrones de 8 años de datos...", "text-blue-400");
-            try {
-                const res = await fetch('/entrenar/procesar');
-                const data = await res.json();
-                log("SINC EXITOSA: " + data.mensaje, "text-emerald-400");
-                cargarStats();
-            } catch (e) { log("Error en procesamiento", "text-red-500"); }
-        }
-
-        function dibujarGrafica(data) {
-            const ctx = document.getElementById('chartFrecuencia').getContext('2d');
-            if (myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: Object.keys(data),
-                    datasets: [{
-                        data: Object.values(data),
-                        backgroundColor: '#3b82f6',
-                        borderRadius: 6,
-                        barThickness: 12
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b', font: { size: 9 } } },
-                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 8 } } }
-                    }
-                }
-            });
-        }
-
-        setInterval(() => { document.getElementById('reloj').innerText = new Date().toLocaleTimeString(); }, 1000);
-        window.onload = cargarStats;
-        
-    </script>
 </body>
 </html>
