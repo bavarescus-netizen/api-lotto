@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-# Importamos respetando tu estructura: carpeta app, archivo db, funcion get_db
+# Importación exacta según tu raíz: app/db.py -> get_db
 from app.db import get_db 
 import logging
 
@@ -8,13 +8,14 @@ logger = logging.getLogger(__name__)
 
 @router.get("/procesar")
 async def entrenar_modelo():
-    # Usamos tu función de conexión original
+    # Establecemos conexión con tu lógica de Neon
     conn = await get_db()
     try:
-        # Limpieza de tabla antes de actualizar
+        # 1. Limpiamos la tabla de resultados calculados
         await conn.execute("TRUNCATE TABLE probabilidades_hora")
 
-        # Consulta SQL con el fix de casting (::TIME) para evitar el error 500 en Render
+        # 2. Inyección de lógica de predicción corregida
+        # Se añade ::TIME y ::DATE para que PostgreSQL procese los strings sin error 500
         query = """
         WITH stats_global AS (
             SELECT 
@@ -30,7 +31,7 @@ async def entrenar_modelo():
                 animalito, 
                 COUNT(*) as c
             FROM historico 
-            WHERE fecha >= CURRENT_DATE - INTERVAL '15 days' 
+            WHERE fecha::DATE >= CURRENT_DATE - INTERVAL '15 days' 
             GROUP BY 1, 2
         )
         INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia)
@@ -49,11 +50,11 @@ async def entrenar_modelo():
         """
         
         await conn.execute(query)
-        return {"status": "success", "message": "Motor V4.5 PRO Sincronizado correctamente."}
+        return {"status": "success", "message": "Motor V4.5 PRO sincronizado con éxito."}
 
     except Exception as e:
-        logger.error(f"Error en el entrenamiento del motor: {e}")
+        logger.error(f"Error crítico en el motor: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cerramos la conexión según tu estándar
+        # Cerramos conexión para no saturar Neon
         await conn.close()
