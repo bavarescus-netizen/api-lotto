@@ -17,7 +17,27 @@
     </style>
 </head>
 <body>
+   <div class="row g-4 mt-2">
+    <div class="col-md-6">
+        <div class="card bg-dark border-primary">
+            <div class="card-body text-center">
+                <h5 class="text-primary">⚙️ Sincronizar Motor</h5>
+                <p class="small text-secondary">Recalcula pesos de los 28,709 registros.</p>
+                <a href="/api/procesar" target="_blank" class="btn btn-outline-primary w-100">EJECUTAR ENTRENAMIENTO</a>
+            </div>
+        </div>
+    </div>
     
+    <div class="col-md-6">
+        <div class="card bg-dark border-success">
+            <div class="card-body text-center">
+                <h5 class="text-success">🔮 Ver Predicción</h5>
+                <p class="small text-secondary">Consulta el animalito más probable ahora.</p>
+                <a href="/api/prediccion" target="_blank" class="btn btn-success w-100">OBTENER SUGERENCIA IA</a>
+            </div>
+        </div>
+    </div>
+</div> 
 <div class="container py-5">
     <header class="text-center mb-5">
         <h1 class="display-4 fw-bold header-gradient">Lotto AI V4.5 PRO</h1>
