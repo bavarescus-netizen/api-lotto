@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 # Importación exacta según tu raíz: app/db.py -> get_db
-from app.db import get_db 
+from db import get_db
 import logging
 
 router = APIRouter()
