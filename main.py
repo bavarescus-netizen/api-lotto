@@ -21,6 +21,7 @@ template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
 # 3. Importación y Registro de Routers
+# Asegúrate de que estos archivos existan en app/routes/
 from app.routes import prediccion, entrenar, stats, historico
 
 app.include_router(prediccion.router, prefix="/api", tags=["IA"])
@@ -37,7 +38,7 @@ async def home(request: Request):
         "registros": "28,709"
     })
 
-# 5. Ejecución (Esto debe ser la última línea del archivo)
+# 5. Ejecución
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
