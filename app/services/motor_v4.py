@@ -22,7 +22,7 @@ async def generar_prediccion(db: AsyncSession):
         hora_int = ahora.hour
         hora_str = ahora.strftime("%I:00 %p")
 
-        # SQL de alta precisión: Busca patrones en los 28,000 registros
+        # 1. SQL DE ALTA PRECISIÓN: Consulta el cerebro entrenado
         query = text("""
             SELECT animalito, probabilidad, 
             CASE 
@@ -38,7 +38,7 @@ async def generar_prediccion(db: AsyncSession):
         datos_ia = res.fetchall()
 
         if not datos_ia:
-            return {"error": "Cerebro no entrenado. Ejecute Re-Calibrar en el Dashboard."}
+            return {"error": "Cerebro no entrenado. Ejecute Entrenamiento."}
 
         top3 = []
         for r in datos_ia:
@@ -47,32 +47,62 @@ async def generar_prediccion(db: AsyncSession):
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png",
+                "imagen": f"{name}.png", # Importante: coincide con tus archivos .png
                 "porcentaje": f"{round(r[1], 1)}%",
-                "tendencia": r[2] # Retorna el color del SEMÁFORO
+                "tendencia": r[2]
             })
 
-        # Registro automático en Auditoría para medir efectividad real
-        await db.execute(text("""
-            INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
-            VALUES (:f, :h, :a, :c, :p)
-        """), {
-            "f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(),
-            "c": float(top3[0]["porcentaje"].replace('%','')), "p": "Neural V4.5 PRO"
-        })
-        await db.commit()
+        # 2. AUDITORÍA: Guardamos la predicción solo si no existe una para esta hora hoy
+        # Así evitamos llenar la base de datos de basura al refrescar la página
+        check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
+        check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
+        
+        if not check_res.fetchone():
+            await db.execute(text("""
+                INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
+                VALUES (:f, :h, :a, :c, :p)
+            """), {
+                "f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(),
+                "c": float(top3[0]["porcentaje"].replace('%','')), "p": "Neural V4.5 PRO"
+            })
+            await db.commit()
 
-        # Lógica de decisión según tu visión de riesgo
         decision_final = "META 5/11 ACTIVA" if top3[0]["tendencia"] != "ROJO" else "⚠️ RIESGO ALTO - NO OPERAR"
 
         return {
             "decision": decision_final, 
             "top3": top3, 
-            "analisis": f"Último entrenamiento basado en 28,709 registros | Sincronizado: {hora_str}"
+            "analisis": f"Basado en 28,709 registros | Sincronizado: {hora_str}"
         }
     except Exception as e:
         await db.rollback()
         return {"error": str(e)}
+
+# --- FUNCIÓN NUEVA: ESTA ES LA QUE MUESTRA LOS RESULTADOS EN EL DASHBOARD ---
+async def obtener_bitacora_avance(db: AsyncSession):
+    """Extrae los últimos 5 sorteos comparando predicción vs realidad"""
+    try:
+        query = text("""
+            SELECT hora, animal_predicho, resultado_real, acierto 
+            FROM auditoria_ia 
+            WHERE fecha = CURRENT_DATE
+            ORDER BY hora DESC 
+            LIMIT 5
+        """)
+        res = await db.execute(query)
+        # Convertimos a lista de diccionarios para que Jinja2 lo lea fácil
+        bitacora = []
+        for r in res.fetchall():
+            bitacora.append({
+                "hora": r[0],
+                "animal_predicho": r[1],
+                "resultado_real": r[2],
+                "acierto": r[3]
+            })
+        return bitacora
+    except Exception as e:
+        print(f"Error en bitácora: {e}")
+        return []
 
 async def analizar_estadisticas(db: AsyncSession):
     query = text("SELECT animalito, COUNT(*) as c FROM historico GROUP BY 1 ORDER BY c DESC LIMIT 10")
