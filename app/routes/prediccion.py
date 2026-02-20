@@ -21,3 +21,5 @@ async def api_obtener_prediccion(db: AsyncSession = Depends(get_db)):
         return resultado
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error en motor neural: {str(e)}")
+
+
