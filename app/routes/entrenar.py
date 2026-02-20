@@ -61,3 +61,5 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         await db.rollback()
         return {"status": "error", "detail": f"Error en entrenamiento: {str(e)}"}
+
+
