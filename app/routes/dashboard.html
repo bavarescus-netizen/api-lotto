@@ -36,10 +36,16 @@
             width: 120px;
             height: 120px;
             object-fit: contain;
-            filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.4));
+            /* Animación sutil de respiración para el icono */
+            animation: pulse-blue 2s infinite ease-in-out;
         }
 
-        /* Semáforo Visual Corregido */
+        @keyframes pulse-blue {
+            0% { filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.4)); }
+            50% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.7)); }
+            100% { filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.4)); }
+        }
+
         .semaforo-dot {
             height: 14px;
             width: 14px;
@@ -72,6 +78,7 @@
             border-radius: 20px;
             font-size: 0.7rem;
             font-weight: bold;
+            text-transform: uppercase;
         }
 
         .bottom-nav {
@@ -86,8 +93,9 @@
             z-index: 1000;
         }
 
-        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; }
+        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; transition: 0.3s; }
         .nav-item.active { color: var(--accent); }
+        .nav-item:hover { color: #f8fafc; }
         
         .meta-badge {
             background: rgba(34, 197, 94, 0.1);
@@ -114,10 +122,11 @@
     <div class="main-card text-center">
         <p class="text-secondary small fw-bold text-uppercase mb-3">Siguiente Sorteo</p>
         
-        {% if top3 %}
+        {% if top3 and top3|length > 0 %}
         <div class="mb-2">
-            <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}">
-            <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].animal }}</h2>
+            <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
+                 onerror="this.src='https://via.placeholder.com/120?text=??'">
+            <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
             <div class="d-flex justify-content-center align-items-center">
                 <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
                 <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
@@ -125,40 +134,47 @@
         </div>
 
         <div class="mt-4">
-            <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% else %}bg-dark border-secondary text-secondary{% endif %} border">
+            <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
                 <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
             </div>
         </div>
         {% else %}
         <div class="py-5">
             <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
-            <p class="text-secondary">Sin datos actuales. Pulsa entrenar para procesar los 28,709 registros.</p>
+            <p class="text-secondary">Cerebro no calibrado.</p>
+            <a href="/api/procesar" class="btn btn-outline-primary btn-sm mt-2">Iniciar Entrenamiento</a>
         </div>
         {% endif %}
     </div>
 
-    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Avance de la Inteligencia</h6>
+    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Avance de la Inteligencia (Hoy)</h6>
     <div class="bitacora-container mb-4">
         {% if bitacora %}
             {% for item in bitacora %}
             <div class="bitacora-item">
                 <div>
                     <div class="fw-bold">{{ item.hora }}</div>
-                    <div class="small text-secondary">Predicho: {{ item.animal_predicho | upper }}</div>
+                    <div class="small text-secondary">Predicho: <span class="text-white">{{ item.animal_predicho | upper }}</span></div>
                 </div>
                 <div class="text-end">
-                    {% if item.acierto %}
-                    <span class="status-pill bg-success text-white">ACIERTO</span>
+                    {% if item.acierto == True %}
+                        <span class="status-pill bg-success text-white">ACIERTO</span>
+                    {% elif item.acierto == False and item.resultado_real %}
+                        <span class="status-pill bg-danger text-white">FALLO</span>
                     {% else %}
-                    <span class="status-pill bg-danger text-white">FALLO</span>
+                        <span class="status-pill bg-secondary text-white">PENDIENTE</span>
                     {% endif %}
-                    <div class="small mt-1 text-secondary">Real: {{ item.resultado_real | upper if item.resultado_real else '...' }}</div>
+                    <div class="small mt-1 text-secondary">Real: 
+                        <span class="{% if item.acierto %}text-success{% else %}text-info{% endif %} fw-bold">
+                            {{ item.resultado_real | upper if item.resultado_real else '...' }}
+                        </span>
+                    </div>
                 </div>
             </div>
             {% endfor %}
         {% else %}
             <div class="p-4 text-center text-secondary small">
-                No hay operaciones registradas en la auditoría hoy.
+                No hay operaciones registradas hoy.
             </div>
         {% endif %}
     </div>
@@ -170,22 +186,24 @@
         <span>Inicio</span>
     </a>
     <a href="/api/prediccion" class="nav-item text-center">
-        <i class="fas fa-bolt d-block fa-lg mb-1"></i>
-        <span>Predecir</span>
+        <i class="fas fa-chart-line d-block fa-lg mb-1"></i>
+        <span>Predicción</span>
     </a>
     <a href="/api/procesar" class="nav-item text-center">
-        <i class="fas fa-sync d-block fa-lg mb-1"></i>
+        <i class="fas fa-microchip d-block fa-lg mb-1"></i>
         <span>Entrenar</span>
     </a>
     <a href="/docs" class="nav-item text-center">
-        <i class="fas fa-code d-block fa-lg mb-1"></i>
-        <span>API Docs</span>
+        <i class="fas fa-terminal d-block fa-lg mb-1"></i>
+        <span>Terminal</span>
     </a>
 </nav>
 
 <script>
-    // Auto-refresco cada 2 minutos para mantener sincronía
-    setTimeout(() => { location.reload(); }, 120000);
+    // Refresco inteligente: solo si la pestaña está activa
+    setInterval(() => {
+        if (!document.hidden) { location.reload(); }
+    }, 120000);
 </script>
 
 </body>
