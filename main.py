@@ -1,6 +1,7 @@
 import sys
 import os
 import asyncio
+import re
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -8,7 +9,6 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import datetime
-import re
 
 # 1. Configuración de rutas para Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +22,7 @@ static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
+# Mantenemos tu ruta original a app/routes para los templates
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
@@ -38,7 +39,7 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN (SIN PANTALLA NEGRA) ---
+# --- RUTA DE SINCRONIZACIÓN ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -71,7 +72,7 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         await db.rollback()
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# --- RUTA PROCESAR (ENTRENAR) SIN PANTALLA NEGRA ---
+# --- RUTA PROCESAR (ENTRENAR) ---
 @app.get("/api/procesar")
 async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
     try:
@@ -83,7 +84,7 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# 4. Ruta Home (Dashboard) - MODIFICADA PARA IMAGEN POR NOMBRE + NUMERO
+# 4. Ruta Home (Dashboard) - CORREGIDA
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     res_ia = await generar_prediccion(db)
@@ -97,4 +98,38 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         prob_real = item.get("prob_real", "2.1%")
         
         if animal_real and animal_real != "PENDIENTE":
-            # 1. Extraemos el nombre para la imagen: "BALLENA (00)" -> "ballena"
+            # 1. Extraemos nombre: "BALLENA (00)" -> "ballena"
+            nombre_limpio = animal_real.split('(')[0].strip().lower()
+            img_name = f"{nombre_limpio}.png"
+            
+            # 2. Extraemos número: "(00)" -> "00"
+            match = re.search(r'\((\d+)\)', animal_real)
+            if match:
+                num_real = match.group(1)
+        
+        bitacora_procesada.append({
+            "hora": item.get("hora"),
+            "animal_predicho": item.get("animal_predicho"),
+            "resultado_real": animal_real,
+            "acierto": item.get("acierto"),
+            "img_real": img_name,
+            "num_real": num_real,
+            "prob_real": prob_real
+        })
+
+    return templates.TemplateResponse("index.html", {
+        "request": request,
+        "res": res_ia,
+        "bitacora": bitacora_procesada
+    })
+
+# --- EVENTOS DE ARRANQUE ---
+@app.on_event("startup")
+async def startup_event():
+    # Arranca el ciclo infinito del scraper/motor en segundo plano
+    asyncio.create_task(ciclo_infinito())
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
