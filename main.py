@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import datetime
 
-# 1. Ajuste de rutas para que Render encuentre tus carpetas
+# 1. Configuración de rutas para Render
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, "app"))
@@ -17,7 +17,7 @@ sys.path.append(os.path.join(BASE_DIR, "app"))
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
 # 2. Configuración de Archivos Estáticos y HTML
-# Imágenes en la raíz / Templates en app/routes/
+# Las imágenes están en la raíz y los HTML en app/routes/
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
@@ -27,10 +27,8 @@ templates = Jinja2Templates(directory=template_path)
 
 # 3. Importaciones siguiendo tu estructura de carpetas
 from db import get_db
-# Servicios y Scraper
 from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance, examen_cerebro
 from app.services.scraper import descargar_rango_historico
-# Automatización
 from app.core.scheduler import ciclo_infinito 
 
 # Routers de la carpeta app/routes/
@@ -41,31 +39,29 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA PARA ACTIVAR EL SCRAPER (EL BOTÓN) ---
+# --- RUTA PARA EL BOTÓN DE SINCRONIZACIÓN ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
-    """Sincroniza manualmente los datos de loteriadehoy.com a tu base Neon"""
+    """Activa el scraper manualmente para actualizar la base de datos Neon"""
     try:
-        # Iniciamos carga desde el último punto registrado (7 Feb) hasta hoy
+        # Sincronizamos desde el último registro (7 de febrero) hasta hoy
         inicio = datetime(2026, 2, 7)
         fin = datetime.now()
         
-        print(f"📡 Iniciando sincronización manual: {inicio.date()} al {fin.date()}")
+        print(f"📡 Sincronización manual: {inicio.date()} al {fin.date()}")
         datos_nuevos = await descargar_rango_historico(inicio, fin)
         
         agregados = 0
         if datos_nuevos:
             for reg in datos_nuevos:
-                # Insertamos evitando duplicados
+                # El ON CONFLICT evita errores por datos que ya existen en Neon
                 result = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {
-                    "f": reg["fecha"], 
-                    "h": reg["hora"], 
-                    "a": reg["animalito"], 
-                    "l": reg["loteria"]
+                    "f": reg["fecha"], "h": reg["hora"], 
+                    "a": reg["animalito"], "l": reg["loteria"]
                 })
                 if result.rowcount > 0:
                     agregados += 1
@@ -73,9 +69,8 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         
         reporte = await examen_cerebro(db)
         return {
-            "status": "Éxito",
+            "status": "Sincronización Exitosa",
             "nuevos_registros": agregados,
-            "mensaje": "Base de datos Neon actualizada correctamente",
             "resultado_ia": reporte
         }
     except Exception as e:
@@ -88,7 +83,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
     res_ia = await generar_prediccion(db)
     bitacora = await obtener_bitacora_avance(db)
 
-    # Renderiza dashboard.html ubicado en app/routes/
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "version": "v4.5 PRO",
@@ -102,7 +96,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 # 5. Inicio del Bot Automático
 @app.on_event("startup")
 async def startup_event():
-    # Activa el scheduler cada vez que el servidor Render despierta
+    # Activa el scheduler de app/core cada vez que Render inicia el servicio
     asyncio.create_task(ciclo_infinito())
 
 if __name__ == "__main__":
