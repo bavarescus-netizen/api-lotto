@@ -101,3 +101,4 @@ async def obtener_bitacora_avance(db: AsyncSession):
     except Exception as e:
         print(f"Error en bitácora: {e}")
         return []
+
