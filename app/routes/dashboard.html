@@ -81,19 +81,23 @@
             text-transform: uppercase;
         }
 
+        /* ESTILO DE BOTONES GRANDES RE-ACTIVADO */
         .btn-panel {
             background: rgba(30, 41, 59, 0.5);
-            border-radius: 15px;
-            padding: 15px;
-            margin-bottom: 20px;
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 25px;
             border: 1px dashed #334155;
         }
 
         .btn-custom {
-            border-radius: 12px;
-            font-weight: 600;
+            border-radius: 15px;
+            font-weight: 700;
             transition: 0.3s;
-            padding: 10px 20px;
+            padding: 12px 25px;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
         }
 
         .bottom-nav {
@@ -108,7 +112,7 @@
             z-index: 1000;
         }
 
-        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; transition: 0.3s; }
+        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; text-align: center; }
         .nav-item.active { color: var(--accent); }
     </style>
 </head>
@@ -120,29 +124,37 @@
             <h1 class="h4 fw-bold mb-0">LottoAI <span class="text-primary">PRO</span></h1>
             <p class="small text-secondary mb-0">Neural Engine V4.5</p>
         </div>
-        <div class="meta-badge" style="background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 12px; padding: 8px 15px;">
+        <div class="badge bg-success bg-opacity-10 text-success p-2 px-3 border border-success border-opacity-25" style="border-radius: 12px;">
             <i class="fas fa-bullseye me-2"></i>Meta: 5/11
         </div>
     </header>
 
-    <div class="btn-panel d-flex gap-2 flex-wrap justify-content-center">
-        <button onclick="lanzarExamen()" class="btn btn-primary btn-custom" id="btnExamen">
-            <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados
-        </button>
-        <a href="/api/procesar" class="btn btn-success btn-custom">
-            <i class="fas fa-brain me-2"></i>Entrenar IA
-        </a>
+    <div class="btn-panel">
+        <div class="d-grid gap-3">
+            <button onclick="lanzarExamen()" class="btn btn-primary btn-custom shadow-sm" id="btnExamen">
+                <i class="fas fa-microscope me-2"></i>Lanzar Examen / Sincronizar
+            </button>
+            <div class="d-flex gap-2">
+                <a href="/api/procesar" class="btn btn-success btn-custom flex-grow-1">
+                    <i class="fas fa-brain me-2"></i>Entrenar
+                </a>
+                <button onclick="verEstadisticas()" class="btn btn-warning btn-custom flex-grow-1">
+                    <i class="fas fa-chart-bar me-2"></i>Tendencia
+                </button>
+            </div>
+        </div>
     </div>
 
     <div id="examen-card" class="main-card mb-4" style="display: none; border-color: var(--accent);">
-        <h6 class="text-accent fw-bold text-uppercase small mb-3">Reporte de Sincronización</h6>
+        <h6 class="text-accent fw-bold text-uppercase small mb-3">Reporte de Efectividad</h6>
         <div class="row align-items-center">
             <div class="col-6">
                 <h2 class="display-4 fw-bold mb-0" id="pct-exito">0%</h2>
                 <p class="text-secondary small">Aciertos Reales</p>
             </div>
             <div class="col-6 text-end">
-                <p class="mb-0 small">Nuevos Datos: <span id="nuevos-reg" class="fw-bold text-primary">0</span></p>
+                <p class="mb-0 small">Registros: <span id="tot-jugadas" class="fw-bold">0</span></p>
+                <p class="mb-0 small text-success">Ganadas: <span id="ganadas" class="fw-bold">0</span></p>
             </div>
         </div>
         <div class="mt-3">
@@ -153,25 +165,25 @@
     <div class="main-card text-center">
         <p class="text-secondary small fw-bold text-uppercase mb-3">Siguiente Sorteo</p>
         {% if top3 and top3|length > 0 %}
-            <div class="mb-2">
-                <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
-                     onerror="this.src='https://via.placeholder.com/120?text=??'">
-                <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
-                <div class="d-flex justify-content-center align-items-center">
-                    <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
-                    <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
-                </div>
+        <div class="mb-2">
+            <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
+                 onerror="this.src='https://via.placeholder.com/120?text=??'">
+            <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
+            <div class="d-flex justify-content-center align-items-center">
+                <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
+                <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
             </div>
-            <div class="mt-4">
-                <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
-                    <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
-                </div>
+        </div>
+        <div class="mt-4">
+            <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
+                <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
             </div>
+        </div>
         {% else %}
-            <div class="py-5">
-                <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
-                <p class="text-secondary">Cerebro no calibrado.</p>
-            </div>
+        <div class="py-5">
+            <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
+            <p class="text-secondary">Cerebro no calibrado.</p>
+        </div>
         {% endif %}
     </div>
 
@@ -192,7 +204,6 @@
                     {% else %}
                         <span class="status-pill bg-secondary text-white">PENDIENTE</span>
                     {% endif %}
-                    
                     <div class="small mt-1 text-secondary">Real: 
                         <span class="{% if item.acierto %}text-success{% else %}text-info{% endif %} fw-bold">
                             {{ item.resultado_real | upper if item.resultado_real else '...' }}
@@ -203,20 +214,20 @@
             {% endfor %}
         {% else %}
             <div class="p-4 text-center text-secondary small">
-                No hay resultados hoy. Pulsa sincronizar.
+                Sin operaciones hoy. Pulse "Lanzar Examen".
             </div>
         {% endif %}
     </div>
 </div>
 
 <nav class="bottom-nav">
-    <a href="/" class="nav-item active text-center">
+    <a href="/" class="nav-item active">
         <i class="fas fa-home d-block fa-lg mb-1"></i>
         <span>Inicio</span>
     </a>
-    <a href="/api/prediccion" class="nav-item text-center">
+    <a href="/api/prediccion" class="nav-item">
         <i class="fas fa-chart-line d-block fa-lg mb-1"></i>
-        <span>IA</span>
+        <span>IA Predic</span>
     </a>
 </nav>
 
@@ -225,30 +236,59 @@
 
     async function lanzarExamen() {
         const btn = document.getElementById('btnExamen');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Buscando datos...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Evaluando...';
+        btn.disabled = true;
         
         try {
             const response = await fetch('/api/examen-real');
             const data = await response.json();
             
-            if (data.status === "Sincronización Exitosa" || data.status === "Éxito") {
+            if (data.status) {
                 document.getElementById('examen-card').style.display = 'block';
-                document.getElementById('nuevos-reg').innerText = data.nuevos_registros;
+                const res = data.resultado || data.resultado_ia || {porcentaje_exito: "0%", total_jugadas: 0, ganadas: 0};
+                document.getElementById('pct-exito').innerText = res.porcentaje_exito;
+                document.getElementById('tot-jugadas').innerText = res.total_jugadas;
+                document.getElementById('ganadas').innerText = res.ganadas || 0;
                 
-                // Actualizar números de éxito si vienen en el JSON
-                if(data.resultado_ia) {
-                    document.getElementById('pct-exito').innerText = data.resultado_ia.porcentaje_exito;
-                }
-                
-                setTimeout(() => { location.reload(); }, 2000);
+                verEstadisticas();
+                setTimeout(() => { location.reload(); }, 2500);
             }
         } catch (e) {
-            alert("Error al sincronizar.");
+            alert("Error de conexión");
         } finally {
-            btn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados';
+            btn.innerHTML = '<i class="fas fa-microscope me-2"></i>Lanzar Examen / Sincronizar';
+            btn.disabled = false;
         }
     }
-</script>
 
+    async function verEstadisticas() {
+        try {
+            const response = await fetch('/api/stats');
+            const result = await response.json();
+            if (result.status === "success") {
+                const ctx = document.getElementById('graficaFeb').getContext('2d');
+                if (miGrafica) { miGrafica.destroy(); }
+                miGrafica = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(result.data),
+                        datasets: [{
+                            label: 'Frecuencia',
+                            data: Object.values(result.data),
+                            backgroundColor: '#3b82f6',
+                            borderRadius: 5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { display: false } }
+                    }
+                });
+                document.getElementById('examen-card').style.display = 'block';
+            }
+        } catch(e) {}
+    }
+</script>
 </body>
 </html>
