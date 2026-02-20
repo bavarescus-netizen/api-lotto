@@ -108,19 +108,8 @@
             z-index: 1000;
         }
 
-        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; text-align: center; }
+        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; transition: 0.3s; }
         .nav-item.active { color: var(--accent); }
-        
-        .meta-badge {
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--success);
-            border: 1px solid rgba(34, 197, 94, 0.2);
-            border-radius: 12px;
-            padding: 8px 15px;
-        }
-
-        /* Efecto de carga para el botón */
-        .loading { pointer-events: none; opacity: 0.7; }
     </style>
 </head>
 <body>
@@ -131,33 +120,29 @@
             <h1 class="h4 fw-bold mb-0">LottoAI <span class="text-primary">PRO</span></h1>
             <p class="small text-secondary mb-0">Neural Engine V4.5</p>
         </div>
-        <div class="meta-badge">
+        <div class="meta-badge" style="background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 12px; padding: 8px 15px;">
             <i class="fas fa-bullseye me-2"></i>Meta: 5/11
         </div>
     </header>
 
     <div class="btn-panel d-flex gap-2 flex-wrap justify-content-center">
-        <button onclick="lanzarExamen()" class="btn btn-success btn-custom w-100 mb-2" id="btnExamen">
-            <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Hoy
+        <button onclick="lanzarExamen()" class="btn btn-primary btn-custom" id="btnExamen">
+            <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados
         </button>
-        <a href="/api/procesar" class="btn btn-outline-primary btn-custom">
-            <i class="fas fa-brain me-2"></i>Entrenar
+        <a href="/api/procesar" class="btn btn-success btn-custom">
+            <i class="fas fa-brain me-2"></i>Entrenar IA
         </a>
-        <button onclick="verEstadisticas()" class="btn btn-outline-warning btn-custom">
-            <i class="fas fa-chart-bar me-2"></i>Ver Tendencia
-        </button>
     </div>
 
     <div id="examen-card" class="main-card mb-4" style="display: none; border-color: var(--accent);">
-        <h6 class="text-accent fw-bold text-uppercase small mb-3">Reporte de Efectividad (Feb)</h6>
+        <h6 class="text-accent fw-bold text-uppercase small mb-3">Reporte de Sincronización</h6>
         <div class="row align-items-center">
             <div class="col-6">
                 <h2 class="display-4 fw-bold mb-0" id="pct-exito">0%</h2>
                 <p class="text-secondary small">Aciertos Reales</p>
             </div>
             <div class="col-6 text-end">
-                <p class="mb-0 small">Registros Nuevos: <span id="nuevos-reg" class="text-primary fw-bold">0</span></p>
-                <p class="mb-0 small text-success">Total Febrero: <span id="tot-jugadas" class="fw-bold">0</span></p>
+                <p class="mb-0 small">Nuevos Datos: <span id="nuevos-reg" class="fw-bold text-primary">0</span></p>
             </div>
         </div>
         <div class="mt-3">
@@ -168,26 +153,25 @@
     <div class="main-card text-center">
         <p class="text-secondary small fw-bold text-uppercase mb-3">Siguiente Sorteo</p>
         {% if top3 and top3|length > 0 %}
-        <div class="mb-2">
-            <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
-                 onerror="this.src='https://via.placeholder.com/120?text=??'">
-            <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
-            <div class="d-flex justify-content-center align-items-center">
-                <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
-                <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
+            <div class="mb-2">
+                <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
+                     onerror="this.src='https://via.placeholder.com/120?text=??'">
+                <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
+                <div class="d-flex justify-content-center align-items-center">
+                    <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
+                    <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
+                </div>
             </div>
-        </div>
-        <div class="mt-4">
-            <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
-                <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
+            <div class="mt-4">
+                <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
+                    <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
+                </div>
             </div>
-        </div>
         {% else %}
-        <div class="py-5">
-            <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
-            <p class="text-secondary">Cerebro no calibrado.</p>
-            <p class="small text-muted">Pulsa "Sincronizar" para despertar la IA.</p>
-        </div>
+            <div class="py-5">
+                <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
+                <p class="text-secondary">Cerebro no calibrado.</p>
+            </div>
         {% endif %}
     </div>
 
@@ -208,5 +192,63 @@
                     {% else %}
                         <span class="status-pill bg-secondary text-white">PENDIENTE</span>
                     {% endif %}
+                    
                     <div class="small mt-1 text-secondary">Real: 
-                        <span class="{% if item.acierto %}text-success
+                        <span class="{% if item.acierto %}text-success{% else %}text-info{% endif %} fw-bold">
+                            {{ item.resultado_real | upper if item.resultado_real else '...' }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="p-4 text-center text-secondary small">
+                No hay resultados hoy. Pulsa sincronizar.
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<nav class="bottom-nav">
+    <a href="/" class="nav-item active text-center">
+        <i class="fas fa-home d-block fa-lg mb-1"></i>
+        <span>Inicio</span>
+    </a>
+    <a href="/api/prediccion" class="nav-item text-center">
+        <i class="fas fa-chart-line d-block fa-lg mb-1"></i>
+        <span>IA</span>
+    </a>
+</nav>
+
+<script>
+    let miGrafica = null;
+
+    async function lanzarExamen() {
+        const btn = document.getElementById('btnExamen');
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Buscando datos...';
+        
+        try {
+            const response = await fetch('/api/examen-real');
+            const data = await response.json();
+            
+            if (data.status === "Sincronización Exitosa" || data.status === "Éxito") {
+                document.getElementById('examen-card').style.display = 'block';
+                document.getElementById('nuevos-reg').innerText = data.nuevos_registros;
+                
+                // Actualizar números de éxito si vienen en el JSON
+                if(data.resultado_ia) {
+                    document.getElementById('pct-exito').innerText = data.resultado_ia.porcentaje_exito;
+                }
+                
+                setTimeout(() => { location.reload(); }, 2000);
+            }
+        } catch (e) {
+            alert("Error al sincronizar.");
+        } finally {
+            btn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados';
+        }
+    }
+</script>
+
+</body>
+</html>
