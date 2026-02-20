@@ -36,9 +36,6 @@ async def generar_prediccion(db: AsyncSession):
         res = await db.execute(query, {"h": hora_int})
         datos_ia = res.fetchall()
 
-        if not datos_ia:
-            return {"error": "Cerebro no entrenado. Ejecute Entrenamiento."}
-
         top3 = []
         for r in datos_ia:
             name = r[0].lower() if r[0] else "desconocido"
@@ -46,95 +43,31 @@ async def generar_prediccion(db: AsyncSession):
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png",  # MANTENIDO POR NOMBRE
+                "imagen": f"{name}.png",
                 "porcentaje": f"{round(r[1], 1)}%",
                 "tendencia": r[2]
             })
 
         if top3:
-            check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
-            check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
-            
-            if not check_res.fetchone():
-                await db.execute(text("""
-                    INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
-                    VALUES (:f, :h, :a, :c, :p)
-                """), {
-                    "f": ahora.date(), 
-                    "h": hora_str, 
-                    "a": top3[0]["animal"].lower(),
-                    "c": float(top3[0]["porcentaje"].replace('%','')), 
-                    "p": "Neural V4.5 PRO"
-                })
-                await db.commit()
+            # Guardar predicción para auditoría si no existe
+            await db.execute(text("""
+                INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
+                VALUES (:f, :h, :a, :c, :p) ON CONFLICT DO NOTHING
+            """), {"f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(), "c": float(top3[0]["porcentaje"].replace('%','')), "p": "Neural V4.5 PRO"})
+            await db.commit()
 
-        decision_final = "META 5/11 ACTIVA" if top3[0]["tendencia"] != "ROJO" else "⚠️ RIESGO ALTO - NO OPERAR"
-
-        return {
-            "decision": decision_final, 
-            "top3": top3, 
-            "analisis": f"Basado en 28,709 registros | Sincronizado: {hora_str}"
-        }
+        return {"top3": top3, "analisis": f"Registros: 28,709 | {hora_str}"}
     except Exception as e:
-        await db.rollback()
         return {"error": str(e)}
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
-        # CORRECCIÓN: Unimos con probabilidades_hora para saber el % del animal que salió
         query = text("""
             SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, p.probabilidad
             FROM auditoria_ia a
             LEFT JOIN probabilidades_hora p ON 
                 (LOWER(a.resultado_real) = LOWER(p.animalito) AND CAST(SUBSTRING(a.hora, 1, 2) AS INTEGER) = p.hora)
-            WHERE a.fecha = CURRENT_DATE
-            ORDER BY a.hora DESC 
-            LIMIT 11
+            WHERE a.fecha = CURRENT_DATE ORDER BY a.hora DESC LIMIT 11
         """)
         res = await db.execute(query)
-        bitacora = []
-        for r in res.fetchall():
-            # Limpiamos el nombre para la imagen: "PAVO (17)" -> "pavo"
-            raw_real = r[2].lower() if r[2] else "pendiente"
-            nombre_animal = raw_real.split('(')[0].strip() if '(' in raw_real else raw_real
-            
-            bitacora.append({
-                "hora": r[0],
-                "animal_predicho": r[1].upper() if r[1] else "---",
-                "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
-                "acierto": r[3],
-                "img_real": f"{nombre_animal}.png", # IMAGEN POR NOMBRE
-                "prob_real": f"{round(r[4], 1)}%" if r[4] else "2.1%"
-            })
-        return bitacora
-    except Exception as e:
-        print(f"Error en bitácora: {e}")
-        return []
-
-async def analizar_estadisticas(db: AsyncSession):
-    query = text("SELECT animalito, COUNT(*) as c FROM historico GROUP BY 1 ORDER BY c DESC LIMIT 10")
-    res = await db.execute(query)
-    filas = res.fetchall()
-    return {"status": "success", "data": {r[0].upper(): r[1] for r in filas}}
-
-async def examen_cerebro(db: AsyncSession):
-    """Calcula la efectividad real desde el 7 de febrero"""
-    try:
-        query = text("""
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END) as ganadas,
-                AVG(CASE WHEN acierto IS NOT NULL THEN (CASE WHEN acierto THEN 100 ELSE 0 END) ELSE NULL END) as efectividad
-            FROM auditoria_ia
-            WHERE fecha >= '2026-02-07'
-        """)
-        res = await db.execute(query)
-        stats = res.fetchone()
-        
-        return {
-            "periodo": "7 Feb al Hoy",
-            "total_jugadas": stats[0] if stats[0] else 0,
-            "ganadas": stats[1] if stats[1] else 0,
-            "porcentaje_exito": f"{round(stats[2], 2) if stats[2] else 0}%"
-        }
-    except Exception as e:
+        bitacora
