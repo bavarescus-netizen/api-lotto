@@ -38,3 +38,5 @@ def cargar():
                         print(f"❌ Error: {e}")
 
     print(f"\n🚀 ¡LISTO! Se cargaron {total_exitos} resultados.")
+
+
