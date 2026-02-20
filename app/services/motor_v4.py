@@ -39,21 +39,27 @@ async def generar_prediccion(db: AsyncSession):
         top3 = []
         for r in datos_ia:
             name = r[0].lower() if r[0] else "desconocido"
+            # Sincronización: Buscamos el número (00) según el nombre (ballena)
             num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "--")
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png",
+                "imagen": f"{name}.png", # Imagen por nombre: ballena.png
                 "porcentaje": f"{round(r[1], 1)}%",
                 "tendencia": r[2]
             })
 
         if top3:
-            # Guardar predicción para auditoría si no existe
             await db.execute(text("""
                 INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
                 VALUES (:f, :h, :a, :c, :p) ON CONFLICT DO NOTHING
-            """), {"f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(), "c": float(top3[0]["porcentaje"].replace('%','')), "p": "Neural V4.5 PRO"})
+            """), {
+                "f": ahora.date(), 
+                "h": hora_str, 
+                "a": top3[0]["animal"].lower(), 
+                "c": float(top3[0]["porcentaje"].replace('%','')), 
+                "p": "Neural V4.5 PRO"
+            })
             await db.commit()
 
         return {"top3": top3, "analisis": f"Registros: 28,709 | {hora_str}"}
@@ -62,6 +68,7 @@ async def generar_prediccion(db: AsyncSession):
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
+        # Consulta que trae el historial del día
         query = text("""
             SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, p.probabilidad
             FROM auditoria_ia a
@@ -70,4 +77,27 @@ async def obtener_bitacora_avance(db: AsyncSession):
             WHERE a.fecha = CURRENT_DATE ORDER BY a.hora DESC LIMIT 11
         """)
         res = await db.execute(query)
-        bitacora
+        bitacora = []
+        
+        for r in res.fetchall():
+            # Limpiamos el nombre del animal real para buscar su imagen y número
+            raw_real = r[2].lower() if r[2] else "pendiente"
+            # Si viene como "BALLENA (00)", extraemos solo "ballena"
+            nombre_animal = raw_real.split('(')[0].strip() if '(' in raw_real else raw_real
+            
+            # Buscamos el número correspondiente en el mapa
+            num_real = next((k for k, v in MAPA_ANIMALES.items() if v == nombre_animal), "--")
+            
+            bitacora.append({
+                "hora": r[0],
+                "animal_predicho": r[1].upper() if r[1] else "---",
+                "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
+                "acierto": r[3],
+                "img_real": f"{nombre_animal}.png", # Para cargar ballena.png
+                "num_real": num_real,               # Para mostrar el 00
+                "prob_real": f"{round(r[4], 1)}%" if r[4] else "2.1%"
+            })
+        return bitacora
+    except Exception as e:
+        print(f"Error en bitácora: {e}")
+        return []
