@@ -55,3 +55,4 @@ async def obtener_ultimos(db: AsyncSession = Depends(get_db)):
     query = text("SELECT fecha, hora, animalito FROM historico ORDER BY fecha DESC, hora DESC LIMIT 10")
     res = await db.execute(query)
     return [{"fecha": r[0], "hora": r[1], "animal": r[2]} for r in res.fetchall()]
+
