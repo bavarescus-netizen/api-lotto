@@ -81,7 +81,6 @@
             text-transform: uppercase;
         }
 
-        /* ESTILOS DE BOTONES Y EXAMEN */
         .btn-panel {
             background: rgba(30, 41, 59, 0.5);
             border-radius: 15px;
@@ -109,7 +108,7 @@
             z-index: 1000;
         }
 
-        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; transition: 0.3s; }
+        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; text-align: center; }
         .nav-item.active { color: var(--accent); }
         
         .meta-badge {
@@ -119,6 +118,9 @@
             border-radius: 12px;
             padding: 8px 15px;
         }
+
+        /* Efecto de carga para el botón */
+        .loading { pointer-events: none; opacity: 0.7; }
     </style>
 </head>
 <body>
@@ -135,13 +137,13 @@
     </header>
 
     <div class="btn-panel d-flex gap-2 flex-wrap justify-content-center">
-        <button onclick="lanzarExamen()" class="btn btn-primary btn-custom" id="btnExamen">
-            <i class="fas fa-microscope me-2"></i>Lanzar Examen
+        <button onclick="lanzarExamen()" class="btn btn-success btn-custom w-100 mb-2" id="btnExamen">
+            <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Hoy
         </button>
-        <a href="/api/procesar" class="btn btn-success btn-custom">
+        <a href="/api/procesar" class="btn btn-outline-primary btn-custom">
             <i class="fas fa-brain me-2"></i>Entrenar
         </a>
-        <button onclick="verEstadisticas()" class="btn btn-warning btn-custom">
+        <button onclick="verEstadisticas()" class="btn btn-outline-warning btn-custom">
             <i class="fas fa-chart-bar me-2"></i>Ver Tendencia
         </button>
     </div>
@@ -154,8 +156,8 @@
                 <p class="text-secondary small">Aciertos Reales</p>
             </div>
             <div class="col-6 text-end">
-                <p class="mb-0 small">Jugadas: <span id="tot-jugadas" class="fw-bold">0</span></p>
-                <p class="mb-0 small text-success">Ganadas: <span id="ganadas" class="fw-bold">0</span></p>
+                <p class="mb-0 small">Registros Nuevos: <span id="nuevos-reg" class="text-primary fw-bold">0</span></p>
+                <p class="mb-0 small text-success">Total Febrero: <span id="tot-jugadas" class="fw-bold">0</span></p>
             </div>
         </div>
         <div class="mt-3">
@@ -184,6 +186,7 @@
         <div class="py-5">
             <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
             <p class="text-secondary">Cerebro no calibrado.</p>
+            <p class="small text-muted">Pulsa "Sincronizar" para despertar la IA.</p>
         </div>
         {% endif %}
     </div>
@@ -206,113 +209,4 @@
                         <span class="status-pill bg-secondary text-white">PENDIENTE</span>
                     {% endif %}
                     <div class="small mt-1 text-secondary">Real: 
-                        <span class="{% if item.acierto %}text-success{% else %}text-info{% endif %} fw-bold">
-                            {{ item.resultado_real | upper if item.resultado_real else '...' }}
-                        </span>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        {% else %}
-            <div class="p-4 text-center text-secondary small">
-                No hay operaciones registradas hoy.
-            </div>
-        {% endif %}
-    </div>
-    <div style="text-align: center; margin: 20px;">
-    <a href="/api/examen-real" 
-       style="background-color: #28a745; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; font-weight: bold;">
-       🔄 ACTUALIZAR RESULTADOS AHORA
-    </a>
-</div>
-</div>
-
-<nav class="bottom-nav">
-    <a href="/" class="nav-item active text-center">
-        <i class="fas fa-home d-block fa-lg mb-1"></i>
-        <span>Inicio</span>
-    </a>
-    <a href="/api/prediccion" class="nav-item text-center">
-        <i class="fas fa-chart-line d-block fa-lg mb-1"></i>
-        <span>Predicción</span>
-    </a>
-    <a href="/api/procesar" class="nav-item text-center">
-        <i class="fas fa-microchip d-block fa-lg mb-1"></i>
-        <span>Entrenar</span>
-    </a>
-    <a href="/docs" class="nav-item text-center">
-        <i class="fas fa-terminal d-block fa-lg mb-1"></i>
-        <span>Terminal</span>
-    </a>
-</nav>
-
-<script>
-    let miGrafica = null;
-
-    async function lanzarExamen() {
-        const btn = document.getElementById('btnExamen');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Evaluando...';
-        
-        try {
-            const response = await fetch('/api/examen-real');
-            const data = await response.json();
-            
-            if (data.status) {
-                document.getElementById('examen-card').style.display = 'block';
-                document.getElementById('pct-exito').innerText = data.resultado.porcentaje_exito;
-                document.getElementById('tot-jugadas').innerText = data.resultado.total_jugadas;
-                document.getElementById('ganadas').innerText = data.resultado.ganadas;
-                
-                // Pedir tendencias de febrero para la gráfica
-                verEstadisticas();
-            }
-        } catch (e) {
-            alert("Error al conectar con el servidor.");
-        } finally {
-            btn.innerHTML = '<i class="fas fa-microscope me-2"></i>Lanzar Examen';
-        }
-    }
-
-    async function verEstadisticas() {
-        const response = await fetch('/api/stats');
-        const result = await response.json();
-        
-        if (result.status === "success") {
-            const ctx = document.getElementById('graficaFeb').getContext('2d');
-            const labels = Object.keys(result.data);
-            const valores = Object.values(result.data);
-
-            if (miGrafica) { miGrafica.destroy(); }
-
-            miGrafica = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Frecuencia en Febrero',
-                        data: valores,
-                        backgroundColor: '#3b82f6',
-                        borderRadius: 5
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        y: { display: false },
-                        x: { ticks: { color: '#64748b', font: { size: 10 } } }
-                    }
-                }
-            });
-            document.getElementById('examen-card').style.display = 'block';
-        }
-    }
-
-    // Refresco automático cada 2 minutos
-    setInterval(() => {
-        if (!document.hidden) { location.reload(); }
-    }, 120000);
-</script>
-
-</body>
-</html>
+                        <span class="{% if item.acierto %}text-success
