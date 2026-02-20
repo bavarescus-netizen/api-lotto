@@ -1,46 +1,60 @@
 import asyncio
-from datetime import datetime
-# Ajustamos las importaciones para que coincidan con tu estructura de carpetas
-from services.scraper import obtener_ultimo_resultado
-from services.guardar_sorteo import guardar_sorteo
-from services.evaluar_prediccion import evaluar
-
-ULTIMO_SORTEO_PROCESADO = None
+from datetime import datetime, timedelta
+from app.services.scraper import obtener_ultimo_resultado
+from app.services.guardar_sorteo import guardar_sorteo
+from app.services.evaluar_prediccion import evaluar
 
 async def ciclo_infinito():
-    global ULTIMO_SORTEO_PROCESADO
+    print("🚀 Monitor Inteligente Activado (9:05 AM - 7:30 PM)")
     
-    print("🚀 Sistema Vivo: Iniciando monitoreo de 11 sorteos diarios...")
+    # Diccionario para no repetir el mismo sorteo
+    ultimo_registro_local = {"hora": None, "fecha": None}
 
     while True:
-        try:
-            # 1. Obtención de datos (Llamada al Scraper)
-            data = await obtener_ultimo_resultado() # IMPORTANTE: Debe ser async si usas httpx o aiohttp
-
-            if data and data != ULTIMO_SORTEO_PROCESADO:
-                # 2. Persistencia en Neon (Solo si es nuevo)
-                # Aquí se mete el resultado al 'historico'
-                guardado = await guardar_sorteo(data)
-
-                if guardado:
-                    print(f"✅ [{datetime.now().strftime('%H:%M:%S')}] Sorteo detectado: {data}")
-                    
-                    # 3. El Sistema "Aprende": Evalúa el acierto/fallo en auditoria_ia
-                    resultado_eval = await evaluar(data)
-                    print(f"📈 Análisis de precisión: {resultado_eval}")
-                    
-                    ULTIMO_SORTEO_PROCESADO = data
+        ahora = datetime.now()
+        # Solo actuar entre 9:00 y 19:40 (7:40 PM para cubrir el último sorteo)
+        if 9 <= ahora.hour <= 19:
+            minuto = ahora.minute
             
-            # Lógica de espera inteligente
-            ahora = datetime.now()
-            # De 9 AM a 7 PM (19) vigilamos cada minuto
-            if 9 <= ahora.hour <= 19:
-                sleep_time = 60  
+            # Lógica: Revisar solo en la ventana crítica (entre el minuto 05 y 25 de cada hora)
+            if 5 <= minuto <= 25:
+                try:
+                    print(f"🔍 [{ahora.strftime('%H:%M')}] Buscando resultado en la web...")
+                    data = await obtener_ultimo_resultado() 
+                    
+                    if data:
+                        # Evitar duplicados: Comparar hora y fecha del sorteo
+                        if data['hora'] != ultimo_registro_local['hora'] or data['fecha'] != ultimo_registro_local['fecha']:
+                            
+                            guardado = await guardar_sorteo(data)
+                            if guardado:
+                                await evaluar(data)
+                                ultimo_registro_local['hora'] = data['hora']
+                                ultimo_registro_local['fecha'] = data['fecha']
+                                print(f"✅ Sorteo de las {data['hora']} guardado con éxito.")
+                                
+                                # Si ya guardamos el de esta hora, dormimos hasta la siguiente hora minuto 05
+                                print("😴 Sorteo capturado. Esperando a la siguiente hora...")
+                                sleep_time = (60 - ahora.minute + 5) * 60 
+                            else:
+                                sleep_time = 300 # Error al guardar, reintentar en 5 min
+                        else:
+                            print("⏳ El sorteo en la web sigue siendo el anterior. Reintentando en 5 min...")
+                            sleep_time = 300
+                    else:
+                        sleep_time = 300 # No hay data, reintentar en 5 min
+                except Exception as e:
+                    print(f"⚠️ Error: {e}")
+                    sleep_time = 300
             else:
-                sleep_time = 600 # Fuera de horario, descansamos 10 min
-                
-        except Exception as e:
-            print(f"⚠️ Error en ciclo: {e}")
-            sleep_time = 120 
+                # Si estamos fuera del rango 05-25, calculamos cuánto falta para el siguiente minuto 05
+                if minuto < 5:
+                    sleep_time = (5 - minuto) * 60
+                else:
+                    sleep_time = (60 - minuto + 5) * 60
+                print(f"💤 Fuera de ventana de sorteo. Durmiendo {sleep_time // 60} minutos...")
+        else:
+            print("🌙 Fuera de horario operativo. Durmiendo 30 min...")
+            sleep_time = 1800
             
         await asyncio.sleep(sleep_time)
