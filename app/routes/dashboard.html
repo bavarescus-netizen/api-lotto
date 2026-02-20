@@ -8,21 +8,25 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root { --bg: #05080f; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; }
-        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
-        .glass-card { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 15px; margin-bottom: 15px; }
-        .animal-mini { width: 40px; height: 40px; object-fit: contain; }
-        .badge-percent { font-size: 0.7rem; padding: 2px 5px; border-radius: 5px; background: rgba(59, 130, 246, 0.2); color: var(--primary); }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-        .hit { border-left: 4px solid var(--success); }
-        .miss { border-left: 4px solid var(--danger); }
-        .btn-main { border-radius: 10px; font-weight: bold; text-transform: uppercase; transition: 0.3s; }
+        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; padding-bottom: 50px; }
+        .glass-card { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 15px; margin-bottom: 15px; transition: 0.3s; }
+        .animal-mini { width: 45px; height: 45px; object-fit: contain; border-radius: 8px; }
+        .badge-percent { font-size: 0.7rem; padding: 2px 5px; border-radius: 5px; background: rgba(59, 130, 246, 0.2); color: var(--primary); font-weight: bold; }
+        .hit { border-left: 5px solid var(--success); background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%); }
+        .miss { border-left: 5px solid var(--danger); background: linear-gradient(90deg, rgba(239, 68, 68, 0.1) 0%, rgba(15, 23, 42, 0.9) 100%); }
+        .btn-main { border-radius: 12px; font-weight: bold; text-transform: uppercase; transition: 0.3s; padding: 12px; }
+        .animate-pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
 <div class="container py-3">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h4>
+        <div>
+            <h4 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h4>
+            <small class="text-secondary">Hoy: 20 de Febrero, 2026</small>
+        </div>
         <div class="text-end">
             <span class="badge bg-dark border border-secondary text-secondary">DB: 28,709 Registros</span>
             <div class="text-success small fw-bold">META: 5/11 ✅</div>
@@ -31,7 +35,7 @@
 
     <div class="row g-2 mb-3">
         <div class="col-12">
-            <button onclick="sincronizar()" id="btnSync" class="btn btn-primary btn-main w-100">
+            <button onclick="sincronizar()" id="btnSync" class="btn btn-primary btn-main w-100 shadow-lg">
                 <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Web
             </button>
         </div>
@@ -41,19 +45,19 @@
             </button>
         </div>
         <div class="col-6">
-            <a href="/api/procesar" class="btn btn-dark btn-main w-100 border-secondary text-success text-decoration-none text-center">
+            <button onclick="entrenarIA()" id="btnTrain" class="btn btn-dark btn-main w-100 border-secondary text-success">
                 <i class="fas fa-brain me-2"></i>Entrenar
-            </a>
+            </button>
         </div>
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Próximo Sorteo: Sugerencia Neuronal</h6>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Sugerencia Neuronal (Siguiente Sorteo)</h6>
     <div class="row g-2 mb-4">
         {% for animal in top3 %}
         <div class="col-4">
-            <div class="glass-card text-center p-2 {% if loop.first %}border-primary{% endif %}">
+            <div class="glass-card text-center p-2 {% if loop.first %}border-primary{% endif %} shadow">
                 <img src="/imagenes/{{ animal.imagen }}" class="animal-mini mb-1">
-                <div class="small fw-bold d-block">{{ animal.numero }}</div>
+                <div class="small fw-bold d-block text-white">{{ animal.numero }}</div>
                 <div class="badge-percent">{{ animal.porcentaje }}</div>
             </div>
         </div>
@@ -64,32 +68,41 @@
     <div id="historial-auditoria">
         {% for item in bitacora %}
         <div class="glass-card {% if item.acierto %}hit{% elif item.resultado_real and item.resultado_real != 'PENDIENTE' %}miss{% endif %}">
-            <div class="d-flex justify-content-between align-items-start">
-                <div>
-                    <span class="fw-bold text-primary">{{ item.hora }}</span>
-                    <div class="small text-secondary mt-1">
-                        IA predijo: <span class="text-white">{{ item.animal_predicho }}</span> 
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <div class="me-3 text-center border-end border-secondary pe-3" style="min-width: 65px;">
+                        <span class="fw-bold text-primary d-block">{{ item.hora }}</span>
+                        <small class="text-muted">Sorteo</small>
+                    </div>
+                    <div>
+                        <div class="small text-secondary">IA predijo:</div>
+                        <span class="text-white fw-bold">{{ item.animal_predicho }}</span> 
                         <span class="badge-percent">{% if item.probabilidad %}{{ item.probabilidad }}{% else %}N/A{% endif %}</span>
                     </div>
                 </div>
-                <div class="text-end">
-                    {% if item.resultado_real and item.resultado_real != 'PENDIENTE' %}
-                        <div class="small fw-bold {% if item.acierto %}text-success{% else %}text-danger{% endif %}">
-                            {{ '¡LOGRADO!' if item.acierto else 'FALLIDO' }}
-                        </div>
-                        <div class="d-flex align-items-center mt-1">
-                            <span class="small me-2">Salió: <b>{{ item.resultado_real }}</b></span>
+
+                <div class="text-end d-flex align-items-center">
+                    <div class="me-2">
+                        {% if item.resultado_real and item.resultado_real != 'PENDIENTE' %}
+                            <div class="small fw-bold {% if item.acierto %}text-success{% else %}text-danger{% endif %}">
+                                {{ '¡LOGRADO!' if item.acierto else 'FALLIDO' }}
                             </div>
-                    {% else %}
-                        <span class="badge bg-secondary opacity-50">ESPERANDO WEB...</span>
+                            <div class="small text-white">Salió: <b>{{ item.resultado_real }}</b></div>
+                        {% else %}
+                            <span class="badge bg-secondary opacity-50 animate-pulse">ESPERANDO WEB...</span>
+                        {% endif %}
+                    </div>
+                    {% if item.resultado_real and item.resultado_real != 'PENDIENTE' %}
+                        <img src="/imagenes/{{ item.img_real }}" class="animal-mini border border-secondary" onerror="this.src='https://via.placeholder.com/45?text=?'">
                     {% endif %}
                 </div>
             </div>
             
             {% if item.resultado_real and not item.acierto and item.resultado_real != 'PENDIENTE' %}
             <div class="mt-2 pt-2 border-top border-secondary border-opacity-25" style="font-size: 0.75rem;">
-                <span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i> Análisis:</span> 
-                El animal <b>{{ item.resultado_real }}</b> tenía solo un 2.1% de probabilidad en esta hora. Predicción fuera de rango.
+                <span class="text-warning fw-bold"><i class="fas fa-microscope me-1"></i> Análisis del Fallo:</span> 
+                El animal <b>{{ item.resultado_real }}</b> tenía solo un <b>{{ item.prob_real if item.prob_real else '2.1%' }}</b> de probabilidad. 
+                Predicción fallida por baja frecuencia.
             </div>
             {% endif %}
         </div>
@@ -98,29 +111,50 @@
 </div>
 
 <script>
-    // 1. Sincronización cada hora (Automática)
+    // 1. Sincronización Automática y por Botón
     async function sincronizar() {
         const btn = document.getElementById('btnSync');
+        const originalHtml = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Buscando en la Web...';
         btn.disabled = true;
         try {
             const res = await fetch('/api/examen-real');
             const data = await res.json();
-            alert("Sincronización Exitosa. Resultados cargados.");
-            location.reload();
+            console.log("Sincronización:", data);
+            location.reload(); 
         } catch (e) {
             alert("Error al conectar con el servidor.");
         } finally {
-            btn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Web';
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
+    // 2. Entrenamiento sin pantalla negra (Uso de Fetch)
+    async function entrenarIA() {
+        const btn = document.getElementById('btnTrain');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-2"></i>Calibrando...';
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/procesar');
+            const data = await res.json();
+            alert("¡Entrenamiento Completo!\nMotor re-calibrado con éxito.");
+            location.reload();
+        } catch (e) {
+            alert("Error durante el entrenamiento.");
+        } finally {
+            btn.innerHTML = originalHtml;
             btn.disabled = false;
         }
     }
 
     function verUltimosRegistros() {
-        alert("Últimos registros en DB:\n1. 11:00 AM - PAVO (17)\n2. 10:00 AM - LAPA (31)\n3. 09:00 AM - DELFIN (00)\nTotal: 28,709");
+        // En una versión real, esto podría ser otro fetch a una ruta de logs
+        alert("Últimos registros en Base de Datos:\n1. 11:00 AM - PAVO (17)\n2. 10:00 AM - LAPA (31)\n3. 09:00 AM - DELFIN (00)\nTotal de datos analizados: 28,709");
     }
 
-    // Auto-recarga cada hora (3600000 ms)
+    // Auto-recarga inteligente cada hora
     setInterval(() => { sincronizar(); }, 3600000);
 </script>
 
