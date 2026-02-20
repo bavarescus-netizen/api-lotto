@@ -9,32 +9,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import datetime
 
-# 1. Ajuste de rutas para que Python encuentre los módulos dentro de 'app'
+# 1. Ajuste de rutas para que Render encuentre tus carpetas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, "app"))
 
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
-# 2. Configuración de Archivos Estáticos y Templates
-# Las imágenes están en la raíz según tu esquema
+# 2. Configuración de Archivos Estáticos y HTML
+# Imágenes en la raíz / Templates en app/routes/
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# Los HTML están en app/routes/
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
-# 3. Importaciones respetando tu estructura de carpetas
+# 3. Importaciones siguiendo tu estructura de carpetas
 from db import get_db
-# Estas están dentro de app/services/
+# Servicios y Scraper
 from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance, examen_cerebro
 from app.services.scraper import descargar_rango_historico
-# Esta está dentro de app/core/
+# Automatización
 from app.core.scheduler import ciclo_infinito 
 
-# Importación de Routers (dentro de app/routes/)
+# Routers de la carpeta app/routes/
 from app.routes import prediccion, entrenar, stats, historico
 
 app.include_router(prediccion.router, prefix="/api", tags=["IA"])
@@ -42,22 +41,22 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA PARA EL BOTÓN DE SINCRONIZACIÓN ---
+# --- RUTA PARA ACTIVAR EL SCRAPER (EL BOTÓN) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
-    """Activa el scraper manualmente y actualiza la base de datos Neon"""
+    """Sincroniza manualmente los datos de loteriadehoy.com a tu base Neon"""
     try:
-        # Iniciamos desde el último punto estable
+        # Iniciamos carga desde el último punto registrado (7 Feb) hasta hoy
         inicio = datetime(2026, 2, 7)
         fin = datetime.now()
         
-        print(f"📡 Iniciando carga manual: {inicio.date()} al {fin.date()}")
+        print(f"📡 Iniciando sincronización manual: {inicio.date()} al {fin.date()}")
         datos_nuevos = await descargar_rango_historico(inicio, fin)
         
         agregados = 0
         if datos_nuevos:
             for reg in datos_nuevos:
-                # El ON CONFLICT evita errores si el dato ya existe
+                # Insertamos evitando duplicados
                 result = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
@@ -74,20 +73,22 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         
         reporte = await examen_cerebro(db)
         return {
-            "status": "Sincronización Exitosa",
+            "status": "Éxito",
             "nuevos_registros": agregados,
-            "evaluacion_ia": reporte
+            "mensaje": "Base de datos Neon actualizada correctamente",
+            "resultado_ia": reporte
         }
     except Exception as e:
         await db.rollback()
         return {"status": "Error", "detalle": str(e)}
 
-# 4. Ruta Principal (Dashboard)
+# 4. Ruta Home (Dashboard)
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     res_ia = await generar_prediccion(db)
     bitacora = await obtener_bitacora_avance(db)
 
+    # Renderiza dashboard.html ubicado en app/routes/
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "version": "v4.5 PRO",
@@ -98,10 +99,10 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         "url_sync": "/api/examen-real"
     })
 
-# 5. Activación del Ciclo Automático
+# 5. Inicio del Bot Automático
 @app.on_event("startup")
 async def startup_event():
-    # Esto ejecuta el scheduler de app/core/ cada vez que Render arranca
+    # Activa el scheduler cada vez que el servidor Render despierta
     asyncio.create_task(ciclo_infinito())
 
 if __name__ == "__main__":
