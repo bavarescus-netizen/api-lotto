@@ -39,3 +39,4 @@ async def ciclo_infinito():
         except Exception as e:
             print(f"⚠️ Error en ciclo: {e}")
             await asyncio.sleep(120)
+            
