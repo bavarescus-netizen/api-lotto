@@ -6,22 +6,19 @@
     <title>Lotto AI V4.5 PRO - Dashboard</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-app: #070b14;
             --card-dark: #111827;
             --accent: #3b82f6;
             --success: #10b981;
-            --warning: #f59e0b;
             --danger: #ef4444;
-            --glass: rgba(255, 255, 255, 0.03);
         }
 
         body { 
             background-color: var(--bg-app); 
             color: #e5e7eb; 
-            font-family: 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Segoe UI', sans-serif;
             padding-bottom: 100px;
         }
 
@@ -30,72 +27,37 @@
             border: 1px solid rgba(255,255,255,0.08);
             border-radius: 24px;
             padding: 20px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.4);
             margin-bottom: 20px;
         }
 
-        .animal-icon {
-            width: 130px;
-            height: 130px;
+        .top-animal-img {
+            width: 80px;
+            height: 80px;
             object-fit: contain;
-            filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.5));
-            animation: float 3s ease-in-out infinite;
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-
-        /* Estilo de la Tarjeta de Entrenamiento */
-        .train-stat-card {
-            background: var(--glass);
-            border-radius: 15px;
-            padding: 12px;
-            border: 1px solid rgba(255,255,255,0.05);
-            text-align: center;
-        }
-
-        .strategy-pill {
-            font-size: 0.7rem;
-            background: rgba(59, 130, 246, 0.1);
-            color: var(--accent);
-            padding: 2px 8px;
-            border-radius: 10px;
-            border: 1px solid rgba(59, 130, 246, 0.2);
         }
 
         .btn-custom {
             border-radius: 16px;
             font-weight: 700;
-            padding: 14px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 12px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .btn-custom:active { transform: scale(0.95); }
-
-        .bitacora-container {
-            border-radius: 20px;
-            background: var(--card-dark);
-            border: 1px solid rgba(255,255,255,0.05);
-            overflow: hidden;
+            transition: 0.2s;
         }
 
         .bitacora-item {
-            padding: 15px;
+            padding: 12px;
             border-bottom: 1px solid rgba(255,255,255,0.05);
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
         }
 
-        .status-badge {
-            font-size: 0.65rem;
-            padding: 4px 10px;
+        .badge-porcentaje {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--accent);
+            padding: 4px 8px;
             border-radius: 8px;
-            font-weight: 800;
+            font-size: 0.8rem;
         }
     </style>
 </head>
@@ -103,148 +65,91 @@
 
 <div class="container py-4">
     <header class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h1 class="h3 fw-bold mb-0">LottoAI <span class="text-primary">CORE</span></h1>
-            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">V4.5 PRO ACTIVE</span>
-        </div>
-        <div class="text-end">
-            <div class="small text-secondary">META DIARIA</div>
-            <div class="fw-bold text-success h5 mb-0">5 / 11 <i class="fas fa-check-circle"></i></div>
-        </div>
+        <h1 class="h4 fw-bold mb-0 text-primary">LottoAI CORE</h1>
+        <div class="text-success fw-bold small">META: 5/11 <i class="fas fa-check-circle"></i></div>
     </header>
 
     <div class="main-card border-primary border-opacity-25">
-        <div class="d-grid gap-3">
-            <button onclick="lanzarExamen()" class="btn btn-primary btn-custom shadow-lg" id="btnExamen">
+        <div class="d-grid gap-2">
+            <button onclick="lanzarExamen()" class="btn btn-primary btn-custom" id="btnExamen">
                 <i class="fas fa-bolt me-2"></i>Sincronizar e Investigar
             </button>
             <div class="row g-2">
                 <div class="col-6">
-                    <button onclick="entrenarIA()" class="btn btn-dark btn-custom w-100 border-secondary">
-                        <i class="fas fa-brain text-success me-2"></i>Entrenar
-                    </button>
+                    <a href="/api/procesar" class="btn btn-dark btn-custom w-100 border-secondary text-success">
+                        <i class="fas fa-brain me-1"></i> Entrenar
+                    </a>
                 </div>
                 <div class="col-6">
-                    <button onclick="verEstadisticas()" class="btn btn-dark btn-custom w-100 border-secondary">
-                        <i class="fas fa-chart-pie text-warning me-2"></i>Tendencia
+                    <button onclick="location.reload()" class="btn btn-dark btn-custom w-100 border-secondary text-warning">
+                        <i class="fas fa-sync me-1"></i> Tendencia
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="reporte-entrenamiento" class="main-card" style="display: none; border: 1px solid var(--success);">
-        <h6 class="text-success fw-bold text-uppercase small mb-3"><i class="fas fa-microscope me-2"></i>Análisis de Calibración</h6>
-        <div class="row g-2 mb-3">
-            <div class="col-4">
-                <div class="train-stat-card">
-                    <div class="small text-secondary">Aciertos</div>
-                    <div class="h4 fw-bold text-success" id="res-aciertos">0</div>
-                </div>
-            </div>
-            <div class="col-4">
-                <div class="train-stat-card">
-                    <div class="small text-secondary">Fallos</div>
-                    <div class="h4 fw-bold text-danger" id="res-fallos">0</div>
-                </div>
-            </div>
-            <div class="col-4">
-                <div class="train-stat-card">
-                    <div class="small text-secondary">Efectividad</div>
-                    <div class="h4 fw-bold text-primary" id="res-pct">0%</div>
-                </div>
-            </div>
-        </div>
-        <div class="p-3 bg-black bg-opacity-25 rounded-3 border border-white border-opacity-10">
-            <div class="d-flex justify-content-between mb-2">
-                <span class="small text-secondary">Mejor hora detectada:</span>
-                <span class="small fw-bold text-warning" id="res-hora">--:--</span>
-            </div>
-            <div class="d-flex justify-content-between">
-                <span class="small text-secondary">Estrategia aplicada:</span>
-                <span class="strategy-pill" id="res-estrategia">Análisis Neuronal Binario</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="main-card text-center">
-        <p class="text-secondary small fw-bold text-uppercase mb-3">Predicción en Curso</p>
+    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Siguiente Sorteo (Top 3 Neuronal)</h6>
+    <div class="row g-2 mb-4">
         {% if top3 %}
-            <div class="mb-3">
-                <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" onerror="this.src='https://via.placeholder.com/130?text=IA'">
-                <h2 class="display-5 fw-bold mt-3 mb-1 text-white">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
-                <div class="h5 fw-bold text-primary">{{ top3[0].porcentaje }} Confiabilidad</div>
-            </div>
-            <div class="p-2 bg-primary bg-opacity-10 border border-primary border-opacity-20 rounded-pill mx-auto" style="max-width: 250px;">
-                <small class="text-primary fw-bold"><i class="fas fa-shield-virus me-2"></i>{{ decision }}</small>
-            </div>
-        {% else %}
-            <div class="py-4">
-                <i class="fas fa-robot fa-3x mb-3 text-secondary opacity-20"></i>
-                <p class="text-secondary">Esperando calibración de datos...</p>
-            </div>
-        {% endif %}
-    </div>
-
-    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Resultados de Hoy (Histórico Real)</h6>
-    <div class="bitacora-container">
-        {% if bitacora %}
-            {% for item in bitacora %}
-            <div class="bitacora-item">
-                <div>
-                    <div class="fw-bold">{{ item.hora }}</div>
-                    <div class="small text-secondary">IA dijo: <span class="text-white">{{ item.animal_predicho | upper }}</span></div>
-                </div>
-                <div class="text-end">
-                    {% if item.acierto %}
-                        <span class="status-badge bg-success text-white"><i class="fas fa-check me-1"></i> ACIERTO</span>
-                    {% elif item.resultado_real %}
-                        <span class="status-badge bg-danger text-white"><i class="fas fa-times me-1"></i> FALLO</span>
-                    {% else %}
-                        <span class="status-badge bg-secondary text-white">PENDIENTE</span>
-                    {% endif %}
-                    <div class="small mt-1 fw-bold text-primary">Salió: {{ item.resultado_real | upper if item.resultado_real else '...' }}</div>
+            {% for animal in top3 %}
+            <div class="col-4">
+                <div class="main-card text-center p-2" style="{% if loop.first %}border: 1px solid var(--accent);{% endif %}">
+                    <img src="/imagenes/{{ animal.imagen }}" class="top-animal-img mb-2" onerror="this.src='https://via.placeholder.com/80?text=?'">
+                    <div class="fw-bold small">{{ animal.numero }}</div>
+                    <div class="badge-porcentaje">{{ animal.porcentaje }}</div>
                 </div>
             </div>
             {% endfor %}
         {% else %}
-            <div class="p-4 text-center text-muted">No hay datos procesados hoy.</div>
+            <div class="col-12 text-center p-4">Esperando datos de IA...</div>
+        {% endif %}
+    </div>
+
+    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Histórico Real (Hoy)</h6>
+    <div class="main-card p-0 overflow-hidden">
+        {% if bitacora %}
+            {% for item in bitacora %}
+            <div class="bitacora-item">
+                <div>
+                    <div class="fw-bold small">{{ item.hora }}</div>
+                    <div class="text-secondary small">IA: <span class="text-white">{{ item.animal_predicho }}</span></div>
+                </div>
+                <div class="text-end">
+                    {% if item.acierto %}
+                        <span class="badge bg-success small">ACIERTO</span>
+                    {% elif item.resultado_real and item.resultado_real != "PENDIENTE" %}
+                        <span class="badge bg-danger small">FALLO</span>
+                    {% else %}
+                        <span class="badge bg-secondary small">PENDIENTE</span>
+                    {% endif %}
+                    <div class="small fw-bold mt-1 text-primary">Salió: {{ item.resultado_real if item.resultado_real else '---' }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="p-4 text-center text-muted small">Sin datos hoy. Presione Sincronizar.</div>
         {% endif %}
     </div>
 </div>
 
-<nav class="fixed-bottom bg-dark border-top border-white border-opacity-10 py-3 d-flex justify-content-around">
-    <a href="/" class="text-primary text-decoration-none text-center">
-        <i class="fas fa-home d-block h5"></i><span class="small">Inicio</span>
-    </a>
-    <a href="/api/prediccion" class="text-secondary text-decoration-none text-center">
-        <i class="fas fa-brain d-block h5"></i><span class="small">IA</span>
-    </a>
-</nav>
-
 <script>
-    // FUNCION LANZAR EXAMEN (SINCRONIZAR)
     async function lanzarExamen() {
         const btn = document.getElementById('btnExamen');
-        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-2"></i>Analizando Web...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sincronizando...';
         btn.disabled = true;
-
+        
         try {
-            const response = await fetch('/api/examen-real');
-            const data = await response.json();
-            
-            // Mostrar los resultados visuales de lo que hizo la IA
-            document.getElementById('reporte-entrenamiento').style.display = 'block';
-            
-            const res = data.resultado_ia || data.evaluacion_ia || {};
-            document.getElementById('res-aciertos').innerText = res.ganadas || "0";
-            document.getElementById('res-fallos').innerText = (res.total_jugadas - res.ganadas) || "0";
-            document.getElementById('res-pct').innerText = res.porcentaje_exito || "0%";
-            document.getElementById('res-hora').innerText = "11:00 AM"; // Simulado o extraído de la data
-            document.getElementById('res-estrategia').innerText = "Frecuencia de Ciclos Cortos";
-
-            // Notificación visual rápida
-            alert("¡Sincronización Exitosa! Datos actualizados.");
-            setTimeout(() => { location.reload(); }, 3000);
+            await fetch('/api/examen-real');
+            alert("Sincronización terminada. Actualizando datos...");
+            location.reload();
         } catch (e) {
-            alert("Error al
+            alert("Error al conectar.");
+        } finally {
+            btn.innerHTML = '<i class="fas fa-bolt me-2"></i>Sincronizar e Investigar';
+            btn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
