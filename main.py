@@ -22,13 +22,12 @@ static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# Mantenemos tu ruta original a app/routes para los templates
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
-# 3. Importaciones de servicios
+# 3. Importaciones de servicios (CORREGIDO: Sin examen_cerebro)
 from db import get_db
-from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance, examen_cerebro
+from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
 from app.core.scheduler import ciclo_infinito 
 
@@ -39,7 +38,7 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN ---
+# --- RUTA DE SINCRONIZACIÓN (CORREGIDA) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -62,11 +61,10 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                     agregados += 1
             await db.commit()
         
-        reporte = await examen_cerebro(db)
+        # Se eliminó la llamada a examen_cerebro para evitar el ImportError
         return JSONResponse({
             "status": "success",
-            "message": f"Sincronización Exitosa. {agregados} nuevos datos.",
-            "resultado_ia": reporte
+            "message": f"Sincronización Exitosa. {agregados} nuevos datos registrados."
         })
     except Exception as e:
         await db.rollback()
@@ -84,7 +82,7 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# 4. Ruta Home (Dashboard) - CORREGIDA
+# 4. Ruta Home (Dashboard)
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     res_ia = await generar_prediccion(db)
@@ -98,11 +96,9 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         prob_real = item.get("prob_real", "2.1%")
         
         if animal_real and animal_real != "PENDIENTE":
-            # 1. Extraemos nombre: "BALLENA (00)" -> "ballena"
             nombre_limpio = animal_real.split('(')[0].strip().lower()
             img_name = f"{nombre_limpio}.png"
             
-            # 2. Extraemos número: "(00)" -> "00"
             match = re.search(r'\((\d+)\)', animal_real)
             if match:
                 num_real = match.group(1)
@@ -126,7 +122,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 # --- EVENTOS DE ARRANQUE ---
 @app.on_event("startup")
 async def startup_event():
-    # Arranca el ciclo infinito del scraper/motor en segundo plano
     asyncio.create_task(ciclo_infinito())
 
 if __name__ == "__main__":
