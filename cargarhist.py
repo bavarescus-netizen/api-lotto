@@ -40,3 +40,4 @@ def cargar():
     print(f"\n🚀 ¡LISTO! Se cargaron {total_exitos} resultados.")
 
 
+
