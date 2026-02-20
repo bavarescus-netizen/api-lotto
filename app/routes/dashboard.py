@@ -49,3 +49,5 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "status_sistema": "LIVE 2018-2026",
         "animales_top": stats.get("data", {})
     })
+
+
