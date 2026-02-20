@@ -32,3 +32,4 @@ async def entrenar_modelo(db):
     
     await db.commit()
     return {"status": "ok", "patrones": len(patrones)}
+
