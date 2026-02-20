@@ -16,3 +16,5 @@ lxml
 openpyxl
 apscheduler
 python-multipart
+beautifulsoup4
+requests
