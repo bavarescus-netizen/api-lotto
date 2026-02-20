@@ -36,3 +36,5 @@ async def api_obtener_stats(db: AsyncSession = Depends(get_db)):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
