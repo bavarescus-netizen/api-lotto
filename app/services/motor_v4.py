@@ -111,3 +111,23 @@ async def analizar_estadisticas(db: AsyncSession):
     res = await db.execute(query)
     filas = res.fetchall()
     return {"status": "success", "data": {r[0].upper(): r[1] for r in filas}}
+    async def examen_cerebro(db: AsyncSession):
+    # Comparamos las predicciones guardadas contra el histórico real
+    query = text("""
+        SELECT 
+            COUNT(*) as total_operaciones,
+            SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END) as aciertos,
+            (SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END)::FLOAT / COUNT(*)::FLOAT) * 100 as efectividad
+        FROM auditoria_ia
+        WHERE fecha >= '2026-02-07'
+    """)
+    
+    res = await db.execute(query)
+    stats = res.fetchone()
+    
+    return {
+        "periodo": "7 Feb al Hoy",
+        "total_jugadas": stats[0],
+        "ganadas": stats[1],
+        "porcentaje_exito": f"{round(stats[2], 2) if stats[2] else 0}%"
+    }
