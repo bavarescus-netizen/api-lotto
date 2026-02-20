@@ -11,16 +11,23 @@ if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 # ✅ Limpieza de parámetros para compatibilidad con Neon
-DATABASE_URL = DATABASE_URL.split("?")[0] + "?ssl=require"
+# Usamos sslmode=require para que asyncpg no tenga problemas
+if "?" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.split("?")[0] + "?ssl=require"
+else:
+    DATABASE_URL += "?ssl=require"
 
-# ✅ Configuración del Motor (Optimizado para carga de datos masiva)
+# ✅ Configuración del Motor (Optimizado para evitar cierres inesperados)
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,      # Verifica la conexión antes de usarla
-    pool_size=10,            # Máximo de conexiones abiertas
-    max_overflow=20,         # Conexiones extra en picos de tráfico
-    pool_recycle=3600        # Reinicia conexiones cada hora para evitar bloqueos
+    pool_pre_ping=True,      # Fundamental: reconecta si la DB se "durmió"
+    pool_size=5,             # Reducido: Neon (free) tiene límites de conexiones
+    max_overflow=10,         # Controlado: para no exceder los límites de Neon
+    pool_recycle=300,        # Ajustado: 5 min. Neon cierra conexiones inactivas rápido
+    connect_args={
+        "command_timeout": 60  # Evita que una consulta pesada mate la App
+    }
 )
 
 SessionLocal = async_sessionmaker(
@@ -34,5 +41,8 @@ async def get_db():
     async with SessionLocal() as session:
         try:
             yield session
+        except Exception:
+            await session.rollback()
+            raise
         finally:
             await session.close()
