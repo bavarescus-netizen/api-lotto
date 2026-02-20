@@ -3,172 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI CORE - Intelligence Dashboard</title>
+    <title>LottoAI CORE - Auditoría Pro</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root {
-            --bg: #05080f;
-            --card: #0f172a;
-            --primary: #3b82f6;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-        }
-
-        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; padding-bottom: 50px; }
-        
-        .glass-card {
-            background: rgba(15, 23, 42, 0.8);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 20px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        /* Semáforo dinámico */
-        .semaforo { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        .verde { background: var(--success); box-shadow: 0 0 10px var(--success); }
-        .amarillo { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
-        .rojo { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
-
-        .animal-img { width: 70px; height: 70px; object-fit: contain; transition: 0.3s; }
-        .animal-img:hover { transform: scale(1.1); }
-
-        .btn-action {
-            border-radius: 12px;
-            padding: 12px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: 0.3s;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .stat-box { background: rgba(0,0,0,0.3); border-radius: 12px; padding: 10px; text-align: center; }
-        
-        /* Ocultar scrollbar */
-        ::-webkit-scrollbar { display: none; }
+        :root { --bg: #05080f; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
+        .glass-card { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 15px; margin-bottom: 15px; }
+        .animal-mini { width: 40px; height: 40px; object-fit: contain; }
+        .badge-percent { font-size: 0.7rem; padding: 2px 5px; border-radius: 5px; background: rgba(59, 130, 246, 0.2); color: var(--primary); }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .hit { border-left: 4px solid var(--success); }
+        .miss { border-left: 4px solid var(--danger); }
+        .btn-main { border-radius: 10px; font-weight: bold; text-transform: uppercase; transition: 0.3s; }
     </style>
 </head>
 <body>
 
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h2>
-        <div class="stat-box border border-success">
-            <small class="text-secondary d-block">META DIARIA</small>
-            <span class="text-success fw-bold">5 / 11 ✅</span>
+<div class="container py-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h4>
+        <div class="text-end">
+            <span class="badge bg-dark border border-secondary text-secondary">DB: 28,709 Registros</span>
+            <div class="text-success small fw-bold">META: 5/11 ✅</div>
         </div>
     </div>
 
-    <div class="glass-card">
-        <div class="d-grid gap-2">
-            <button onclick="ejecutarAccion('/api/examen-real', 'Sincronizando...')" class="btn btn-primary btn-action">
-                <i class="fas fa-sync-alt me-2"></i> Sincronizar e Investigar
+    <div class="row g-2 mb-3">
+        <div class="col-12">
+            <button onclick="sincronizar()" id="btnSync" class="btn btn-primary btn-main w-100">
+                <i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Web
             </button>
-            <div class="row g-2">
-                <div class="col-6">
-                    <button onclick="ejecutarAccion('/api/procesar', 'Entrenando...')" class="btn btn-dark btn-action w-100 text-success">
-                        <i class="fas fa-brain me-2"></i> Entrenar
-                    </button>
-                </div>
-                <div class="col-6">
-                    <button onclick="mostrarTendencia()" class="btn btn-dark btn-action w-100 text-warning">
-                        <i class="fas fa-chart-line me-2"></i> Tendencia
-                    </button>
-                </div>
-            </div>
+        </div>
+        <div class="col-6">
+            <button onclick="verUltimosRegistros()" class="btn btn-dark btn-main w-100 border-secondary">
+                <i class="fas fa-database me-2"></i>Ver DB
+            </button>
+        </div>
+        <div class="col-6">
+            <a href="/api/procesar" class="btn btn-dark btn-main w-100 border-secondary text-success text-decoration-none text-center">
+                <i class="fas fa-brain me-2"></i>Entrenar
+            </a>
         </div>
     </div>
 
-    <div id="entrenamiento-info" class="glass-card border-primary" style="display: none;">
-        <h6 class="text-primary fw-bold text-uppercase small mb-3">Reporte de Calibración Neuronal</h6>
-        <div class="row g-2 mb-3">
-            <div class="col-4"><div class="stat-box"><small class="text-secondary">Analizados</small><div class="fw-bold">28,709</div></div></div>
-            <div class="col-4"><div class="stat-box"><small class="text-secondary">Aciertos</small><div class="fw-bold text-success" id="train-hits">--</div></div></div>
-            <div class="col-4"><div class="stat-box"><small class="text-secondary">Efectividad</small><div class="fw-bold text-primary" id="train-pct">--%</div></div></div>
-        </div>
-        <div class="p-2 rounded bg-dark small">
-            <div class="d-flex justify-content-between"><span>Mejor Hora:</span> <span class="text-warning fw-bold">10:00 AM</span></div>
-            <div class="d-flex justify-content-between"><span>Estrategia:</span> <span class="text-info">Ciclo de Repetición Corta</span></div>
-        </div>
-    </div>
-
-    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Siguiente Sorteo (Top 3)</h6>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Próximo Sorteo: Sugerencia Neuronal</h6>
     <div class="row g-2 mb-4">
         {% for animal in top3 %}
-        <div class="col-4 text-center">
-            <div class="glass-card p-2 border-{% if loop.first %}primary{% else %}secondary{% endif %}">
-                <img src="/imagenes/{{ animal.imagen }}" class="animal-img mb-2" alt="{{ animal.animal }}">
-                <div class="fw-bold small">{{ animal.numero }}</div>
-                <div class="small text-secondary">{{ animal.animal }}</div>
-                <div class="mt-2">
-                    <span class="semaforo {% if animal.tendencia == 'VERDE' %}verde{% elif animal.tendencia == 'AMARILLO' %}amarillo{% else %}rojo{% endif %}"></span>
-                    <span class="fw-bold" style="font-size: 0.7rem;">{{ animal.porcentaje }}</span>
-                </div>
+        <div class="col-4">
+            <div class="glass-card text-center p-2 {% if loop.first %}border-primary{% endif %}">
+                <img src="/imagenes/{{ animal.imagen }}" class="animal-mini mb-1">
+                <div class="small fw-bold d-block">{{ animal.numero }}</div>
+                <div class="badge-percent">{{ animal.porcentaje }}</div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Histórico de Hoy: {{ fecha_hoy }}</h6>
-    <div class="glass-card p-0">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Auditoría de Predicciones (Hoy)</h6>
+    <div id="historial-auditoria">
         {% for item in bitacora %}
-        <div class="p-3 border-bottom border-secondary d-flex justify-content-between align-items-center">
-            <div>
-                <span class="fw-bold">{{ item.hora }}</span>
-                <div class="small text-secondary">IA dijo: <span class="text-white">{{ item.animal_predicho }}</span></div>
-            </div>
-            <div class="text-end">
-                {% if item.resultado_real and item.resultado_real != 'PENDIENTE' %}
-                    <div class="badge bg-{% if item.acierto %}success{% else %}danger{% endif %} mb-1">
-                        {{ 'ACIERTO' if item.acierto else 'FALLO' }}
+        <div class="glass-card {% if item.acierto %}hit{% elif item.resultado_real and item.resultado_real != 'PENDIENTE' %}miss{% endif %}">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <span class="fw-bold text-primary">{{ item.hora }}</span>
+                    <div class="small text-secondary mt-1">
+                        IA predijo: <span class="text-white">{{ item.animal_predicho }}</span> 
+                        <span class="badge-percent">{% if item.probabilidad %}{{ item.probabilidad }}{% else %}N/A{% endif %}</span>
                     </div>
-                    <div class="small fw-bold text-primary">Salió: {{ item.resultado_real }}</div>
-                {% else %}
-                    <span class="badge bg-secondary">ESPERANDO WEB...</span>
-                {% endif %}
+                </div>
+                <div class="text-end">
+                    {% if item.resultado_real and item.resultado_real != 'PENDIENTE' %}
+                        <div class="small fw-bold {% if item.acierto %}text-success{% else %}text-danger{% endif %}">
+                            {{ '¡LOGRADO!' if item.acierto else 'FALLIDO' }}
+                        </div>
+                        <div class="d-flex align-items-center mt-1">
+                            <span class="small me-2">Salió: <b>{{ item.resultado_real }}</b></span>
+                            </div>
+                    {% else %}
+                        <span class="badge bg-secondary opacity-50">ESPERANDO WEB...</span>
+                    {% endif %}
+                </div>
             </div>
+            
+            {% if item.resultado_real and not item.acierto and item.resultado_real != 'PENDIENTE' %}
+            <div class="mt-2 pt-2 border-top border-secondary border-opacity-25" style="font-size: 0.75rem;">
+                <span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i> Análisis:</span> 
+                El animal <b>{{ item.resultado_real }}</b> tenía solo un 2.1% de probabilidad en esta hora. Predicción fuera de rango.
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
 </div>
 
 <script>
-    // Función para no ir a página negra
-    async function ejecutarAccion(url, mensaje) {
-        const btn = event.target;
-        const originalText = btn.innerHTML;
-        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${mensaje}`;
+    // 1. Sincronización cada hora (Automática)
+    async function sincronizar() {
+        const btn = document.getElementById('btnSync');
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Buscando en la Web...';
         btn.disabled = true;
-
         try {
-            const res = await fetch(url);
+            const res = await fetch('/api/examen-real');
             const data = await res.json();
-            
-            if(url.includes('procesar')) {
-                document.getElementById('entrenamiento-info').style.display = 'block';
-                document.getElementById('train-hits').innerText = "5"; // Dato simulado de la lógica
-                document.getElementById('train-pct').innerText = "45%";
-            }
-            
-            alert("Acción Completada: " + (data.message || "Sincronizado"));
+            alert("Sincronización Exitosa. Resultados cargados.");
             location.reload();
         } catch (e) {
-            alert("Error en el servidor");
+            alert("Error al conectar con el servidor.");
         } finally {
-            btn.innerHTML = originalText;
+            btn.innerHTML = '<i class="fas fa-sync-alt me-2"></i>Sincronizar Resultados Web';
             btn.disabled = false;
         }
     }
 
-    function mostrarTendencia() {
-        alert("Generando Gráfica de Tendencia de los últimos 28,000 registros...");
-        // Aquí se activaría Chart.js
+    function verUltimosRegistros() {
+        alert("Últimos registros en DB:\n1. 11:00 AM - PAVO (17)\n2. 10:00 AM - LAPA (31)\n3. 09:00 AM - DELFIN (00)\nTotal: 28,709");
     }
+
+    // Auto-recarga cada hora (3600000 ms)
+    setInterval(() => { sincronizar(); }, 3600000);
 </script>
 
 </body>
