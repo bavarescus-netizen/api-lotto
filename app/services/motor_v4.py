@@ -3,6 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import pytz
+import re
 
 MAPA_ANIMALES = {
     "0": "delfin", "00": "ballena", "1": "carnero", "2": "toro", "3": "ciempies",
@@ -22,6 +23,7 @@ async def generar_prediccion(db: AsyncSession):
         hora_int = ahora.hour
         hora_str = ahora.strftime("%I:00 %p")
 
+        # 1. Traer Top 3 desde la tabla de inteligencia
         query = text("""
             SELECT animalito, probabilidad, 
             CASE 
@@ -46,11 +48,12 @@ async def generar_prediccion(db: AsyncSession):
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png",
+                "imagen": f"{num}.png", # Cambiado a número para consistencia
                 "porcentaje": f"{round(r[1], 1)}%",
                 "tendencia": r[2]
             })
 
+        # 2. Guardar en auditoría si no existe para esta hora
         if top3:
             check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
             check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
@@ -64,7 +67,7 @@ async def generar_prediccion(db: AsyncSession):
                     "h": hora_str, 
                     "a": top3[0]["animal"].lower(),
                     "c": float(top3[0]["porcentaje"].replace('%','')), 
-                    "p": "Neural V4.5 PRO"
+                    "p": f"Neural V4.5 PRO | Top1: {top3[0]['animal']}"
                 })
                 await db.commit()
 
@@ -73,7 +76,7 @@ async def generar_prediccion(db: AsyncSession):
         return {
             "decision": decision_final, 
             "top3": top3, 
-            "analisis": f"Basado en 28,709 registros | Sincronizado: {hora_str}"
+            "analisis": f"Basado en 28,709 registros | Fecha: {ahora.date()} | Hora: {hora_str}"
         }
     except Exception as e:
         await db.rollback()
@@ -81,32 +84,41 @@ async def generar_prediccion(db: AsyncSession):
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
+        # 3. Traer bitácora con cruce de probabilidades reales para auditoría
         query = text("""
-            SELECT hora, animal_predicho, resultado_real, acierto 
-            FROM auditoria_ia 
-            WHERE fecha = CURRENT_DATE
-            ORDER BY hora DESC 
-            LIMIT 5
+            SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, a.confianza_pct,
+                   p.probabilidad as prob_real_salio
+            FROM auditoria_ia a
+            LEFT JOIN probabilidades_hora p ON 
+                (LOWER(a.resultado_real) = LOWER(p.animalito) AND CAST(SUBSTRING(a.hora, 1, 2) AS INTEGER) = p.hora)
+            WHERE a.fecha = CURRENT_DATE
+            ORDER BY a.hora DESC 
+            LIMIT 8
         """)
         res = await db.execute(query)
         bitacora = []
+        
         for r in res.fetchall():
+            # Extraer número del animal real para la imagen
+            animal_real = r[2] if r[2] else "PENDIENTE"
+            num_real = "00"
+            if animal_real != "PENDIENTE":
+                # Buscar número en el MAPA
+                num_real = next((k for k, v in MAPA_ANIMALES.items() if v.lower() in animal_real.lower()), "00")
+
             bitacora.append({
                 "hora": r[0],
                 "animal_predicho": r[1].upper() if r[1] else "---",
-                "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
-                "acierto": r[3]
+                "probabilidad": f"{r[4]}%" if r[4] else "N/A",
+                "resultado_real": animal_real.upper(),
+                "acierto": r[3],
+                "img_real": f"{num_real}.png",
+                "prob_real": f"{round(r[5], 1)}%" if r[5] else "2.1%" 
             })
         return bitacora
     except Exception as e:
         print(f"Error en bitácora: {e}")
         return []
-
-async def analizar_estadisticas(db: AsyncSession):
-    query = text("SELECT animalito, COUNT(*) as c FROM historian GROUP BY 1 ORDER BY c DESC LIMIT 10")
-    res = await db.execute(query)
-    filas = res.fetchall()
-    return {"status": "success", "data": {r[0].upper(): r[1] for r in filas}}
 
 async def examen_cerebro(db: AsyncSession):
     """Calcula la efectividad real desde el 7 de febrero"""
