@@ -79,3 +79,5 @@ async def descargar_rango_historico(fecha_inicio: datetime, fecha_fin: datetime)
             await asyncio.sleep(0.5) # Pausa amigable para no ser bloqueados
             
     return datos
+
+
