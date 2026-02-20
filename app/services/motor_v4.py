@@ -22,7 +22,6 @@ async def generar_prediccion(db: AsyncSession):
         hora_int = ahora.hour
         hora_str = ahora.strftime("%I:00 %p")
 
-        # 1. Consulta al cerebro entrenado
         query = text("""
             SELECT animalito, probabilidad, 
             CASE 
@@ -43,7 +42,6 @@ async def generar_prediccion(db: AsyncSession):
         top3 = []
         for r in datos_ia:
             name = r[0].lower() if r[0] else "desconocido"
-            # Buscamos el número, si no existe ponemos "--"
             num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "--")
             top3.append({
                 "numero": num,
@@ -53,7 +51,6 @@ async def generar_prediccion(db: AsyncSession):
                 "tendencia": r[2]
             })
 
-        # 2. AUDITORÍA: Verificación y Registro
         if top3:
             check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
             check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
@@ -84,7 +81,6 @@ async def generar_prediccion(db: AsyncSession):
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
-        # Traemos los de hoy para ver efectividad en tiempo real
         query = text("""
             SELECT hora, animal_predicho, resultado_real, acierto 
             FROM auditoria_ia 
@@ -107,27 +103,30 @@ async def obtener_bitacora_avance(db: AsyncSession):
         return []
 
 async def analizar_estadisticas(db: AsyncSession):
-    query = text("SELECT animalito, COUNT(*) as c FROM historico GROUP BY 1 ORDER BY c DESC LIMIT 10")
+    query = text("SELECT animalito, COUNT(*) as c FROM historian GROUP BY 1 ORDER BY c DESC LIMIT 10")
     res = await db.execute(query)
     filas = res.fetchall()
     return {"status": "success", "data": {r[0].upper(): r[1] for r in filas}}
-    async def examen_cerebro(db: AsyncSession):
-    # Comparamos las predicciones guardadas contra el histórico real
-    query = text("""
-        SELECT 
-            COUNT(*) as total_operaciones,
-            SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END) as aciertos,
-            (SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END)::FLOAT / COUNT(*)::FLOAT) * 100 as efectividad
-        FROM auditoria_ia
-        WHERE fecha >= '2026-02-07'
-    """)
-    
-    res = await db.execute(query)
-    stats = res.fetchone()
-    
-    return {
-        "periodo": "7 Feb al Hoy",
-        "total_jugadas": stats[0],
-        "ganadas": stats[1],
-        "porcentaje_exito": f"{round(stats[2], 2) if stats[2] else 0}%"
-    }
+
+async def examen_cerebro(db: AsyncSession):
+    """Calcula la efectividad real desde el 7 de febrero"""
+    try:
+        query = text("""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN acierto = TRUE THEN 1 ELSE 0 END) as ganadas,
+                AVG(CASE WHEN acierto IS NOT NULL THEN (CASE WHEN acierto THEN 100 ELSE 0 END) ELSE NULL END) as efectividad
+            FROM auditoria_ia
+            WHERE fecha >= '2026-02-07'
+        """)
+        res = await db.execute(query)
+        stats = res.fetchone()
+        
+        return {
+            "periodo": "7 Feb al Hoy",
+            "total_jugadas": stats[0] if stats[0] else 0,
+            "ganadas": stats[1] if stats[1] else 0,
+            "porcentaje_exito": f"{round(stats[2], 2) if stats[2] else 0}%"
+        }
+    except Exception as e:
+        return {"error": str(e)}
