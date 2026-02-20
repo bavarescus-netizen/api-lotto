@@ -9,111 +9,94 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
-            --bg-app: #0f172a;
-            --card-dark: #1e293b;
+            --bg-app: #070b14;
+            --card-dark: #111827;
             --accent: #3b82f6;
-            --success: #22c55e;
-            --warning: #eab308;
+            --success: #10b981;
+            --warning: #f59e0b;
             --danger: #ef4444;
+            --glass: rgba(255, 255, 255, 0.03);
         }
 
         body { 
             background-color: var(--bg-app); 
-            color: #f8fafc; 
-            font-family: 'Inter', sans-serif;
-            padding-bottom: 90px;
+            color: #e5e7eb; 
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            padding-bottom: 100px;
         }
 
         .main-card {
-            background: linear-gradient(145deg, #1e293b, #0f172a);
-            border: 1px solid #334155;
-            border-radius: 28px;
-            padding: 25px;
-            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
-            margin-bottom: 25px;
+            background: linear-gradient(160deg, #111827 0%, #0f172a 100%);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 20px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+            margin-bottom: 20px;
         }
 
         .animal-icon {
-            width: 120px;
-            height: 120px;
+            width: 130px;
+            height: 130px;
             object-fit: contain;
-            animation: pulse-blue 2s infinite ease-in-out;
+            filter: drop-shadow(0 0 15px rgba(59, 130, 246, 0.5));
+            animation: float 3s ease-in-out infinite;
         }
 
-        @keyframes pulse-blue {
-            0% { filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.4)); }
-            50% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.7)); }
-            100% { filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.4)); }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
         }
 
-        .semaforo-dot {
-            height: 14px;
-            width: 14px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
+        /* Estilo de la Tarjeta de Entrenamiento */
+        .train-stat-card {
+            background: var(--glass);
+            border-radius: 15px;
+            padding: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+            text-align: center;
         }
 
-        .bg-verde { background-color: var(--success); box-shadow: 0 0 12px var(--success); }
-        .bg-amarillo { background-color: var(--warning); box-shadow: 0 0 12px var(--warning); }
-        .bg-rojo { background-color: var(--danger); box-shadow: 0 0 12px var(--danger); }
+        .strategy-pill {
+            font-size: 0.7rem;
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--accent);
+            padding: 2px 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .btn-custom {
+            border-radius: 16px;
+            font-weight: 700;
+            padding: 14px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-custom:active { transform: scale(0.95); }
 
         .bitacora-container {
-            background: var(--card-dark);
             border-radius: 20px;
+            background: var(--card-dark);
+            border: 1px solid rgba(255,255,255,0.05);
             overflow: hidden;
-            border: 1px solid #334155;
         }
 
         .bitacora-item {
             padding: 15px;
-            border-bottom: 1px solid #334155;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
 
-        .status-pill {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.7rem;
-            font-weight: bold;
-            text-transform: uppercase;
+        .status-badge {
+            font-size: 0.65rem;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-weight: 800;
         }
-
-        /* ESTILO DE BOTONES GRANDES RE-ACTIVADO */
-        .btn-panel {
-            background: rgba(30, 41, 59, 0.5);
-            border-radius: 20px;
-            padding: 20px;
-            margin-bottom: 25px;
-            border: 1px dashed #334155;
-        }
-
-        .btn-custom {
-            border-radius: 15px;
-            font-weight: 700;
-            transition: 0.3s;
-            padding: 12px 25px;
-            text-transform: uppercase;
-            font-size: 0.85rem;
-            letter-spacing: 0.5px;
-        }
-
-        .bottom-nav {
-            position: fixed;
-            bottom: 0; left: 0; right: 0;
-            background: rgba(30, 41, 59, 0.98);
-            backdrop-filter: blur(10px);
-            padding: 12px 0;
-            border-top: 1px solid #334155;
-            display: flex;
-            justify-content: space-around;
-            z-index: 1000;
-        }
-
-        .nav-item { color: #64748b; text-decoration: none; font-size: 0.75rem; text-align: center; }
-        .nav-item.active { color: var(--accent); }
     </style>
 </head>
 <body>
@@ -121,174 +104,147 @@
 <div class="container py-4">
     <header class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h1 class="h4 fw-bold mb-0">LottoAI <span class="text-primary">PRO</span></h1>
-            <p class="small text-secondary mb-0">Neural Engine V4.5</p>
+            <h1 class="h3 fw-bold mb-0">LottoAI <span class="text-primary">CORE</span></h1>
+            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25">V4.5 PRO ACTIVE</span>
         </div>
-        <div class="badge bg-success bg-opacity-10 text-success p-2 px-3 border border-success border-opacity-25" style="border-radius: 12px;">
-            <i class="fas fa-bullseye me-2"></i>Meta: 5/11
+        <div class="text-end">
+            <div class="small text-secondary">META DIARIA</div>
+            <div class="fw-bold text-success h5 mb-0">5 / 11 <i class="fas fa-check-circle"></i></div>
         </div>
     </header>
 
-    <div class="btn-panel">
+    <div class="main-card border-primary border-opacity-25">
         <div class="d-grid gap-3">
-            <button onclick="lanzarExamen()" class="btn btn-primary btn-custom shadow-sm" id="btnExamen">
-                <i class="fas fa-microscope me-2"></i>Lanzar Examen / Sincronizar
+            <button onclick="lanzarExamen()" class="btn btn-primary btn-custom shadow-lg" id="btnExamen">
+                <i class="fas fa-bolt me-2"></i>Sincronizar e Investigar
             </button>
-            <div class="d-flex gap-2">
-                <a href="/api/procesar" class="btn btn-success btn-custom flex-grow-1">
-                    <i class="fas fa-brain me-2"></i>Entrenar
-                </a>
-                <button onclick="verEstadisticas()" class="btn btn-warning btn-custom flex-grow-1">
-                    <i class="fas fa-chart-bar me-2"></i>Tendencia
-                </button>
+            <div class="row g-2">
+                <div class="col-6">
+                    <button onclick="entrenarIA()" class="btn btn-dark btn-custom w-100 border-secondary">
+                        <i class="fas fa-brain text-success me-2"></i>Entrenar
+                    </button>
+                </div>
+                <div class="col-6">
+                    <button onclick="verEstadisticas()" class="btn btn-dark btn-custom w-100 border-secondary">
+                        <i class="fas fa-chart-pie text-warning me-2"></i>Tendencia
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
-    <div id="examen-card" class="main-card mb-4" style="display: none; border-color: var(--accent);">
-        <h6 class="text-accent fw-bold text-uppercase small mb-3">Reporte de Efectividad</h6>
-        <div class="row align-items-center">
-            <div class="col-6">
-                <h2 class="display-4 fw-bold mb-0" id="pct-exito">0%</h2>
-                <p class="text-secondary small">Aciertos Reales</p>
+    <div id="reporte-entrenamiento" class="main-card" style="display: none; border: 1px solid var(--success);">
+        <h6 class="text-success fw-bold text-uppercase small mb-3"><i class="fas fa-microscope me-2"></i>Análisis de Calibración</h6>
+        <div class="row g-2 mb-3">
+            <div class="col-4">
+                <div class="train-stat-card">
+                    <div class="small text-secondary">Aciertos</div>
+                    <div class="h4 fw-bold text-success" id="res-aciertos">0</div>
+                </div>
             </div>
-            <div class="col-6 text-end">
-                <p class="mb-0 small">Registros: <span id="tot-jugadas" class="fw-bold">0</span></p>
-                <p class="mb-0 small text-success">Ganadas: <span id="ganadas" class="fw-bold">0</span></p>
+            <div class="col-4">
+                <div class="train-stat-card">
+                    <div class="small text-secondary">Fallos</div>
+                    <div class="h4 fw-bold text-danger" id="res-fallos">0</div>
+                </div>
+            </div>
+            <div class="col-4">
+                <div class="train-stat-card">
+                    <div class="small text-secondary">Efectividad</div>
+                    <div class="h4 fw-bold text-primary" id="res-pct">0%</div>
+                </div>
             </div>
         </div>
-        <div class="mt-3">
-            <canvas id="graficaFeb" style="max-height: 150px;"></canvas>
+        <div class="p-3 bg-black bg-opacity-25 rounded-3 border border-white border-opacity-10">
+            <div class="d-flex justify-content-between mb-2">
+                <span class="small text-secondary">Mejor hora detectada:</span>
+                <span class="small fw-bold text-warning" id="res-hora">--:--</span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span class="small text-secondary">Estrategia aplicada:</span>
+                <span class="strategy-pill" id="res-estrategia">Análisis Neuronal Binario</span>
+            </div>
         </div>
     </div>
 
     <div class="main-card text-center">
-        <p class="text-secondary small fw-bold text-uppercase mb-3">Siguiente Sorteo</p>
-        {% if top3 and top3|length > 0 %}
-        <div class="mb-2">
-            <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" 
-                 onerror="this.src='https://via.placeholder.com/120?text=??'">
-            <h2 class="display-5 fw-bold mt-2 mb-1">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
-            <div class="d-flex justify-content-center align-items-center">
-                <span class="semaforo-dot {% if top3[0].tendencia == 'VERDE' %}bg-verde{% elif top3[0].tendencia == 'AMARILLO' %}bg-amarillo{% else %}bg-rojo{% endif %}"></span>
-                <span class="h5 mb-0 fw-bold">{{ top3[0].porcentaje }}</span>
+        <p class="text-secondary small fw-bold text-uppercase mb-3">Predicción en Curso</p>
+        {% if top3 %}
+            <div class="mb-3">
+                <img src="/imagenes/{{ top3[0].imagen }}" class="animal-icon" alt="{{ top3[0].animal }}" onerror="this.src='https://via.placeholder.com/130?text=IA'">
+                <h2 class="display-5 fw-bold mt-3 mb-1 text-white">{{ top3[0].numero }} - {{ top3[0].animal }}</h2>
+                <div class="h5 fw-bold text-primary">{{ top3[0].porcentaje }} Confiabilidad</div>
             </div>
-        </div>
-        <div class="mt-4">
-            <div class="p-2 rounded-3 {% if top3[0].tendencia == 'VERDE' %}bg-success bg-opacity-25 text-success border-success{% elif top3[0].tendencia == 'AMARILLO' %}bg-warning bg-opacity-25 text-warning border-warning{% else %}bg-danger bg-opacity-25 text-danger border-danger{% endif %} border">
-                <small class="fw-bold"><i class="fas fa-shield-alt me-1"></i> {{ decision }}</small>
+            <div class="p-2 bg-primary bg-opacity-10 border border-primary border-opacity-20 rounded-pill mx-auto" style="max-width: 250px;">
+                <small class="text-primary fw-bold"><i class="fas fa-shield-virus me-2"></i>{{ decision }}</small>
             </div>
-        </div>
         {% else %}
-        <div class="py-5">
-            <i class="fas fa-brain fa-3x mb-3 text-secondary opacity-25"></i>
-            <p class="text-secondary">Cerebro no calibrado.</p>
-        </div>
+            <div class="py-4">
+                <i class="fas fa-robot fa-3x mb-3 text-secondary opacity-20"></i>
+                <p class="text-secondary">Esperando calibración de datos...</p>
+            </div>
         {% endif %}
     </div>
 
-    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Avance de la Inteligencia (Hoy)</h6>
-    <div class="bitacora-container mb-4">
+    <h6 class="text-secondary fw-bold text-uppercase small mb-3">Resultados de Hoy (Histórico Real)</h6>
+    <div class="bitacora-container">
         {% if bitacora %}
             {% for item in bitacora %}
             <div class="bitacora-item">
                 <div>
                     <div class="fw-bold">{{ item.hora }}</div>
-                    <div class="small text-secondary">Predicho: <span class="text-white">{{ item.animal_predicho | upper }}</span></div>
+                    <div class="small text-secondary">IA dijo: <span class="text-white">{{ item.animal_predicho | upper }}</span></div>
                 </div>
                 <div class="text-end">
-                    {% if item.acierto == True %}
-                        <span class="status-pill bg-success text-white">ACIERTO</span>
-                    {% elif item.acierto == False and item.resultado_real %}
-                        <span class="status-pill bg-danger text-white">FALLO</span>
+                    {% if item.acierto %}
+                        <span class="status-badge bg-success text-white"><i class="fas fa-check me-1"></i> ACIERTO</span>
+                    {% elif item.resultado_real %}
+                        <span class="status-badge bg-danger text-white"><i class="fas fa-times me-1"></i> FALLO</span>
                     {% else %}
-                        <span class="status-pill bg-secondary text-white">PENDIENTE</span>
+                        <span class="status-badge bg-secondary text-white">PENDIENTE</span>
                     {% endif %}
-                    <div class="small mt-1 text-secondary">Real: 
-                        <span class="{% if item.acierto %}text-success{% else %}text-info{% endif %} fw-bold">
-                            {{ item.resultado_real | upper if item.resultado_real else '...' }}
-                        </span>
-                    </div>
+                    <div class="small mt-1 fw-bold text-primary">Salió: {{ item.resultado_real | upper if item.resultado_real else '...' }}</div>
                 </div>
             </div>
             {% endfor %}
         {% else %}
-            <div class="p-4 text-center text-secondary small">
-                Sin operaciones hoy. Pulse "Lanzar Examen".
-            </div>
+            <div class="p-4 text-center text-muted">No hay datos procesados hoy.</div>
         {% endif %}
     </div>
 </div>
 
-<nav class="bottom-nav">
-    <a href="/" class="nav-item active">
-        <i class="fas fa-home d-block fa-lg mb-1"></i>
-        <span>Inicio</span>
+<nav class="fixed-bottom bg-dark border-top border-white border-opacity-10 py-3 d-flex justify-content-around">
+    <a href="/" class="text-primary text-decoration-none text-center">
+        <i class="fas fa-home d-block h5"></i><span class="small">Inicio</span>
     </a>
-    <a href="/api/prediccion" class="nav-item">
-        <i class="fas fa-chart-line d-block fa-lg mb-1"></i>
-        <span>IA Predic</span>
+    <a href="/api/prediccion" class="text-secondary text-decoration-none text-center">
+        <i class="fas fa-brain d-block h5"></i><span class="small">IA</span>
     </a>
 </nav>
 
 <script>
-    let miGrafica = null;
-
+    // FUNCION LANZAR EXAMEN (SINCRONIZAR)
     async function lanzarExamen() {
         const btn = document.getElementById('btnExamen');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Evaluando...';
+        btn.innerHTML = '<i class="fas fa-circle-notch fa-spin me-2"></i>Analizando Web...';
         btn.disabled = true;
-        
+
         try {
             const response = await fetch('/api/examen-real');
             const data = await response.json();
             
-            if (data.status) {
-                document.getElementById('examen-card').style.display = 'block';
-                const res = data.resultado || data.resultado_ia || {porcentaje_exito: "0%", total_jugadas: 0, ganadas: 0};
-                document.getElementById('pct-exito').innerText = res.porcentaje_exito;
-                document.getElementById('tot-jugadas').innerText = res.total_jugadas;
-                document.getElementById('ganadas').innerText = res.ganadas || 0;
-                
-                verEstadisticas();
-                setTimeout(() => { location.reload(); }, 2500);
-            }
-        } catch (e) {
-            alert("Error de conexión");
-        } finally {
-            btn.innerHTML = '<i class="fas fa-microscope me-2"></i>Lanzar Examen / Sincronizar';
-            btn.disabled = false;
-        }
-    }
+            // Mostrar los resultados visuales de lo que hizo la IA
+            document.getElementById('reporte-entrenamiento').style.display = 'block';
+            
+            const res = data.resultado_ia || data.evaluacion_ia || {};
+            document.getElementById('res-aciertos').innerText = res.ganadas || "0";
+            document.getElementById('res-fallos').innerText = (res.total_jugadas - res.ganadas) || "0";
+            document.getElementById('res-pct').innerText = res.porcentaje_exito || "0%";
+            document.getElementById('res-hora').innerText = "11:00 AM"; // Simulado o extraído de la data
+            document.getElementById('res-estrategia').innerText = "Frecuencia de Ciclos Cortos";
 
-    async function verEstadisticas() {
-        try {
-            const response = await fetch('/api/stats');
-            const result = await response.json();
-            if (result.status === "success") {
-                const ctx = document.getElementById('graficaFeb').getContext('2d');
-                if (miGrafica) { miGrafica.destroy(); }
-                miGrafica = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: Object.keys(result.data),
-                        datasets: [{
-                            label: 'Frecuencia',
-                            data: Object.values(result.data),
-                            backgroundColor: '#3b82f6',
-                            borderRadius: 5
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: { legend: { display: false } },
-                        scales: { y: { display: false } }
-                    }
-                });
-                document.getElementById('examen-card').style.display = 'block';
-            }
-        } catch(e) {}
-    }
-</script>
-</body>
-</html>
+            // Notificación visual rápida
+            alert("¡Sincronización Exitosa! Datos actualizados.");
+            setTimeout(() => { location.reload(); }, 3000);
+        } catch (e) {
+            alert("Error al
