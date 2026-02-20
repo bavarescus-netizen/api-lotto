@@ -22,7 +22,7 @@ async def generar_prediccion(db: AsyncSession):
         hora_int = ahora.hour
         hora_str = ahora.strftime("%I:00 %p")
 
-        # 1. SQL DE ALTA PRECISIÓN: Consulta el cerebro entrenado
+        # 1. Consulta al cerebro entrenado
         query = text("""
             SELECT animalito, probabilidad, 
             CASE 
@@ -42,30 +42,34 @@ async def generar_prediccion(db: AsyncSession):
 
         top3 = []
         for r in datos_ia:
-            name = r[0].lower()
-            num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "0")
+            name = r[0].lower() if r[0] else "desconocido"
+            # Buscamos el número, si no existe ponemos "--"
+            num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "--")
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png", # Importante: coincide con tus archivos .png
+                "imagen": f"{name}.png",
                 "porcentaje": f"{round(r[1], 1)}%",
                 "tendencia": r[2]
             })
 
-        # 2. AUDITORÍA: Guardamos la predicción solo si no existe una para esta hora hoy
-        # Así evitamos llenar la base de datos de basura al refrescar la página
-        check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
-        check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
-        
-        if not check_res.fetchone():
-            await db.execute(text("""
-                INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
-                VALUES (:f, :h, :a, :c, :p)
-            """), {
-                "f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(),
-                "c": float(top3[0]["porcentaje"].replace('%','')), "p": "Neural V4.5 PRO"
-            })
-            await db.commit()
+        # 2. AUDITORÍA: Verificación y Registro
+        if top3:
+            check_query = text("SELECT id FROM auditoria_ia WHERE fecha = :f AND hora = :h")
+            check_res = await db.execute(check_query, {"f": ahora.date(), "h": hora_str})
+            
+            if not check_res.fetchone():
+                await db.execute(text("""
+                    INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
+                    VALUES (:f, :h, :a, :c, :p)
+                """), {
+                    "f": ahora.date(), 
+                    "h": hora_str, 
+                    "a": top3[0]["animal"].lower(),
+                    "c": float(top3[0]["porcentaje"].replace('%','')), 
+                    "p": "Neural V4.5 PRO"
+                })
+                await db.commit()
 
         decision_final = "META 5/11 ACTIVA" if top3[0]["tendencia"] != "ROJO" else "⚠️ RIESGO ALTO - NO OPERAR"
 
@@ -78,10 +82,9 @@ async def generar_prediccion(db: AsyncSession):
         await db.rollback()
         return {"error": str(e)}
 
-# --- FUNCIÓN NUEVA: ESTA ES LA QUE MUESTRA LOS RESULTADOS EN EL DASHBOARD ---
 async def obtener_bitacora_avance(db: AsyncSession):
-    """Extrae los últimos 5 sorteos comparando predicción vs realidad"""
     try:
+        # Traemos los de hoy para ver efectividad en tiempo real
         query = text("""
             SELECT hora, animal_predicho, resultado_real, acierto 
             FROM auditoria_ia 
@@ -90,13 +93,12 @@ async def obtener_bitacora_avance(db: AsyncSession):
             LIMIT 5
         """)
         res = await db.execute(query)
-        # Convertimos a lista de diccionarios para que Jinja2 lo lea fácil
         bitacora = []
         for r in res.fetchall():
             bitacora.append({
                 "hora": r[0],
-                "animal_predicho": r[1],
-                "resultado_real": r[2],
+                "animal_predicho": r[1].upper() if r[1] else "---",
+                "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
                 "acierto": r[3]
             })
         return bitacora
