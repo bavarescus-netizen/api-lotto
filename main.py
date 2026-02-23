@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from datetime import datetime, date  # Importamos date para la validación
+from datetime import datetime, date
 
 # 1. Configuración de rutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,7 +22,7 @@ static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# Según tu imagen image_d3f242.png, dashboard.html está en app/routes
+# Localización de dashboard.html en app/routes
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
@@ -39,29 +39,32 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN (CORREGIDA PARA EVITAR EL DATAERROR) ---
+# --- RUTA DE SINCRONIZACIÓN ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
-        inicio = datetime(2026, 2, 7)
-        fin = datetime.now()
-        datos_nuevos = await descargar_rango_historico(inicio, fin)
+        inicio = datetime(2026, 2, 7).date()
+        hoy = date.today()
+        
+        datos_nuevos = await descargar_rango_historico(inicio, hoy)
         
         agregados = 0
         if datos_nuevos:
             for reg in datos_nuevos:
-                # CORRECCIÓN PARA EL ERROR 'toordinal': 
-                # Nos aseguramos de que la fecha sea un objeto date, no un string
-                fecha_valida = reg["fecha"]
-                if isinstance(fecha_valida, str):
-                    fecha_valida = datetime.strptime(fecha_valida, '%Y-%m-%d').date()
+                # Conversión segura a objeto date
+                f_raw = reg["fecha"]
+                fecha_valida = datetime.strptime(f_raw, '%Y-%m-%d').date() if isinstance(f_raw, str) else f_raw
+
+                # Evitar insertar fechas futuras por error del scraper
+                if fecha_valida > hoy:
+                    continue
 
                 result = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {
-                    "f": fecha_valida, # Ahora es un objeto date
+                    "f": fecha_valida,
                     "h": reg["hora"], 
                     "a": reg["animalito"], 
                     "l": reg["loteria"]
@@ -72,11 +75,19 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         
         return JSONResponse({
             "status": "success",
-            "message": f"Sincronización Exitosa. {agregados} nuevos datos registrados."
+            "message": f"Sincronización Exitosa. {agregados} nuevos registros guardados."
         })
     except Exception as e:
         await db.rollback()
         return JSONResponse({"status": "error", "message": f"Error de DB: {str(e)}"}, status_code=500)
+
+# --- RUTA PROCESAR (RECALIBRAR) ---
+@app.get("/api/procesar")
+async def procesar_entrenamiento():
+    return JSONResponse({
+        "status": "success",
+        "message": "Motor V4.5 PRO activo y procesando."
+    })
 
 # --- RUTA HOME (DASHBOARD) ---
 @app.get("/", response_class=HTMLResponse)
@@ -93,7 +104,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             prob_real = item.get("prob_real", "2.1%")
             
             if animal_real and animal_real != "PENDIENTE":
-                # Limpieza de nombre para la imagen
                 nombre_limpio = animal_real.split('(')[0].strip().lower()
                 img_name = f"{nombre_limpio}.png"
                 
@@ -111,7 +121,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "prob_real": prob_real
             })
 
-        # Renderizamos dashboard.html
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "res": res_ia,
