@@ -22,7 +22,7 @@ static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# CORRECCIÓN: Apuntamos a la carpeta 'app/routes' donde está tu dashboard.html
+# Ubicación de dashboard.html según tu estructura: app/routes/
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
@@ -68,7 +68,6 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         })
     except Exception as e:
         await db.rollback()
-        # CORRECCIÓN: Paréntesis cerrado correctamente
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 # --- RUTA PROCESAR (ENTRENAR) ---
@@ -92,4 +91,44 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 
         bitacora_procesada = []
         for item in bitacora_raw:
-            animal_real = item.get("
+            # Línea corregida (aquí era el SyntaxError)
+            animal_real = item.get("resultado_real")
+            img_name = "pendiente.png"
+            num_real = "--"
+            prob_real = item.get("prob_real", "2.1%")
+            
+            if animal_real and animal_real != "PENDIENTE":
+                nombre_limpio = animal_real.split('(')[0].strip().lower()
+                img_name = f"{nombre_limpio}.png"
+                
+                match = re.search(r'\((\d+)\)', animal_real)
+                if match:
+                    num_real = match.group(1)
+            
+            bitacora_procesada.append({
+                "hora": item.get("hora"),
+                "animal_predicho": item.get("animal_predicho"),
+                "resultado_real": animal_real,
+                "acierto": item.get("acierto"),
+                "img_real": img_name,
+                "num_real": num_real,
+                "prob_real": prob_real
+            })
+
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "res": res_ia,
+            "bitacora": bitacora_procesada
+        })
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+# --- EVENTOS DE ARRANQUE ---
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(ciclo_infinito())
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
