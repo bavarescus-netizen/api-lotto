@@ -8,21 +8,21 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, date  # Importamos date para la validación
 
-# 1. Configuración de rutas para Render
+# 1. Configuración de rutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, "app"))
 
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
-# 2. Configuración de Archivos Estáticos
+# 2. Archivos Estáticos y Plantillas
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# Ubicación de dashboard.html según tu estructura: app/routes/
+# Según tu imagen image_d3f242.png, dashboard.html está en app/routes
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
@@ -32,14 +32,14 @@ from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
 from app.core.scheduler import ciclo_infinito 
 
-# Importación de Routers
+# Routers
 from app.routes import prediccion, entrenar, stats, historico
 app.include_router(prediccion.router, prefix="/api", tags=["IA"])
 app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN ---
+# --- RUTA DE SINCRONIZACIÓN (CORREGIDA PARA EVITAR EL DATAERROR) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -50,13 +50,21 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         agregados = 0
         if datos_nuevos:
             for reg in datos_nuevos:
+                # CORRECCIÓN PARA EL ERROR 'toordinal': 
+                # Nos aseguramos de que la fecha sea un objeto date, no un string
+                fecha_valida = reg["fecha"]
+                if isinstance(fecha_valida, str):
+                    fecha_valida = datetime.strptime(fecha_valida, '%Y-%m-%d').date()
+
                 result = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {
-                    "f": reg["fecha"], "h": reg["hora"], 
-                    "a": reg["animalito"], "l": reg["loteria"]
+                    "f": fecha_valida, # Ahora es un objeto date
+                    "h": reg["hora"], 
+                    "a": reg["animalito"], 
+                    "l": reg["loteria"]
                 })
                 if result.rowcount > 0:
                     agregados += 1
@@ -68,21 +76,9 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         })
     except Exception as e:
         await db.rollback()
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse({"status": "error", "message": f"Error de DB: {str(e)}"}, status_code=500)
 
-# --- RUTA PROCESAR (ENTRENAR) ---
-@app.get("/api/procesar")
-async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
-    try:
-        await asyncio.sleep(1) 
-        return JSONResponse({
-            "status": "success",
-            "message": "Motor V4.5 PRO recalibrado correctamente."
-        })
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
-# 4. Ruta Home (Dashboard)
+# --- RUTA HOME (DASHBOARD) ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
@@ -91,13 +87,13 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 
         bitacora_procesada = []
         for item in bitacora_raw:
-            # Línea corregida (aquí era el SyntaxError)
             animal_real = item.get("resultado_real")
             img_name = "pendiente.png"
             num_real = "--"
             prob_real = item.get("prob_real", "2.1%")
             
             if animal_real and animal_real != "PENDIENTE":
+                # Limpieza de nombre para la imagen
                 nombre_limpio = animal_real.split('(')[0].strip().lower()
                 img_name = f"{nombre_limpio}.png"
                 
@@ -115,15 +111,15 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "prob_real": prob_real
             })
 
+        # Renderizamos dashboard.html
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "res": res_ia,
             "bitacora": bitacora_procesada
         })
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse({"status": "error", "message": f"Error en Home: {str(e)}"}, status_code=500)
 
-# --- EVENTOS DE ARRANQUE ---
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(ciclo_infinito())
