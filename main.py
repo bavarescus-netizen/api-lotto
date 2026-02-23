@@ -18,27 +18,29 @@ sys.path.append(os.path.join(BASE_DIR, "app"))
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
 # 2. Configuración de Archivos Estáticos y HTML
+# Según tu raíz: imagenes/ está en la raíz
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
+# Según tu raíz: template.html está dentro de app/routes/
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
-# 3. Importaciones de servicios (CORREGIDO: Sin examen_cerebro)
+# 3. Importaciones de servicios
 from db import get_db
 from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
 from app.core.scheduler import ciclo_infinito 
 
-# Routers
+# Importación de Routers
 from app.routes import prediccion, entrenar, stats, historico
 app.include_router(prediccion.router, prefix="/api", tags=["IA"])
 app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN (CORREGIDA) ---
+# --- RUTA DE SINCRONIZACIÓN ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -61,7 +63,6 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                     agregados += 1
             await db.commit()
         
-        # Se eliminó la llamada a examen_cerebro para evitar el ImportError
         return JSONResponse({
             "status": "success",
             "message": f"Sincronización Exitosa. {agregados} nuevos datos registrados."
@@ -77,7 +78,7 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
         await asyncio.sleep(1) 
         return JSONResponse({
             "status": "success",
-            "message": "Motor V4.5 PRO recalibrado con los 28,709 registros."
+            "message": "Motor V4.5 PRO recalibrado correctamente."
         })
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
@@ -85,6 +86,7 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
 # 4. Ruta Home (Dashboard)
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
+    # Llamadas al motor de servicios
     res_ia = await generar_prediccion(db)
     bitacora_raw = await obtener_bitacora_avance(db)
 
@@ -113,7 +115,8 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             "prob_real": prob_real
         })
 
-    return templates.TemplateResponse("index.html", {
+    # Renderizado del archivo template.html ubicado en app/routes/
+    return templates.TemplateResponse("template.html", {
         "request": request,
         "res": res_ia,
         "bitacora": bitacora_procesada
@@ -122,9 +125,11 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 # --- EVENTOS DE ARRANQUE ---
 @app.on_event("startup")
 async def startup_event():
+    # Inicia el ciclo en segundo plano
     asyncio.create_task(ciclo_infinito())
 
 if __name__ == "__main__":
     import uvicorn
+    # Render asigna el puerto dinámicamente
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
