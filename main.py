@@ -18,14 +18,13 @@ sys.path.append(os.path.join(BASE_DIR, "app"))
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
 # 2. Configuración de Archivos Estáticos y HTML
-# Según tu raíz: imagenes/ está en la raíz
+# Imágenes en la raíz /imagenes
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-# Según tu raíz: template.html está dentro de app/routes/
-template_path = os.path.join(BASE_DIR, "app", "routes")
-templates = Jinja2Templates(directory=template_path)
+# CORRECCIÓN: Buscamos el HTML en la raíz (BASE_DIR) porque ahí está template.html
+templates = Jinja2Templates(directory=BASE_DIR)
 
 # 3. Importaciones de servicios
 from db import get_db
@@ -69,67 +68,4 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         })
     except Exception as e:
         await db.rollback()
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
-# --- RUTA PROCESAR (ENTRENAR) ---
-@app.get("/api/procesar")
-async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
-    try:
-        await asyncio.sleep(1) 
-        return JSONResponse({
-            "status": "success",
-            "message": "Motor V4.5 PRO recalibrado correctamente."
-        })
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
-
-# 4. Ruta Home (Dashboard)
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request, db: AsyncSession = Depends(get_db)):
-    # Llamadas al motor de servicios
-    res_ia = await generar_prediccion(db)
-    bitacora_raw = await obtener_bitacora_avance(db)
-
-    bitacora_procesada = []
-    for item in bitacora_raw:
-        animal_real = item.get("resultado_real")
-        img_name = "pendiente.png"
-        num_real = "--"
-        prob_real = item.get("prob_real", "2.1%")
-        
-        if animal_real and animal_real != "PENDIENTE":
-            nombre_limpio = animal_real.split('(')[0].strip().lower()
-            img_name = f"{nombre_limpio}.png"
-            
-            match = re.search(r'\((\d+)\)', animal_real)
-            if match:
-                num_real = match.group(1)
-        
-        bitacora_procesada.append({
-            "hora": item.get("hora"),
-            "animal_predicho": item.get("animal_predicho"),
-            "resultado_real": animal_real,
-            "acierto": item.get("acierto"),
-            "img_real": img_name,
-            "num_real": num_real,
-            "prob_real": prob_real
-        })
-
-    # Renderizado del archivo template.html ubicado en app/routes/
-    return templates.TemplateResponse("template.html", {
-        "request": request,
-        "res": res_ia,
-        "bitacora": bitacora_procesada
-    })
-
-# --- EVENTOS DE ARRANQUE ---
-@app.on_event("startup")
-async def startup_event():
-    # Inicia el ciclo en segundo plano
-    asyncio.create_task(ciclo_infinito())
-
-if __name__ == "__main__":
-    import uvicorn
-    # Render asigna el puerto dinámicamente
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+        return JSONResponse({"status": "error", "message": str(e)}, status_
