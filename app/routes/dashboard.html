@@ -3,91 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI CORE - Auditoría Pro</title>
+    <title>LottoAI CORE V4.5 PRO</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #05080f; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; }
-        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
-        .glass-card { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 15px; margin-bottom: 15px; }
-        .animal-img-card { width: 60px; height: 60px; object-fit: contain; }
-        .num-badge { background: white; color: black; font-weight: 800; border-radius: 6px; padding: 2px 8px; display: inline-block; margin-top: 5px; font-size: 1rem; }
-        .badge-percent { font-size: 0.75rem; color: var(--primary); font-weight: bold; margin-top: 5px; }
-        .hit { border-left: 5px solid var(--success); }
-        .miss { border-left: 5px solid var(--danger); }
-        .btn-main { border-radius: 12px; font-weight: bold; text-transform: uppercase; padding: 12px; }
+        :root { --bg: #05080f; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; --warning: #f59e0b; }
+        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; overflow-x: hidden; }
+        .glass-card { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 15px; padding: 15px; }
+        .animal-img-card { width: 55px; height: 55px; object-fit: contain; filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.5)); }
+        .num-badge { background: #fff; color: #000; font-weight: 800; border-radius: 6px; padding: 1px 6px; font-size: 0.9rem; }
+        .badge-percent { font-size: 0.7rem; color: var(--primary); font-weight: bold; margin-top: 4px; }
+        .hit { border-left: 4px solid var(--success); background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%); }
+        .miss { border-left: 4px solid var(--danger); background: linear-gradient(90deg, rgba(239, 68, 68, 0.1) 0%, transparent 100%); }
+        .btn-main { border-radius: 12px; font-weight: bold; text-transform: uppercase; padding: 10px; font-size: 0.8rem; }
+        .scroll-x { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; scrollbar-width: none; }
+        .scroll-x::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
 
 <div class="container py-3">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h4>
-        <div class="text-end text-success small fw-bold">DB: 28,709 ✅</div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="fw-bold text-primary mb-0">LottoAI <span class="text-white">CORE</span></h4>
+            <div class="text-secondary" style="font-size: 0.7rem;">{{ analisis }}</div>
+        </div>
+        <div class="text-end">
+            <span class="badge bg-success" style="font-size: 0.6rem;">LIVE 2018-2026</span>
+        </div>
     </div>
 
     <div class="row g-2 mb-4">
-        <div class="col-12"><button onclick="accion('/api/examen-real')" class="btn btn-primary btn-main w-100">Sincronizar Web</button></div>
-        <div class="col-6"><button onclick="alert('Registros: 28,709')" class="btn btn-dark btn-main w-100 border-secondary">Ver DB</button></div>
-        <div class="col-6"><button onclick="accion('/api/procesar')" class="btn btn-dark btn-main w-100 border-secondary text-success">Entrenar</button></div>
+        <div class="col-12"><button onclick="accion('/api/examen-real')" class="btn btn-primary btn-main w-100"><i class="fas fa-sync-alt me-2"></i>Sincronizar Web</button></div>
+        <div class="col-6"><button onclick="location.reload()" class="btn btn-dark btn-main w-100 border-secondary">Actualizar</button></div>
+        <div class="col-6"><button onclick="accion('/api/procesar')" class="btn btn-dark btn-main w-100 border-secondary text-success">Entrenar IA</button></div>
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3">Sugerencia Siguiente Sorteo</h6>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-brain me-2"></i>Sugerencia Próximo Sorteo</h6>
     <div class="row g-2 mb-4">
         {% for animal in top3 %}
         <div class="col-4">
             <div class="glass-card text-center p-2 {% if loop.first %}border-primary{% endif %}">
-                <img src="/imagenes/{{ animal.imagen }}" class="animal-img-card">
-                <div class="d-block"><span class="num-badge">{{ animal.numero }}</span></div>
+                <img src="/imagenes/{{ animal.imagen }}" class="animal-img-card" onerror="this.src='/imagenes/pendiente.png'">
+                <div class="mt-1"><span class="num-badge">{{ animal.numero }}</span></div>
                 <div class="badge-percent">{{ animal.porcentaje }}</div>
+                <div class="small text-uppercase" style="font-size: 0.55rem; color: #94a3b8;">{{ animal.animal }}</div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3">Historial de Hoy</h6>
-    {% for item in bitacora %}
-    <div class="glass-card {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% endif %}">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <span class="fw-bold text-primary">{{ item.hora }}</span>
-                <div class="small">IA: {{ item.animal_predicho }}</div>
-            </div>
-            <div class="text-end d-flex align-items-center">
-                <div class="me-2">
-                    <div class="small fw-bold {% if item.acierto %}text-success{% else %}text-danger{% endif %}">
-                        {{ 'ACIERTO' if item.acierto else 'FALLO' if item.resultado_real != 'PENDIENTE' else 'ESPERANDO...' }}
-                    </div>
-                    <div class="small">Salió: {{ item.resultado_real }}</div>
-                </div>
-                {% if item.resultado_real != 'PENDIENTE' %}
-                <div class="text-center">
-                    <img src="/imagenes/{{ item.img_real }}" style="width: 40px; height: 40px; object-fit: contain;">
-                    <div class="small fw-bold bg-white text-dark rounded px-1">{{ item.num_real }}</div>
-                </div>
-                {% endif %}
-            </div>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-database me-2"></i>Últimos Resultados (Histórico)</h6>
+    <div class="scroll-x mb-4">
+        {% for res in ultimos_db %}
+        <div class="glass-card text-center p-2" style="min-width: 85px;">
+            <div class="text-primary fw-bold" style="font-size: 0.7rem;">{{ res.hora }}</div>
+            <img src="/imagenes/{{ res.img }}" style="width: 35px; height: 35px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+            <div class="text-white-50" style="font-size: 0.6rem; white-space: nowrap; overflow: hidden;">{{ res.animal }}</div>
         </div>
-        {% if item.resultado_real != 'PENDIENTE' and not item.acierto %}
-        <div class="mt-2 small text-warning border-top border-secondary pt-1">
-            Análisis: {{ item.resultado_real }} tenía solo {{ item.prob_real }} de probabilidad.
-        </div>
-        {% endif %}
+        {% endfor %}
     </div>
-    {% endfor %}
+
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-list-check me-2"></i>Bitácora de Avance Hoy</h6>
+    <div class="d-flex flex-column gap-2">
+        {% for item in bitacora %}
+        <div class="glass-card {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% endif %}">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <div class="me-3 text-center" style="width: 50px;">
+                        <div class="fw-bold text-primary small">{{ item.hora }}</div>
+                        <div class="num-badge" style="font-size: 0.7rem;">IA</div>
+                    </div>
+                    <div>
+                        <div class="fw-bold small">{{ item.animal_predicho }}</div>
+                        <div class="text-secondary" style="font-size: 0.65rem;">Salió: {{ item.resultado_real }}</div>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    <div class="text-end">
+                        <div class="small fw-bold {% if item.acierto %}text-success{% elif item.resultado_real != 'PENDIENTE' %}text-danger{% else %}text-warning{% endif %}">
+                            {{ 'ACIERTO' if item.acierto else 'FALLO' if item.resultado_real != 'PENDIENTE' else 'ESPERANDO' }}
+                        </div>
+                        <div class="small text-secondary" style="font-size: 0.6rem;">Prob: {{ item.prob_real }}</div>
+                    </div>
+                    {% if item.resultado_real != 'PENDIENTE' %}
+                    <div class="bg-dark rounded p-1">
+                        <img src="/imagenes/{{ item.img_real }}" style="width: 35px; height: 35px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 </div>
 
 <script>
     async function accion(url) {
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+        btn.disabled = true;
+
         try {
             const res = await fetch(url);
             const data = await res.json();
-            alert(data.message || "Proceso completado");
-            location.reload();
-        } catch (e) { alert("Error de conexión"); }
+            if(data.status === "success") {
+                alert("✅ " + data.message);
+                location.reload();
+            } else {
+                alert("❌ Error: " + data.message);
+            }
+        } catch (e) { 
+            alert("⚠️ Error de conexión al servidor"); 
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
+    // Auto-recarga cada hora para ver sorteos nuevos
     setInterval(() => { location.reload(); }, 3600000);
 </script>
 </body>
 </html>
-
