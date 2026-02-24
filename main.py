@@ -38,7 +38,7 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN (VERSIÓN FINAL CORREGIDA) ---
+# --- RUTA DE SINCRONIZACIÓN (LA SOLUCIÓN AL ERROR 500) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -52,22 +52,24 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
             for reg in datos_nuevos:
                 f_raw = reg["fecha"]
                 
-                # Conversión segura: Evita el error 'date object has no attribute date'
+                # LA CORRECCIÓN: Manejo inteligente de tipos de fecha
                 if isinstance(f_raw, str):
                     f_val = datetime.strptime(f_raw, '%Y-%m-%d').date()
+                elif isinstance(f_raw, datetime):
+                    f_val = f_raw.date()
                 else:
-                    f_val = f_raw # Ya es un objeto date
+                    f_val = f_raw # Ya es un objeto date puro
                 
                 if f_val > hoy_puro: continue
 
-                # A. Insertar en Histórico (Sin columna ID)
+                # A. Insertar en Histórico
                 await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
-                # B. Actualizar Auditoría (Limpia números del nombre: '15 OSO' -> 'oso')
+                # B. Actualizar Auditoría
                 await db.execute(text("""
                     UPDATE auditoria_ia 
                     SET resultado_real = :a,
@@ -99,7 +101,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             await db.commit()
         except: await db.rollback()
 
-        # 2. Historial (Ordenado solo por fecha/hora)
+        # 2. Historial
         res_db = await db.execute(text("""
             SELECT hora, animalito FROM historico 
             ORDER BY fecha DESC, hora DESC LIMIT 12
@@ -126,7 +128,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         "top3": res_ia.get("top3", []),
         "bitacora": bitacora,
         "ultimos_db": ultimos_12,
-        "analisis": res_ia.get("analisis", "IA en tiempo real")
+        "analisis": res_ia.get("analisis", "Análisis IA completado")
     })
 
 @app.on_event("startup")
