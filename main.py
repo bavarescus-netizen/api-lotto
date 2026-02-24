@@ -38,7 +38,7 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN CORREGIDA ---
+# --- RUTA DE SINCRONIZACIÓN (CON MARCADO DE ACIERTOS) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -71,30 +71,29 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                         WHERE fecha = :f AND hora = :h AND (resultado_real = 'PENDIENTE' OR resultado_real IS NULL)
                     """), {"a": reg["animalito"], "f": fecha_valida, "h": reg["hora"]})
 
-            await db.commit() # Commit final de toda la tanda
+            await db.commit() 
         
         return JSONResponse({"status": "success", "message": f"Sincronización Exitosa. {agregados} registros actualizados."})
     except Exception as e:
-        await db.rollback() # Si algo falla en el bucle, limpiamos la transacción
+        await db.rollback() 
         return JSONResponse({"status": "error", "message": f"Error Sincro: {str(e)}"}, status_code=500)
 
-# --- RUTA HOME CORREGIDA (BLINDADA) ---
+# --- RUTA HOME (CON CORRECCIÓN PARA NEON SIN ID) ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
-    res_ia = {"top3": [], "analisis": "Motor en espera"}
+    res_ia = {"top3": [], "analisis": "Motor V4.5 PRO Activo"}
     bitacora = []
     ultimos_12 = []
 
-    # Bloque 1: Predicción e IA (Independiente)
+    # Bloque 1: Predicción e IA
     try:
         res_ia = await generar_prediccion(db)
-        # Hacemos commit o rollback para cerrar cualquier transacción abierta por el Motor
         await db.commit() 
     except Exception as e:
         print(f"⚠️ Error Motor: {e}")
         await db.rollback()
 
-    # Bloque 2: Bitácora (Independiente)
+    # Bloque 2: Bitácora de Avance
     try:
         bitacora = await obtener_bitacora_avance(db)
         await db.commit()
@@ -102,14 +101,19 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         print(f"⚠️ Error Bitacora: {e}")
         await db.rollback()
 
-    # Bloque 3: Últimos 12 Históricos (Independiente)
+    # Bloque 3: Últimos 12 Históricos (USANDO FECHA/HORA PORQUE NO HAY ID)
     try:
         res_db = await db.execute(text("""
             SELECT hora, animalito FROM historico 
-            ORDER BY fecha DESC, id DESC LIMIT 12
+            ORDER BY fecha DESC, hora DESC LIMIT 12
         """))
-        for r in res_db.fetchall():
-            nombre_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', r[1]).lower()
+        
+        filas = res_db.fetchall()
+        for r in filas:
+            # Limpieza para imágenes: Ej: "15 OSO (0)" -> "oso.png"
+            nombre_sucio = r[1].lower()
+            nombre_limpio = re.sub(r'[^a-záéíóúñ]', '', nombre_sucio).strip()
+            
             ultimos_12.append({
                 "hora": r[0],
                 "animal": r[1].upper(),
@@ -117,16 +121,15 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             })
         await db.commit()
     except Exception as e:
-        print(f"⚠️ Error Historial: {e}")
+        print(f"⚠️ Error Historial en Neon: {e}")
         await db.rollback()
 
-    # Renderizado final: Siempre devuelve la página, aunque una parte falle
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "top3": res_ia.get("top3", []),
         "bitacora": bitacora,
         "ultimos_db": ultimos_12,
-        "analisis": res_ia.get("analisis", "Sistema Activo")
+        "analisis": res_ia.get("analisis", "Análisis de Red Neuronal")
     })
 
 @app.on_event("startup")
