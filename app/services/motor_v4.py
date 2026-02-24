@@ -21,7 +21,6 @@ async def generar_prediccion(db: AsyncSession):
         tz = pytz.timezone('America/Caracas')
         ahora = datetime.now(tz)
         hora_int = ahora.hour
-        # Normalizamos la hora para que coincida con la DB (Ej: 03:00 PM)
         hora_str = ahora.strftime("%I:00 %p").upper()
 
         query = text("""
@@ -46,7 +45,6 @@ async def generar_prediccion(db: AsyncSession):
             })
 
         if top3:
-            # --- BLINDAJE: Usamos .date() explícito para Neon ---
             await db.execute(text("""
                 INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, resultado_real)
                 VALUES (:f, :h, :a, :c, 'PENDIENTE')
@@ -66,7 +64,7 @@ async def generar_prediccion(db: AsyncSession):
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
-        # SQL Corregido para manejar correctamente la comparación de horas y fechas
+        # CORRECCIÓN: Usamos CONCAT para evitar el error de parámetros bind ':00'
         query = text("""
             SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, COALESCE(p.probabilidad, 2.1)
             FROM auditoria_ia a
@@ -75,7 +73,7 @@ async def obtener_bitacora_avance(db: AsyncSession):
                 AND EXTRACT(HOUR FROM CAST(
                     CASE 
                         WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' 
-                        THEN (CAST(SPLIT_PART(a.hora, ':', 1) AS INT) + 12)::TEXT || ':00'
+                        THEN CONCAT((CAST(SPLIT_PART(a.hora, ':', 1) AS INT) + 12)::TEXT, ':00')
                         WHEN a.hora LIKE '12%AM' THEN '00:00'
                         ELSE SPLIT_PART(a.hora, ' ', 1)
                     END AS TIME)) = p.hora
