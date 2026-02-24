@@ -26,40 +26,41 @@ from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
 from app.core.scheduler import ciclo_infinito 
 
-# --- RUTA DE SINCRONIZACIÓN (SISTEMA ANTI-BALAS) ---
+# --- RUTA DE SINCRONIZACIÓN (SISTEMA DE DOBLE CAPA) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
         hoy = date.today()
-        # Sincronizamos los últimos 15 días
-        inicio = date(2026, 2, 7)
-        datos = await descargar_rango_historico(inicio, hoy)
+        # Sincronizamos desde el 7 de febrero como indica tu histórico
+        datos = await descargar_rango_historico(date(2026, 2, 7), hoy)
         
         agregados = 0
         if datos:
             for reg in datos:
                 f_raw = reg.get("fecha")
                 
-                # --- TRATAMIENTO DE FECHA DE FUERZA BRUTA ---
-                # Convertimos lo que sea a String primero, y de String a Date.
-                # Esto elimina cualquier error de "no attribute date" de raíz.
-                try:
-                    f_str = str(f_raw).split(" ")[0] # Toma "2026-02-24" incluso si viene con hora
-                    f_val = datetime.strptime(f_str, '%Y-%m-%d').date()
-                except Exception as e:
-                    print(f"⚠️ Error procesando fecha individual {f_raw}: {e}")
+                # --- SOLUCIÓN DEFINITIVA AL ERROR DE ATRIBUTO ---
+                # Si el objeto ya tiene .date() (es datetime), lo llamamos.
+                # Si no lo tiene (ya es date), lo usamos directo.
+                if hasattr(f_raw, 'date'):
+                    f_val = f_raw.date()
+                elif isinstance(f_raw, date):
+                    f_val = f_raw
+                elif isinstance(f_raw, str):
+                    f_val = datetime.strptime(f_raw[:10], '%Y-%m-%d').date()
+                else:
                     continue
 
                 if f_val > hoy: continue
 
-                # A. Histórico (Evitar duplicados)
+                # A. Guardar en Histórico
                 await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
-                # B. Auditoría (Actualizar resultados reales)
+                # B. Actualizar Auditoría
                 await db.execute(text("""
                     UPDATE auditoria_ia 
                     SET resultado_real = :a,
@@ -70,20 +71,19 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
             await db.commit()
             agregados = len(datos)
         
-        return JSONResponse({"status": "success", "message": f"Sincronizado OK: {agregados} registros."})
+        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros procesados."})
     except Exception as e:
         await db.rollback()
-        # Log ultra detallado para Render
-        print(f"❌ ERROR CRÍTICO EN SINCRONIZACIÓN: {str(e)}")
+        print(f"❌ Error Crítico: {e}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# --- RUTA DE ENTRENAMIENTO (PROCESAR) ---
+# --- RUTA DE ENTRENAMIENTO ---
 @app.get("/api/procesar")
 async def procesar_motor(db: AsyncSession = Depends(get_db)):
     try:
         await generar_prediccion(db)
         await db.commit()
-        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado."})
+        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado exitosamente."})
     except Exception as e:
         await db.rollback()
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
@@ -94,13 +94,12 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         res_ia = await generar_prediccion(db)
         
-        # Últimos 12 resultados
+        # Obtenemos los últimos sorteos de tu tabla histórica impecable
         res_db = await db.execute(text("SELECT hora, animalito FROM historico ORDER BY fecha DESC, hora DESC LIMIT 12"))
         ultimos_12 = []
         for r in res_db.fetchall():
-            # Limpiamos nombre de animal para la imagen
-            img_clean = re.sub(r'[^a-záéíóúñ]', '', r[1].lower()).strip() + ".png"
-            ultimos_12.append({"hora": r[0], "animal": r[1].upper(), "img": img_clean})
+            img = re.sub(r'[^a-záéíóúñ]', '', r[1].lower()).strip() + ".png"
+            ultimos_12.append({"hora": r[0], "animal": r[1].upper(), "img": img})
         
         bitacora = await obtener_bitacora_avance(db)
         await db.commit()
@@ -114,8 +113,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         })
     except Exception as e:
         await db.rollback()
-        print(f"⚠️ Error Home: {e}")
-        return HTMLResponse(content=f"Error en servidor: {e}", status_code=500)
+        return HTMLResponse(content=f"Error en Dashboard: {e}", status_code=500)
 
 @app.on_event("startup")
 async def startup():
