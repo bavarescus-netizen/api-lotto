@@ -27,78 +27,81 @@ from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
 from app.core.scheduler import ciclo_infinito 
 
-# --- RUTA DE SINCRONIZACIÓN (BLINDADA CONTRA EL ERROR DE FECHA) ---
+# --- RUTA DE SINCRONIZACIÓN (VERSIÓN ANTIBALAS) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
+    f_raw = None # Para debug en el catch
     try:
         hoy = date.today()
-        # Traemos datos desde el inicio del ciclo (7 de febrero)
+        # Traemos datos desde el 7 de febrero
         datos = await descargar_rango_historico(date(2026, 2, 7), hoy)
         
         agregados = 0
         if datos:
             for reg in datos:
-                f_raw = reg["fecha"]
+                f_raw = reg.get("fecha")
                 
-                # --- LÓGICA ANTI-ERROR DEFINITIVA ---
-                # Si es string, lo convertimos
+                # --- LÓGICA DE FECHA DEFINITIVA ---
+                # Detectamos el tipo de dato para no llamar a .date() en un objeto date
                 if isinstance(f_raw, str):
                     f_val = datetime.strptime(f_raw, '%Y-%m-%d').date()
-                # Si ya es date, lo usamos tal cual (AQUÍ ESTABA EL FALLO ANTERIOR)
-                elif isinstance(f_raw, date):
-                    f_val = f_raw
-                # Si es datetime completo, extraemos solo la fecha
-                elif hasattr(f_raw, 'date'):
+                elif isinstance(f_raw, datetime):
                     f_val = f_raw.date()
+                elif isinstance(f_raw, date):
+                    f_val = f_raw # Si ya es date, se usa directo
                 else:
-                    continue
+                    # Intento desesperado: convertir a string y procesar
+                    try:
+                        f_val = datetime.strptime(str(f_raw)[:10], '%Y-%m-%d').date()
+                    except:
+                        continue 
 
                 if f_val > hoy: continue
 
-                # A. Insertar en Histórico (Sin columna ID para Neon)
+                # A. Insertar en Histórico (Neon compatible)
                 await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
-                # B. Marcar Aciertos en Auditoría
+                # B. Actualizar Auditoría de la IA
                 await db.execute(text("""
                     UPDATE auditoria_ia 
                     SET resultado_real = :a,
                         acierto = (LOWER(animal_predicho) = LOWER(REGEXP_REPLACE(:a, '[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', 'g')))
                     WHERE fecha = :f AND hora = :h 
-                    AND (resultado_real = 'PENDIENTE' OR resultado_real IS NULL)
                 """), {"a": reg["animalito"], "f": f_val, "h": reg["hora"]})
 
             await db.commit()
             agregados = len(datos)
         
-        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros procesados."})
+        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros."})
     except Exception as e:
         await db.rollback()
-        print(f"❌ Error Sincro Detallado: {str(e)}")
-        return JSONResponse({"status": "error", "message": f"Fallo en servidor: {str(e)}"}, status_code=500)
+        # Este print te dirá exactamente qué tipo de dato causó el fallo en los logs de Render
+        print(f"❌ Error Sincro - Tipo: {type(f_raw)} - Valor: {f_raw} - Error: {str(e)}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# --- RUTA PARA RECALIBRAR EL MOTOR (PARA EL BOTÓN ENTRENAR) ---
+# --- RUTA PARA ENTRENAR / PROCESAR ---
 @app.get("/api/procesar")
 async def procesar_motor(db: AsyncSession = Depends(get_db)):
     try:
-        res = await generar_prediccion(db)
+        await generar_prediccion(db)
         await db.commit()
         return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado."})
     except Exception as e:
         await db.rollback()
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
-# --- HOME DASHBOARD ---
+# --- DASHBOARD PRINCIPAL ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # 1. Generar predicción actual
+        # Predicción actual
         res_ia = await generar_prediccion(db)
         
-        # 2. Obtener historial (Sin ID)
+        # Últimos 12 resultados
         res_db = await db.execute(text("""
             SELECT hora, animalito FROM historico 
             ORDER BY fecha DESC, hora DESC LIMIT 12
@@ -106,7 +109,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         ultimos_12 = []
         for r in res_db.fetchall():
-            # Limpiamos nombre para la imagen: "15 OSO" -> "oso.png"
             img_name = re.sub(r'[^a-záéíóúñ]', '', r[1].lower()).strip()
             ultimos_12.append({
                 "hora": r[0],
@@ -114,7 +116,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "img": f"{img_name}.png"
             })
         
-        # 3. Obtener bitácora
         bitacora = await obtener_bitacora_avance(db)
         await db.commit()
 
@@ -123,14 +124,14 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             "top3": res_ia.get("top3", []),
             "bitacora": bitacora,
             "ultimos_db": ultimos_12,
-            "analisis": res_ia.get("analisis", "Sistema Online")
+            "analisis": "LottoAI Core Activo"
         })
     except Exception as e:
         await db.rollback()
-        print(f"⚠️ Error Home: {e}")
-        return HTMLResponse(content=f"Error en Dashboard: {e}", status_code=500)
+        print(f"⚠️ Error Dashboard: {e}")
+        return HTMLResponse(content=f"Error en servidor: {e}", status_code=500)
 
-# --- INICIO AUTOMÁTICO DEL SCHEDULER ---
+# --- SCHEDULER ---
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(ciclo_infinito())
