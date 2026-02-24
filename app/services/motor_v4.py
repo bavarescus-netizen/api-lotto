@@ -21,9 +21,9 @@ async def generar_prediccion(db: AsyncSession):
         tz = pytz.timezone('America/Caracas')
         ahora = datetime.now(tz)
         hora_int = ahora.hour
-        hora_str = ahora.strftime("%I:00 %p")
+        # Normalizamos la hora para que coincida con la DB (Ej: 03:00 PM)
+        hora_str = ahora.strftime("%I:00 %p").upper()
 
-        # Buscamos en probabilidades_hora que llena tu archivo entrenar.py
         query = text("""
             SELECT animalito, probabilidad, tendencia
             FROM probabilidades_hora 
@@ -45,41 +45,57 @@ async def generar_prediccion(db: AsyncSession):
                 "tendencia": r[2]
             })
 
-        # Registrar la predicción principal para auditoría posterior
         if top3:
+            # --- BLINDAJE: Usamos .date() explícito para Neon ---
             await db.execute(text("""
                 INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, resultado_real)
                 VALUES (:f, :h, :a, :c, 'PENDIENTE')
                 ON CONFLICT (fecha, hora) DO NOTHING
             """), {
-                "f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(), "c": float(top3[0]["porcentaje"].replace('%',''))
+                "f": ahora.date(), 
+                "h": hora_str, 
+                "a": top3[0]["animal"].lower(), 
+                "c": float(top3[0]["porcentaje"].replace('%',''))
             })
             await db.commit()
 
         return {"top3": top3, "analisis": f"Registros Analizados: 28,709 | {hora_str}"}
     except Exception as e:
+        print(f"❌ Error en Motor: {e}")
         return {"top3": [], "analisis": f"Error: {str(e)}"}
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
+        # SQL Corregido para manejar correctamente la comparación de horas y fechas
         query = text("""
             SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, COALESCE(p.probabilidad, 2.1)
             FROM auditoria_ia a
-            LEFT JOIN probabilidades_hora p ON (LOWER(a.resultado_real) = LOWER(p.animalito) 
-                 AND EXTRACT(HOUR FROM CAST(SUBSTRING(a.hora, 1, 2) || ':00' AS TIME)) = p.hora)
+            LEFT JOIN probabilidades_hora p ON (
+                LOWER(a.resultado_real) = LOWER(p.animalito) 
+                AND EXTRACT(HOUR FROM CAST(
+                    CASE 
+                        WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' 
+                        THEN (CAST(SPLIT_PART(a.hora, ':', 1) AS INT) + 12)::TEXT || ':00'
+                        WHEN a.hora LIKE '12%AM' THEN '00:00'
+                        ELSE SPLIT_PART(a.hora, ' ', 1)
+                    END AS TIME)) = p.hora
+            )
             WHERE a.fecha = CURRENT_DATE 
-            ORDER BY CASE WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' THEN 1 ELSE 0 END, a.hora DESC 
+            ORDER BY 
+                CASE WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' THEN 1 ELSE 0 END DESC, 
+                a.hora DESC 
             LIMIT 11
         """)
         res = await db.execute(query)
         bitacora = []
         for r in res.fetchall():
-            nombre_animal = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', (r[2] or "pendiente")).lower()
+            res_real = (r[2] or "pendiente").lower()
+            nombre_animal = re.sub(r'[^a-z]', '', res_real)
             num_real = next((k for k, v in MAPA_ANIMALES.items() if v == nombre_animal), "--")
             
             bitacora.append({
                 "hora": r[0],
-                "animal_predicho": r[1].upper(),
+                "animal_predicho": r[1].upper() if r[1] else "PENDIENTE",
                 "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
                 "acierto": r[3],
                 "img_real": f"{nombre_animal}.png",
@@ -88,4 +104,5 @@ async def obtener_bitacora_avance(db: AsyncSession):
             })
         return bitacora
     except Exception as e:
+        print(f"❌ Error en Bitacora: {e}")
         return []
