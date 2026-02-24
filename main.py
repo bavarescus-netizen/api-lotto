@@ -10,14 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from datetime import datetime, date
 
-# 1. Configuración de rutas
+# 1. Rutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, "app"))
 
 app = FastAPI(title="Lotto AI V4.5 PRO")
 
-# 2. Archivos Estáticos y Plantillas
+# 2. Estáticos y Plantillas
 static_path = os.path.join(BASE_DIR, "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
@@ -25,7 +25,6 @@ if os.path.exists(static_path):
 template_path = os.path.join(BASE_DIR, "app", "routes")
 templates = Jinja2Templates(directory=template_path)
 
-# 3. Importaciones de servicios
 from db import get_db
 from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
 from app.services.scraper import descargar_rango_historico
@@ -38,83 +37,81 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN CORREGIDA (Sin error de atributo date) ---
+# --- RUTA DE SINCRONIZACIÓN (REHECHA PARA NEON) ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
-        # 'hoy' ya es un objeto date, no necesita .date()
-        inicio = date(2026, 2, 7)
+        # Usamos objetos date puros
+        inicio_busqueda = date(2026, 2, 7)
         hoy = date.today()
         
-        datos_nuevos = await descargar_rango_historico(inicio, hoy)
+        datos_nuevos = await descargar_rango_historico(inicio_busqueda, hoy)
         
         agregados = 0
         if datos_nuevos:
             for reg in datos_nuevos:
-                f_raw = reg["fecha"]
-                # Conversión segura de fecha si viene como string
-                fecha_valida = datetime.strptime(f_raw, '%Y-%m-%d').date() if isinstance(f_raw, str) else f_raw
+                # Normalización de fecha
+                f_val = reg["fecha"]
+                if isinstance(f_val, str):
+                    f_val = datetime.strptime(f_val, '%Y-%m-%d').date()
                 
-                if fecha_valida > hoy: continue
+                if f_val > hoy: continue
 
-                # A. Insertar en Histórico
+                # A. Insertar en Histórico (Sin ID)
                 result = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
-                """), {"f": fecha_valida, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
+                """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
                 if result.rowcount > 0:
                     agregados += 1
-                    # B. Marcado de ACIERTOS automático
+                    # B. Marcado de ACIERTOS (Usa regex para comparar solo letras)
                     await db.execute(text("""
                         UPDATE auditoria_ia 
                         SET resultado_real = :a,
                             acierto = (LOWER(animal_predicho) = LOWER(SUBSTRING(:a FROM '[a-zA-ZáéíóúñÁÉÍÓÚÑ]+')))
                         WHERE fecha = :f AND hora = :h AND (resultado_real = 'PENDIENTE' OR resultado_real IS NULL)
-                    """), {"a": reg["animalito"], "f": fecha_valida, "h": reg["hora"]})
+                    """), {"a": reg["animalito"], "f": f_val, "h": reg["hora"]})
 
             await db.commit() 
         
-        return JSONResponse({"status": "success", "message": f"Sincronización Exitosa. {agregados} nuevos registros."})
+        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} nuevos."})
     except Exception as e:
         await db.rollback() 
-        return JSONResponse({"status": "error", "message": f"Error Sincro: {str(e)}"}, status_code=500)
+        return JSONResponse({"status": "error", "message": f"Fallo en Sincro: {str(e)}"}, status_code=500)
 
-# --- RUTA HOME (Sin columna ID para Neon) ---
+# --- RUTA HOME (CORREGIDA SIN COLUMNA ID) ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     res_ia = {"top3": [], "analisis": "Motor V4.5 PRO ONLINE"}
     bitacora = []
     ultimos_12 = []
 
-    # Bloque 1: Predicción e IA
+    # 1. IA
     try:
         res_ia = await generar_prediccion(db)
         await db.commit() 
     except Exception as e:
-        print(f"⚠️ Error Motor: {e}")
         await db.rollback()
 
-    # Bloque 2: Bitácora de Avance
+    # 2. Bitácora
     try:
         bitacora = await obtener_bitacora_avance(db)
         await db.commit()
     except Exception as e:
-        print(f"⚠️ Error Bitacora: {e}")
         await db.rollback()
 
-    # Bloque 3: Últimos 12 (Ordenado por fecha/hora)
+    # 3. Histórico (Ordenado solo por fecha y hora)
     try:
         res_db = await db.execute(text("""
             SELECT hora, animalito FROM historico 
             ORDER BY fecha DESC, hora DESC LIMIT 12
         """))
         
-        filas = res_db.fetchall()
-        for r in filas:
+        for r in res_db.fetchall():
             nombre_sucio = r[1].lower()
-            # Limpieza para que '15 OSO (0)' busque 'oso.png'
+            # Limpia "05 LEON" a "leon"
             nombre_limpio = re.sub(r'[^a-záéíóúñ]', '', nombre_sucio).strip()
             
             ultimos_12.append({
@@ -124,7 +121,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             })
         await db.commit()
     except Exception as e:
-        print(f"⚠️ Error Historial: {e}")
+        print(f"Error Historial: {e}")
         await db.rollback()
 
     return templates.TemplateResponse("dashboard.html", {
@@ -132,7 +129,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         "top3": res_ia.get("top3", []),
         "bitacora": bitacora,
         "ultimos_db": ultimos_12,
-        "analisis": res_ia.get("analisis", "Sistema de Auditoría Activo")
+        "analisis": res_ia.get("analisis", "Auditoría en tiempo real")
     })
 
 @app.on_event("startup")
