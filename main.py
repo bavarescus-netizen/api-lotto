@@ -38,7 +38,7 @@ app.include_router(entrenar.router, prefix="/api", tags=["Motor"])
 app.include_router(stats.router, prefix="/api", tags=["Stats"])
 app.include_router(historico.router, prefix="/api", tags=["Historial"])
 
-# --- RUTA DE SINCRONIZACIÓN (CON MARCADO DE ACIERTOS) ---
+# --- RUTA DE SINCRONIZACIÓN CORREGIDA ---
 @app.get("/api/examen-real")
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
@@ -50,6 +50,7 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
         if datos_nuevos:
             for reg in datos_nuevos:
                 f_raw = reg["fecha"]
+                # Conversión segura de fecha
                 fecha_valida = datetime.strptime(f_raw, '%Y-%m-%d').date() if isinstance(f_raw, str) else f_raw
                 if fecha_valida > hoy: continue
 
@@ -62,8 +63,7 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                 
                 if result.rowcount > 0:
                     agregados += 1
-                    # B. Marcado de ACIERTOS automático en Auditoría
-                    # Comparamos el animalito que acaba de entrar con la predicción que estaba PENDIENTE
+                    # B. Marcado de ACIERTOS automático
                     await db.execute(text("""
                         UPDATE auditoria_ia 
                         SET resultado_real = :a,
@@ -71,44 +71,63 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                         WHERE fecha = :f AND hora = :h AND (resultado_real = 'PENDIENTE' OR resultado_real IS NULL)
                     """), {"a": reg["animalito"], "f": fecha_valida, "h": reg["hora"]})
 
-            await db.commit()
+            await db.commit() # Commit final de toda la tanda
         
-        return JSONResponse({"status": "success", "message": f"Sincronización Exitosa. {agregados} nuevos datos y auditoría actualizada."})
+        return JSONResponse({"status": "success", "message": f"Sincronización Exitosa. {agregados} registros actualizados."})
     except Exception as e:
-        await db.rollback()
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        await db.rollback() # Si algo falla en el bucle, limpiamos la transacción
+        return JSONResponse({"status": "error", "message": f"Error Sincro: {str(e)}"}, status_code=500)
 
-# --- RUTA HOME (CON LOS ÚLTIMOS 12 DE LA DB) ---
+# --- RUTA HOME CORREGIDA (BLINDADA) ---
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
+    res_ia = {"top3": [], "analisis": "Motor en espera"}
+    bitacora = []
+    ultimos_12 = []
+
+    # Bloque 1: Predicción e IA (Independiente)
     try:
         res_ia = await generar_prediccion(db)
-        bitacora = await obtener_bitacora_avance(db)
+        # Hacemos commit o rollback para cerrar cualquier transacción abierta por el Motor
+        await db.commit() 
+    except Exception as e:
+        print(f"⚠️ Error Motor: {e}")
+        await db.rollback()
 
-        # CONSULTA: Últimos 12 registros reales de la DB para los cuadritos
+    # Bloque 2: Bitácora (Independiente)
+    try:
+        bitacora = await obtener_bitacora_avance(db)
+        await db.commit()
+    except Exception as e:
+        print(f"⚠️ Error Bitacora: {e}")
+        await db.rollback()
+
+    # Bloque 3: Últimos 12 Históricos (Independiente)
+    try:
         res_db = await db.execute(text("""
-            SELECT hora, animalito, fecha FROM historico 
-            ORDER BY fecha DESC, hora DESC LIMIT 12
+            SELECT hora, animalito FROM historico 
+            ORDER BY fecha DESC, id DESC LIMIT 12
         """))
-        ultimos_12 = []
         for r in res_db.fetchall():
-            # Limpiamos nombre para la imagen: "Delfin (0)" -> "delfin.png"
             nombre_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', r[1]).lower()
             ultimos_12.append({
                 "hora": r[0],
                 "animal": r[1].upper(),
                 "img": f"{nombre_limpio}.png"
             })
-
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "top3": res_ia.get("top3", []), # Enviamos top3 directamente
-            "bitacora": bitacora,
-            "ultimos_db": ultimos_12,
-            "analisis": res_ia.get("analisis", "Carga completa")
-        })
+        await db.commit()
     except Exception as e:
-        return JSONResponse({"status": "error", "message": f"Error en Home: {str(e)}"}, status_code=500)
+        print(f"⚠️ Error Historial: {e}")
+        await db.rollback()
+
+    # Renderizado final: Siempre devuelve la página, aunque una parte falle
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "top3": res_ia.get("top3", []),
+        "bitacora": bitacora,
+        "ultimos_db": ultimos_12,
+        "analisis": res_ia.get("analisis", "Sistema Activo")
+    })
 
 @app.on_event("startup")
 async def startup_event():
