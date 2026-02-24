@@ -59,12 +59,12 @@ async def generar_prediccion(db: AsyncSession):
 
         return {"top3": top3, "analisis": f"Registros Analizados: 28,709 | {hora_str}"}
     except Exception as e:
-        print(f"❌ Error en Motor: {e}")
+        print(f"❌ Error en Motor (Generar): {e}")
         return {"top3": [], "analisis": f"Error: {str(e)}"}
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
-        # CORRECCIÓN: Usamos CONCAT para evitar el error de parámetros bind ':00'
+        # CHR(58) es ':' -> Esto evita que SQLAlchemy crea que es un parámetro
         query = text("""
             SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, COALESCE(p.probabilidad, 2.1)
             FROM auditoria_ia a
@@ -73,14 +73,17 @@ async def obtener_bitacora_avance(db: AsyncSession):
                 AND EXTRACT(HOUR FROM CAST(
                     CASE 
                         WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' 
-                        THEN CONCAT((CAST(SPLIT_PART(a.hora, ':', 1) AS INT) + 12)::TEXT, ':00')
-                        WHEN a.hora LIKE '12%AM' THEN '00:00'
+                        THEN (CAST(SPLIT_PART(a.hora, CHR(58), 1) AS INT) + 12)::TEXT || CHR(58) || '00'
+                        WHEN a.hora LIKE '12%AM' THEN '00' || CHR(58) || '00'
                         ELSE SPLIT_PART(a.hora, ' ', 1)
                     END AS TIME)) = p.hora
             )
             WHERE a.fecha = CURRENT_DATE 
             ORDER BY 
-                CASE WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' THEN 1 ELSE 0 END DESC, 
+                CASE 
+                    WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' THEN 1 
+                    ELSE 0 
+                END DESC, 
                 a.hora DESC 
             LIMIT 11
         """)
@@ -96,7 +99,7 @@ async def obtener_bitacora_avance(db: AsyncSession):
                 "animal_predicho": r[1].upper() if r[1] else "PENDIENTE",
                 "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
                 "acierto": r[3],
-                "img_real": f"{nombre_animal}.png",
+                "img_real": f"{nombre_animal}.png" if r[2] else "pendiente.png",
                 "num_real": num_real,
                 "prob_real": f"{round(r[4], 1)}%"
             })
