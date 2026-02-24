@@ -54,4 +54,84 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l)
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
-                """), {"f": f_val, "h":
+                """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
+                
+                # B. Actualizar Auditoría (Aciertos/Fallos)
+                await db.execute(text("""
+                    UPDATE auditoria_ia 
+                    SET resultado_real = :a,
+                        acierto = (LOWER(animal_predicho) = LOWER(REGEXP_REPLACE(:a, '[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', 'g')))
+                    WHERE fecha = :f AND hora = :h 
+                """), {"a": reg["animalito"], "f": f_val, "h": reg["hora"]})
+
+            await db.commit()
+            agregados = len(datos)
+        
+        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros."})
+    except Exception as e:
+        await db.rollback()
+        print(f"❌ Error Crítico Sincro: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+# --- RUTA DE PROCESAMIENTO (CORRECCIÓN ERROR 404) ---
+@app.get("/api/procesar")
+async def procesar_motor(db: AsyncSession = Depends(get_db)):
+    try:
+        # Generar nueva predicción y guardar en auditoria_ia
+        res = await generar_prediccion(db)
+        await db.commit()
+        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado exitosamente."})
+    except Exception as e:
+        await db.rollback()
+        print(f"❌ Error Procesar: {e}")
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+# --- HOME DASHBOARD (CORRECCIÓN CONSULTA SIN ID) ---
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request, db: AsyncSession = Depends(get_db)):
+    try:
+        # 1. Obtener predicción actual
+        res_ia = await generar_prediccion(db)
+        
+        # 2. Obtener últimos 12 resultados (Sin usar columna ID)
+        res_db = await db.execute(text("""
+            SELECT hora, animalito FROM historico 
+            ORDER BY fecha DESC, hora DESC LIMIT 12
+        """))
+        
+        ultimos_12 = []
+        for r in res_db.fetchall():
+            # Limpiar nombre para la imagen: "15 OSO" -> "oso.png"
+            img_name = re.sub(r'[^a-záéíóúñ]', '', r[1].lower()).strip()
+            ultimos_12.append({
+                "hora": r[0],
+                "animal": r[1].upper(),
+                "img": f"{img_name}.png"
+            })
+        
+        # 3. Obtener bitácora de aciertos
+        bitacora = await obtener_bitacora_avance(db)
+        await db.commit()
+
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "top3": res_ia.get("top3", []),
+            "bitacora": bitacora,
+            "ultimos_db": ultimos_12,
+            "analisis": res_ia.get("analisis", "Sistema Online")
+        })
+    except Exception as e:
+        await db.rollback()
+        print(f"⚠️ Error Home: {e}")
+        return HTMLResponse(content=f"Error en servidor: {e}", status_code=500)
+
+# --- EVENTOS Y ARRANQUE ---
+@app.on_event("startup")
+async def startup_event():
+    # Inicia el monitoreo automático en segundo plano
+    asyncio.create_task(ciclo_infinito())
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
