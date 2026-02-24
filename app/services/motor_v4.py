@@ -3,6 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import pytz
+import re
 
 MAPA_ANIMALES = {
     "0": "delfin", "00": "ballena", "1": "carnero", "2": "toro", "3": "ciempies",
@@ -22,13 +23,9 @@ async def generar_prediccion(db: AsyncSession):
         hora_int = ahora.hour
         hora_str = ahora.strftime("%I:00 %p")
 
+        # Buscamos en probabilidades_hora que llena tu archivo entrenar.py
         query = text("""
-            SELECT animalito, probabilidad, 
-            CASE 
-                WHEN probabilidad >= 40 THEN 'VERDE'
-                WHEN probabilidad >= 25 THEN 'AMARILLO'
-                ELSE 'ROJO'
-            END as nivel_riesgo
+            SELECT animalito, probabilidad, tendencia
             FROM probabilidades_hora 
             WHERE hora = :h 
             ORDER BY probabilidad DESC LIMIT 3
@@ -38,67 +35,57 @@ async def generar_prediccion(db: AsyncSession):
 
         top3 = []
         for r in datos_ia:
-            name = r[0].lower() if r[0] else "desconocido"
-            # Sincronización: Buscamos el número (00) según el nombre (ballena)
+            name = r[0].lower()
             num = next((k for k, v in MAPA_ANIMALES.items() if v == name), "--")
             top3.append({
                 "numero": num,
                 "animal": name.upper(),
-                "imagen": f"{name}.png", # Imagen por nombre: ballena.png
+                "imagen": f"{name}.png",
                 "porcentaje": f"{round(r[1], 1)}%",
                 "tendencia": r[2]
             })
 
+        # Registrar la predicción principal para auditoría posterior
         if top3:
             await db.execute(text("""
-                INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, patron_detectado)
-                VALUES (:f, :h, :a, :c, :p) ON CONFLICT DO NOTHING
+                INSERT INTO auditoria_ia (fecha, hora, animal_predicho, confianza_pct, resultado_real)
+                VALUES (:f, :h, :a, :c, 'PENDIENTE')
+                ON CONFLICT (fecha, hora) DO NOTHING
             """), {
-                "f": ahora.date(), 
-                "h": hora_str, 
-                "a": top3[0]["animal"].lower(), 
-                "c": float(top3[0]["porcentaje"].replace('%','')), 
-                "p": "Neural V4.5 PRO"
+                "f": ahora.date(), "h": hora_str, "a": top3[0]["animal"].lower(), "c": float(top3[0]["porcentaje"].replace('%',''))
             })
             await db.commit()
 
-        return {"top3": top3, "analisis": f"Registros: 28,709 | {hora_str}"}
+        return {"top3": top3, "analisis": f"Registros Analizados: 28,709 | {hora_str}"}
     except Exception as e:
-        return {"error": str(e)}
+        return {"top3": [], "analisis": f"Error: {str(e)}"}
 
 async def obtener_bitacora_avance(db: AsyncSession):
     try:
-        # Consulta que trae el historial del día
         query = text("""
-            SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, p.probabilidad
+            SELECT a.hora, a.animal_predicho, a.resultado_real, a.acierto, COALESCE(p.probabilidad, 2.1)
             FROM auditoria_ia a
-            LEFT JOIN probabilidades_hora p ON 
-                (LOWER(a.resultado_real) = LOWER(p.animalito) AND CAST(SUBSTRING(a.hora, 1, 2) AS INTEGER) = p.hora)
-            WHERE a.fecha = CURRENT_DATE ORDER BY a.hora DESC LIMIT 11
+            LEFT JOIN probabilidades_hora p ON (LOWER(a.resultado_real) = LOWER(p.animalito) 
+                 AND EXTRACT(HOUR FROM CAST(SUBSTRING(a.hora, 1, 2) || ':00' AS TIME)) = p.hora)
+            WHERE a.fecha = CURRENT_DATE 
+            ORDER BY CASE WHEN a.hora LIKE '%PM' AND a.hora NOT LIKE '12%' THEN 1 ELSE 0 END, a.hora DESC 
+            LIMIT 11
         """)
         res = await db.execute(query)
         bitacora = []
-        
         for r in res.fetchall():
-            # Limpiamos el nombre del animal real para buscar su imagen y número
-            raw_real = r[2].lower() if r[2] else "pendiente"
-            # Si viene como "BALLENA (00)", extraemos solo "ballena"
-            nombre_animal = raw_real.split('(')[0].strip() if '(' in raw_real else raw_real
-            
-            # Buscamos el número correspondiente en el mapa
+            nombre_animal = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', (r[2] or "pendiente")).lower()
             num_real = next((k for k, v in MAPA_ANIMALES.items() if v == nombre_animal), "--")
             
             bitacora.append({
                 "hora": r[0],
-                "animal_predicho": r[1].upper() if r[1] else "---",
+                "animal_predicho": r[1].upper(),
                 "resultado_real": r[2].upper() if r[2] else "PENDIENTE",
                 "acierto": r[3],
-                "img_real": f"{nombre_animal}.png", # Para cargar ballena.png
-                "num_real": num_real,               # Para mostrar el 00
-                "prob_real": f"{round(r[4], 1)}%" if r[4] else "2.1%"
+                "img_real": f"{nombre_animal}.png",
+                "num_real": num_real,
+                "prob_real": f"{round(r[4], 1)}%"
             })
         return bitacora
     except Exception as e:
-        print(f"Error en bitácora: {e}")
         return []
-
