@@ -56,7 +56,7 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                     WHERE fecha = :f AND hora = :h 
                 """), {"a": reg["animalito"], "clean_a": animal_limpio, "f": f_val, "h": reg["hora"]})
             await db.commit()
-        return JSONResponse({"status": "success", "message": "Sincronizado y Auditado."})
+        return JSONResponse({"status": "success", "message": "Resultados sincronizados."})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
@@ -65,15 +65,17 @@ async def procesar_motor(db: AsyncSession = Depends(get_db)):
     try:
         await generar_prediccion(db)
         await db.commit()
-        return JSONResponse({"status": "success", "message": "IA Recalibrada con 28k registros."})
+        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO Recalibrado."})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
+        # 1. Predicciones
         res_ia = await generar_prediccion(db)
-        # Histórico de 12 (3x4)
+        
+        # 2. Histórico de 12 para Grid 3x4
         res_db = await db.execute(text("""
             SELECT fecha, hora, animalito FROM historico 
             ORDER BY fecha DESC, 
@@ -83,36 +85,32 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         tz = pytz.timezone('America/Caracas')
         hoy = datetime.now(tz).date()
-        ultimos_db = []
+        ultimos_12 = []
         for r in res_db.fetchall():
             f_res = extraer_fecha_pura(r[0])
             img_name = re.sub(r'[^a-z]', '', r[2].lower()).strip()
-            ultimos_db.append({
+            ultimos_12.append({
                 "es_hoy": f_res == hoy,
                 "hora": r[1], "animal": r[2].upper(), "img": f"{img_name}.png"
             })
 
-        bitacora = await obtener_bitacora_avance(db)
+        # 3. Datos de Aprendizaje (Score)
+        count_res = await db.execute(text("SELECT COUNT(*) FROM historico"))
+        total_entrenamiento = count_res.scalar()
         
-        # Scoring
-        res_efec = await db.execute(text("""
+        res_ayer = await db.execute(text("""
             SELECT COUNT(*), SUM(CASE WHEN acierto = true THEN 1 ELSE 0 END)
-            FROM auditoria_ia WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+            FROM auditoria_ia WHERE fecha = CURRENT_DATE - INTERVAL '1 day'
         """))
-        st = res_efec.fetchone()
-        score = round((st[1]/st[0]*100) if st and st[0]>0 else 0, 1)
+        stats = res_ayer.fetchone()
+        efectividad = round((stats[1]/stats[0]*100) if stats and stats[0]>0 else 0, 1)
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request, "top3": res_ia.get("top3", []),
-            "bitacora": bitacora, "ultimos_db": ultimos_db, "score": score
+            "bitacora": await obtener_bitacora_avance(db), 
+            "ultimos_db": ultimos_12, 
+            "total_data": total_entrenamiento,
+            "efectividad": efectividad
         })
     except Exception as e:
-        return HTMLResponse(content=f"Error: {e}", status_code=500)
-
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(ciclo_infinito())
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+        return HTMLResponse(content=f"Error en el sistema: {e}", status_code=500)
