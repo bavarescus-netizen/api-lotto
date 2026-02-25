@@ -44,7 +44,6 @@ from app.core.scheduler import ciclo_infinito
 async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     """Sincroniza resultados de la web a la DB (Solo ayer y hoy)"""
     try:
-        # CAMBIO: Ya no usamos el 7 de febrero. Solo descargamos las últimas 48 horas.
         tz = pytz.timezone('America/Caracas')
         hoy_dt = datetime.now(tz)
         inicio_dt = hoy_dt - timedelta(days=1) 
@@ -65,8 +64,7 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
                     ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
-                # 2. Actualizar Auditoría (Para marcar aciertos en la bitácora)
-                # Limpiamos el nombre del animalito para comparar sin errores de acentos o espacios
+                # 2. Actualizar Auditoría
                 animal_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', reg["animalito"]).lower()
                 
                 await db.execute(text("""
@@ -84,31 +82,26 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
             await db.commit()
             agregados = len(datos)
         
-        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros (Bloque actual)."})
+        return JSONResponse({"status": "success", "message": f"Sincronizado: {agregados} registros."})
     except Exception as e:
         await db.rollback()
-        print(f"❌ ERROR EN SINCRONIZACIÓN: {str(e)}")
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/procesar")
 async def procesar_motor(db: AsyncSession = Depends(get_db)):
-    """Recalibra las probabilidades de la IA"""
     try:
         await generar_prediccion(db)
         await db.commit()
-        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado exitosamente."})
+        return JSONResponse({"status": "success", "message": "Motor V4.5 PRO recalibrado."})
     except Exception as e:
         await db.rollback()
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
-    """Página principal del Dashboard"""
     try:
-        # Obtenemos predicción actual
         res_ia = await generar_prediccion(db)
         
-        # Obtenemos últimos 12 resultados para la tabla de la derecha
         res_db = await db.execute(text("""
             SELECT hora, animalito 
             FROM historico 
@@ -120,16 +113,30 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         ultimos_12 = []
         for r in res_db.fetchall():
-            # Generar nombre de imagen limpio
             img_name = re.sub(r'[^a-z]', '', r[1].lower()).strip()
             ultimos_12.append({
-                "hora": r[0], 
-                "animal": r[1].upper(), 
-                "img": f"{img_name}.png"
+                "hora": r[0], "animal": r[1].upper(), "img": f"{img_name}.png"
             })
         
-        # Obtenemos la bitácora de aciertos de hoy
         bitacora = await obtener_bitacora_avance(db)
         await db.commit()
 
-        return
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request, 
+            "top3": res_ia.get("top3", []),
+            "bitacora": bitacora, 
+            "ultimos_db": ultimos_12, 
+            "analisis": "LottoAI v4.5 PRO"
+        })
+    except Exception as e:
+        await db.rollback()
+        return HTMLResponse(content=f"Error en Dashboard: {e}", status_code=500)
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(ciclo_infinito())
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
