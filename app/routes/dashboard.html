@@ -3,70 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI V4.5 PRO</title>
+    <title>LottoAI PRO V4.5</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #0a0e17; --card: #151b29; --hoy: #10b981; --ayer: #3b82f6; }
+        :root { --bg: #070a13; --card: #111827; --win: #10b981; --loss: #ef4444; --wait: #3b82f6; }
         body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
-        .main-container { max-width: 480px; margin: auto; padding: 15px; }
-        .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; }
+        .main-container { max-width: 450px; margin: auto; padding: 10px; }
+        .glass-card { background: var(--card); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
         
-        /* Grid de Resultados 3x4 */
-        .grid-resultados { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-        .box-res { padding: 8px; border-radius: 8px; text-align: center; font-size: 0.6rem; border-bottom: 3px solid transparent; }
-        .res-hoy { border-color: var(--hoy); background: rgba(16, 185, 129, 0.1); }
-        .res-ayer { border-color: var(--ayer); background: rgba(59, 130, 246, 0.1); }
+        /* Grid 3x4 */
+        .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .res-item { 
+            padding: 8px; border-radius: 10px; text-align: center; position: relative;
+            transition: 0.3s; border: 2px solid transparent;
+        }
+        .item-hoy { opacity: 1; }
+        .item-ayer { opacity: 0.5; filter: grayscale(30%); background: rgba(0,0,0,0.2); }
         
-        .animal-img { width: 35px; height: 35px; object-fit: contain; }
-        .prob-badge { font-size: 0.55rem; padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,0.5); }
+        /* Bordes de estado */
+        .status-win { border-color: var(--win); background: rgba(16,185,129,0.1); }
+        .status-loss { border-color: var(--loss); background: rgba(239,68,68,0.1); }
+        .status-none { border-color: var(--wait); background: rgba(59,130,246,0.1); }
+
+        .animal-img { width: 32px; height: 32px; object-fit: contain; }
+        .badge-score { font-size: 0.6rem; background: rgba(0,0,0,0.6); padding: 3px 6px; border-radius: 5px; }
     </style>
 </head>
 <body>
 
 <div class="main-container">
-    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center border-primary">
+    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center">
         <div>
-            <h6 class="mb-0 fw-bold">DATOS DE APRENDIZAJE</h6>
-            <small class="text-primary fw-bold">{{ total_data }} registros procesados</small>
+            <h6 class="mb-0 fw-bold text-primary">CORE V4.5 PRO</h6>
+            <small class="text-secondary">{{ total_data }} registros aprendidos</small>
         </div>
         <div class="text-end">
             <h5 class="mb-0 text-success fw-bold">{{ efectividad }}%</h5>
-            <small class="text-secondary" style="font-size: 0.5rem;">EFICACIA AYER</small>
+            <small class="text-secondary" style="font-size: 0.5rem;">EFICACIA 7 DÍAS</small>
         </div>
     </div>
 
     <div class="row g-2 mb-3">
-        <div class="col-8">
-            <button onclick="ejecutar('/api/examen-real')" class="btn btn-primary btn-sm w-100 fw-bold">SINCRONIZAR WEB</button>
-        </div>
-        <div class="col-4">
-            <button onclick="ejecutar('/api/procesar')" class="btn btn-success btn-sm w-100 fw-bold">RE-ENTRENAR</button>
-        </div>
-    </div>
-
-    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Predicción Motor V4.5</h6>
-    <div class="row g-2 mb-4">
         {% for a in top3 %}
-        {% set p = a.porcentaje|replace('%','')|float %}
         <div class="col-4">
-            <div class="glass-card p-2 text-center {% if p >= 25 %}border-success{% elif p >= 15 %}border-warning{% else %}border-danger{% endif %}" style="border-width: 2px;">
-                <div class="fw-bold small">#{{ a.numero }}</div>
+            <div class="glass-card p-2 text-center" style="border-bottom: 3px solid var(--win);">
+                <div class="fw-bold" style="font-size: 0.6rem;">#{{ a.numero }}</div>
                 <img src="/imagenes/{{ a.imagen }}" class="animal-img my-1">
-                <div class="fw-bold text-uppercase" style="font-size: 0.5rem;">{{ a.animal }}</div>
-                <div class="prob-badge text-white mt-1">{{ a.porcentaje }}</div>
+                <div class="fw-bold text-uppercase" style="font-size: 0.45rem;">{{ a.animal }}</div>
+                <div class="badge-score mt-1">{{ a.porcentaje }}</div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Histórico (Verde: Hoy | Azul: Ayer)</h6>
-    <div class="grid-resultados">
+    <div class="d-flex gap-2 mb-4">
+        <button onclick="ejecutar('/api/examen-real')" class="btn btn-primary btn-sm w-100 fw-bold">SINCRONIZAR SEMANA</button>
+        <button onclick="ejecutar('/api/procesar')" class="btn btn-success btn-sm w-100 fw-bold">ENTRENAR IA</button>
+    </div>
+
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Auditoría (Verde: Acierto | Rojo: Fallo)</h6>
+    <div class="res-grid">
         {% for r in ultimos_db %}
-        <div class="box-res {% if r.es_hoy %}res-hoy{% else %}res-ayer{% endif %}">
-            <div class="fw-bold {% if r.es_hoy %}text-success{% else %}text-primary{% endif %}">{{ r.hora }}</div>
+        <div class="res-item 
+            {{ 'item-hoy' if r.es_hoy else 'item-ayer' }} 
+            {% if r.acierto == True %}status-win{% elif r.acierto == False %}status-loss{% else %}status-none{% endif %}">
+            
+            <div class="fw-bold" style="font-size: 0.5rem; color: #94a3b8;">{{ r.hora }}</div>
             <img src="/imagenes/{{ r.img }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-            <div class="fw-bold text-white text-uppercase" style="font-size: 0.45rem;">{{ r.animal }}</div>
+            <div class="fw-bold text-white text-uppercase" style="font-size: 0.4rem; overflow: hidden;">{{ r.animal }}</div>
+            
+            <div style="position: absolute; top: 2px; right: 2px;">
+                {% if r.acierto == True %}<i class="fas fa-check-circle text-success" style="font-size: 0.6rem;"></i>
+                {% elif r.acierto == False %}<i class="fas fa-times-circle text-danger" style="font-size: 0.6rem;"></i>
+                {% endif %}
+            </div>
         </div>
         {% endfor %}
     </div>
@@ -74,12 +85,10 @@
 
 <script>
     async function ejecutar(url) {
-        const b = event.target; b.disabled = true; b.innerText = "...";
-        try {
-            const r = await fetch(url);
-            const d = await r.json();
-            alert(d.message); location.reload();
-        } catch(e) { alert("Error"); b.disabled = false; b.innerText = "Error"; }
+        const b = event.target; b.disabled = true;
+        const res = await fetch(url);
+        const data = await res.json();
+        alert(data.message); location.reload();
     }
 </script>
 </body>
