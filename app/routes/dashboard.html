@@ -3,128 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI CORE V4.5 PRO</title>
+    <title>LottoAI PRO V4.5</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #050810; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; }
-        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
-        .main-container { max-width: 500px; margin: auto; padding: 20px; }
-        .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; }
+        :root { --bg: #0b0f1a; --card: #161e2d; --hoy: #10b981; --ayer: #3b82f6; }
+        body { background: var(--bg); color: #e2e8f0; font-family: 'Segoe UI', Roboto, sans-serif; }
+        .main-container { max-width: 480px; margin: auto; padding: 15px; }
+        .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; }
         
-        /* Semáforo de Probabilidad */
-        .top-card { border-radius: 12px; text-align: center; padding: 12px; border: 2px solid transparent; transition: 0.3s; }
-        .prob-alta { border-color: var(--success); background: rgba(16, 185, 129, 0.1); color: #fff; }
-        .prob-media { border-color: var(--warning); background: rgba(245, 158, 11, 0.1); color: #fff; }
-        .prob-baja { border-color: var(--danger); background: rgba(239, 68, 68, 0.1); color: #fff; }
+        /* Sistema de Semáforo */
+        .top-card { border-radius: 12px; text-align: center; padding: 10px; border-bottom: 4px solid transparent; }
+        .alta { border-color: #10b981; background: rgba(16,185,129,0.1); }
+        .media { border-color: #f59e0b; background: rgba(245,158,11,0.1); }
+        .baja { border-color: #ef4444; background: rgba(239,68,68,0.1); }
+
+        /* Grid 3x4 */
+        .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .res-box { padding: 8px; border-radius: 8px; text-align: center; font-size: 0.6rem; position: relative; }
+        .box-hoy { border: 1px solid var(--hoy); background: rgba(16,185,129,0.05); }
+        .box-ayer { border: 1px solid var(--ayer); background: rgba(59,130,246,0.05); }
         
-        .animal-img { width: 65px; height: 65px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
-        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; border: none; width: 100%; }
-        
-        /* Bitácora */
-        .bitacora-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; }
-        .res-item { border-radius: 12px; padding: 10px; text-align: center; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.1); }
-        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: #4ade80; }
-        .miss { background: rgba(239, 68, 68, 0.2); border-color: var(--danger); color: #f87171; }
+        .animal-img { width: 35px; height: 35px; object-fit: contain; }
+        .btn-main { border-radius: 10px; font-weight: bold; font-size: 0.7rem; padding: 10px; border: none; }
     </style>
 </head>
 <body>
 
 <div class="main-container">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center">
         <div>
-            <h4 class="fw-bold mb-0">LOTTOAI <span class="text-primary">PRO</span></h4>
-            <div class="d-flex gap-2">
-                <small class="text-success fw-bold" style="font-size: 0.7rem;">
-                    <i class="fas fa-check-circle"></i> Ayer: {{ efectividad_ayer|default('78') }}%
-                </small>
-                <small class="text-info fw-bold" style="font-size: 0.7rem;">
-                    <i class="fas fa-clock"></i> Pico: 4PM-7PM
-                </small>
-            </div>
+            <h5 class="mb-0 fw-bold text-primary">LottoAI <span class="text-white">CORE</span></h5>
+            <small class="text-secondary">Entrenamiento: 28,450 reg.</small>
         </div>
-        <span class="badge bg-primary px-3 py-2">VENEZUELA</span>
-    </div>
-
-    <div class="mb-4">
-        <button onclick="ejecutarAction('/api/examen-real')" class="btn-action bg-primary text-white mb-2">
-            <i class="fas fa-sync-alt me-2"></i> Sincronizar Resultados Web
-        </button>
-        <div class="d-flex gap-2">
-            <button onclick="ejecutarAction('/api/procesar')" class="btn-action bg-success text-white flex-grow-1">
-                <i class="fas fa-brain me-2"></i> Entrenar IA
-            </button>
-            <button onclick="location.reload()" class="btn-action bg-secondary text-white" style="width: 60px;">
-                <i class="fas fa-redo"></i>
-            </button>
+        <div class="text-end">
+            <div class="h5 mb-0 text-success fw-bold">{{ score }}%</div>
+            <small class="text-secondary" style="font-size: 0.6rem;">EFECTIVIDAD 7D</small>
         </div>
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Predicciones y Probabilidad</h6>
+    <div class="row g-2 mb-3">
+        <div class="col-8">
+            <button onclick="ejecutar('/api/examen-real')" class="btn-main bg-primary text-white w-100">SINCRONIZAR DATOS</button>
+        </div>
+        <div class="col-4">
+            <button onclick="ejecutar('/api/procesar')" class="btn-main bg-success text-white w-100">IA TRAIN</button>
+        </div>
+    </div>
+
+    <h6 class="small fw-bold text-uppercase text-secondary mb-2">Sugerencias del Motor V4.5</h6>
     <div class="row g-2 mb-4">
-        {% if top3 %}
-            {% for animal in top3 %}
-            {% set prob = animal.porcentaje|replace('%', '')|float %}
-            <div class="col-4">
-                <div class="top-card {% if prob >= 25 %}prob-alta{% elif prob >= 15 %}prob-media{% else %}prob-baja{% endif %}">
-                    <div class="fw-bold small">#{{ animal.numero }}</div>
-                    <img src="/imagenes/{{ animal.imagen }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-                    <div class="fw-bold text-uppercase" style="font-size: 0.55rem;">{{ animal.animal }}</div>
-                    <span class="badge bg-dark bg-opacity-50 mt-1" style="font-size: 0.6rem;">{{ animal.porcentaje }}</span>
-                </div>
+        {% for a in top3 %}
+        {% set p = a.porcentaje|replace('%','')|float %}
+        <div class="col-4">
+            <div class="top-card glass-card {% if p >= 25 %}alta{% elif p >= 15 %}media{% else %}baja{% endif %}">
+                <div class="fw-bold small">#{{ a.numero }}</div>
+                <img src="/imagenes/{{ a.imagen }}" class="animal-img my-1">
+                <div class="fw-bold text-uppercase" style="font-size: 0.5rem;">{{ a.animal }}</div>
+                <div class="badge bg-dark bg-opacity-50 mt-1" style="font-size: 0.5rem;">{{ a.porcentaje }}</div>
             </div>
-            {% endfor %}
-        {% else %}
-            <div class="col-12 text-center py-4 glass-card text-white-50 small">
-                Sin datos de entrenamiento. Pulsa "Entrenar IA".
-            </div>
-        {% endif %}
-    </div>
-
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-calendar-check me-2"></i>Bitácora de Hoy</h6>
-    <div class="bitacora-grid mb-4">
-        {% for item in bitacora %}
-        <div class="res-item {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% else %}wait{% endif %}">
-            <div class="fw-bold mb-1 border-bottom border-white-10">{{ item.hora }}</div>
-            {% if item.resultado_real != 'PENDIENTE' %}
-                <img src="/imagenes/{{ item.img_real }}" style="width: 35px; height: 35px; object-fit: contain;">
-                <div class="fw-bold mt-1 text-uppercase" style="font-size: 0.55rem;">{{ item.resultado_real }}</div>
-                <div class="small fw-bold" style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
-            {% else %}
-                <div class="py-3 text-white-50 small">PENDIENTE</div>
-            {% endif %}
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-history me-2"></i>Histórico Reciente (Base de Datos)</h6>
-    <div class="scroll-h d-flex gap-2 overflow-auto pb-2" style="scrollbar-width: none;">
-        {% for res in ultimos_db %}
-        <div class="glass-card text-center" style="min-width: 85px; padding: 10px;">
-            <div class="text-primary fw-bold" style="font-size: 0.6rem;">{{ res.hora }}</div>
-            <img src="/imagenes/{{ res.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
-            <div class="text-white-50" style="font-size: 0.5rem;">{{ res.animal }}</div>
+    <h6 class="small fw-bold text-uppercase text-secondary mb-2">Últimos 12 Resultados (Hoy/Ayer)</h6>
+    <div class="res-grid">
+        {% for r in ultimos_db %}
+        <div class="res-box {% if r.es_hoy %}box-hoy{% else %}box-ayer{% endif %}">
+            <div class="fw-bold {% if r.es_hoy %}text-success{% else %}text-primary{% endif %}">{{ r.hora }}</div>
+            <img src="/imagenes/{{ r.img }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
+            <div class="fw-bold text-white text-uppercase" style="font-size: 0.45rem;">{{ r.animal }}</div>
         </div>
         {% endfor %}
     </div>
 </div>
 
 <script>
-    async function ejecutarAction(url) {
-        const btn = event.target.closest('button');
-        const original = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-        btn.disabled = true;
+    async function ejecutar(url) {
+        const b = event.target; b.innerText = "PROCESANDO...";
         try {
-            const res = await fetch(url);
-            const data = await res.json();
-            alert(data.message);
-            location.reload();
-        } catch (e) {
-            alert("Error de conexión");
-            btn.innerHTML = original;
-            btn.disabled = false;
-        }
+            const r = await fetch(url);
+            const d = await r.json();
+            alert(d.message); location.reload();
+        } catch(e) { alert("Error de red"); b.innerText = "REINTENTAR"; }
     }
 </script>
 </body>
