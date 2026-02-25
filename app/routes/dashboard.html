@@ -3,114 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI V4.5 PRO</title>
+    <title>LottoAI CORE V4.5 PRO</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --primary: #3b82f6; }
-        body { background: var(--bg); color: #f1f5f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root { --bg: #050810; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
         
-        /* Contenedores manejables */
-        .container { max-width: 600px; } 
-        .glass-card { background: var(--card); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        .main-container { max-width: 500px; margin: auto; padding: 20px; }
+        .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; }
         
-        /* Botones del Sistema */
-        .btn-system { border-radius: 10px; font-weight: bold; font-size: 0.75rem; text-transform: uppercase; transition: 0.3s; }
-        .btn-sync { background: #3b82f6; color: white; }
-        .btn-train { background: #10b981; color: white; }
-        .btn-update { background: #64748b; color: white; }
+        /* Botonera Principal */
+        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; transition: 0.2s; border: none; }
+        .btn-sync { background: #3b82f6; color: white; width: 100%; margin-bottom: 10px; }
+        .btn-train { background: #10b981; color: white; flex: 1; }
+        .btn-refresh { background: #334155; color: white; flex: 1; margin-left: 10px; }
 
-        /* Tarjetas de Sugerencia (Tamaño manejable) */
-        .sugerencia-card { border-radius: 10px; padding: 10px; text-align: center; border: none; }
-        .bg-top1 { background: #facc15; color: #000; } /* Oro */
-        .bg-top2 { background: #e2e8f0; color: #000; } /* Plata */
-        .bg-top3 { background: #fdba74; color: #000; } /* Bronce */
-        .animal-img { width: 45px; height: 45px; object-fit: contain; }
+        /* Sugerencias (Top 3) */
+        .top-card { border-radius: 12px; text-align: center; padding: 10px; position: relative; overflow: hidden; }
+        .bg-1 { background: #fbbf24; color: #000; } /* Amarillo */
+        .bg-2 { background: #22c55e; color: #fff; } /* Verde */
+        .bg-3 { background: #ef4444; color: #fff; } /* Rojo */
+        .animal-img { width: 60px; height: 60px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2)); }
 
-        /* Bitácora de Hoy */
-        .bitacora-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
-        .res-card { border-radius: 10px; padding: 8px; text-align: center; font-size: 0.7rem; }
-        .hit { background: #065f46; border: 1px solid #10b981; color: #ecfdf5; } /* Verde */
-        .miss { background: #7f1d1d; border: 1px solid #ef4444; color: #fef2f2; } /* Rojo */
-        .wait { background: #334155; color: #94a3b8; } /* Gris */
+        /* Bitácora Hoy (Estilo Tarjeta de Resultado) */
+        .bitacora-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 10px; }
+        .res-item { border-radius: 12px; padding: 10px; text-align: center; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.1); }
+        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: var(--success); }
+        .miss { background: rgba(239, 68, 68, 0.2); border-color: var(--danger); color: var(--danger); }
+        .wait { background: #1e293b; color: #94a3b8; }
+        
+        .scroll-h { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; scrollbar-width: none; }
     </style>
 </head>
 <body>
 
-<div class="container py-4">
+<div class="main-container">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h5 class="fw-bold mb-0 text-primary">LOTTOAI <span class="text-white">PRO</span></h5>
-            <small class="text-secondary">Motor V4.5 recalibrado</small>
+            <h4 class="fw-bold mb-0">LOTTOAI <span class="text-primary">PRO</span></h4>
+            <small class="text-secondary">Motor V4.5 Recalibrado</small>
         </div>
-        <div class="badge bg-primary">VENEZUELA</div>
+        <span class="badge bg-primary px-3 py-2">VENEZUELA</span>
     </div>
 
-    <div class="row g-2 mb-4">
-        <div class="col-12">
-            <button onclick="ejecutar('/api/examen-real')" class="btn btn-sync btn-system w-100 py-2">
-                <i class="fas fa-sync-alt me-2"></i> Sincronizar Resultados Web
-            </button>
-        </div>
-        <div class="col-6">
-            <button onclick="ejecutar('/api/procesar')" class="btn btn-train btn-system w-100">
+    <div class="mb-4">
+        <button onclick="ejecutar('/api/examen-real')" class="btn-action btn-sync">
+            <i class="fas fa-sync-alt me-2"></i> Sincronizar Resultados Web
+        </button>
+        <div class="d-flex">
+            <button onclick="ejecutar('/api/procesar')" class="btn-action btn-train">
                 <i class="fas fa-brain me-2"></i> Entrenar IA
             </button>
-        </div>
-        <div class="col-6">
-            <button onclick="location.reload()" class="btn btn-update btn-system w-100">
+            <button onclick="location.reload()" class="btn-action btn-refresh">
                 <i class="fas fa-redo me-2"></i> Actualizar
             </button>
         </div>
     </div>
 
-    <h6 class="text-uppercase small fw-bold mb-3 text-secondary"><i class="fas fa-star me-2"></i>Sugerencia Próximo Sorteo</h6>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Sugerencia Próximo Sorteo</h6>
     <div class="row g-2 mb-4">
         {% for animal in top3 %}
         <div class="col-4">
-            <div class="sugerencia-card {% if loop.index == 1 %}bg-top1{% elif loop.index == 2 %}bg-top2{% else %}bg-top3{% endif %}">
+            <div class="top-card {% if loop.index == 1 %}bg-1{% elif loop.index == 2 %}bg-2{% else %}bg-3{% endif %}">
                 <div class="fw-bold small">{{ animal.numero }}</div>
                 <img src="/imagenes/{{ animal.imagen }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-                <div class="fw-bold" style="font-size: 0.6rem;">{{ animal.animal }}</div>
-                <div class="badge bg-dark text-white p-1 mt-1" style="font-size: 0.5rem;">{{ animal.porcentaje }}</div>
+                <div class="fw-bold text-uppercase" style="font-size: 0.55rem;">{{ animal.animal }}</div>
+                <div class="badge bg-dark bg-opacity-25 mt-1" style="font-size: 0.6rem;">{{ animal.porcentaje }}</div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-uppercase small fw-bold mb-3 text-secondary"><i class="fas fa-history me-2"></i>Bitácora de Aciertos (Hoy)</h6>
-    <div class="bitacora-grid">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-calendar-check me-2"></i>Bitácora de Aciertos (Hoy)</h6>
+    <div class="bitacora-container mb-4">
         {% for item in bitacora %}
-        <div class="res-card {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% else %}wait{% endif %}">
-            <div class="fw-bold border-bottom border-white-50 mb-1" style="font-size: 0.6rem;">{{ item.hora }}</div>
+        <div class="res-item {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% else %}wait{% endif %}">
+            <div class="fw-bold mb-1 border-bottom border-white-10">{{ item.hora }}</div>
             {% if item.resultado_real != 'PENDIENTE' %}
-                <img src="/imagenes/{{ item.img_real }}" style="width: 30px; height: 30px; object-fit: contain;">
-                <div class="fw-bold mt-1">{{ item.resultado_real }}</div>
-                <div style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
+                <img src="/imagenes/{{ item.img_real }}" style="width: 35px; height: 35px; object-fit: contain;">
+                <div class="fw-bold mt-1 text-uppercase">{{ item.resultado_real }}</div>
+                <div class="small" style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
             {% else %}
-                <div class="py-2 text-white-50">ESPERANDO</div>
+                <div class="py-3 text-white-50 small">PENDIENTE</div>
             {% endif %}
         </div>
         {% endfor %}
     </div>
 
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-history me-2"></i>Histórico Reciente</h6>
+    <div class="scroll-h">
+        {% for res in ultimos_db %}
+        <div class="glass-card text-center" style="min-width: 80px; padding: 10px;">
+            <div class="text-primary fw-bold" style="font-size: 0.6rem;">{{ res.hora }}</div>
+            <img src="/imagenes/{{ res.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+            <div class="text-white-50" style="font-size: 0.55rem; white-space: nowrap;">{{ res.animal }}</div>
+        </div>
+        {% endfor %}
+    </div>
 </div>
 
 <script>
     async function ejecutar(url) {
-        const confirmacion = confirm("¿Desea ejecutar esta acción?");
-        if (!confirmacion) return;
+        const btn = event.target;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PROCESANDO...';
+        btn.disabled = true;
 
         try {
             const res = await fetch(url);
             const data = await res.json();
-            alert(data.status === "success" ? "✅ " + data.message : "❌ " + data.message);
-            location.reload();
+            if(data.status === "success") {
+                location.reload();
+            } else {
+                alert("Error: " + data.message);
+                btn.innerHTML = original;
+                btn.disabled = false;
+            }
         } catch (e) {
-            alert("⚠️ Error de conexión");
+            alert("Error de conexión");
+            btn.innerHTML = original;
+            btn.disabled = false;
         }
     }
 </script>
-
 </body>
 </html>
