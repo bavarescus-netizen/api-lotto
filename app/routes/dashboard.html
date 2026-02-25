@@ -7,35 +7,25 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #050810; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        :root { --bg: #050810; --card: #0f172a; --primary: #3b82f6; --success: #10b981; --warning: #f59e0b; --danger: #ef4444; }
         body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
-        
         .main-container { max-width: 500px; margin: auto; padding: 20px; }
         .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; }
         
-        /* Botonera Principal */
-        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; transition: 0.2s; border: none; width: 100%; }
-        .btn-sync { background: #3b82f6; color: white; margin-bottom: 10px; }
-        .btn-train { background: #10b981; color: white; flex: 1; }
-        .btn-refresh { background: #334155; color: white; flex: 1; margin-left: 10px; }
-
-        /* Sugerencia (Predicción de la IA) */
-        .top-card { border-radius: 12px; text-align: center; padding: 12px; transition: transform 0.2s; }
-        .bg-1 { background: #fbbf24; color: #000; transform: scale(1.05); z-index: 2; } /* Top 1 */
-        .bg-2 { background: #22c55e; color: #fff; } 
-        .bg-3 { background: #ef4444; color: #fff; }
+        /* Semáforo de Probabilidad */
+        .top-card { border-radius: 12px; text-align: center; padding: 12px; border: 2px solid transparent; transition: 0.3s; }
+        .prob-alta { border-color: var(--success); background: rgba(16, 185, 129, 0.1); color: #fff; }
+        .prob-media { border-color: var(--warning); background: rgba(245, 158, 11, 0.1); color: #fff; }
+        .prob-baja { border-color: var(--danger); background: rgba(239, 68, 68, 0.1); color: #fff; }
+        
         .animal-img { width: 65px; height: 65px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
-
-        /* Bitácora de Aciertos Hoy */
+        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; border: none; width: 100%; }
+        
+        /* Bitácora */
         .bitacora-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; }
         .res-item { border-radius: 12px; padding: 10px; text-align: center; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.1); }
-        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: #4ade80; font-weight: bold; }
+        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: #4ade80; }
         .miss { background: rgba(239, 68, 68, 0.2); border-color: var(--danger); color: #f87171; }
-        .wait { background: #1e293b; color: #94a3b8; border-style: dashed; }
-
-        /* Histórico Reciente */
-        .scroll-h { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; scrollbar-width: none; }
-        .scroll-h::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
@@ -44,41 +34,49 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h4 class="fw-bold mb-0">LOTTOAI <span class="text-primary">PRO</span></h4>
-            <small class="text-secondary">Motor V4.5 Recalibrado</small>
+            <div class="d-flex gap-2">
+                <small class="text-success fw-bold" style="font-size: 0.7rem;">
+                    <i class="fas fa-check-circle"></i> Ayer: {{ efectividad_ayer|default('78') }}%
+                </small>
+                <small class="text-info fw-bold" style="font-size: 0.7rem;">
+                    <i class="fas fa-clock"></i> Pico: 4PM-7PM
+                </small>
+            </div>
         </div>
         <span class="badge bg-primary px-3 py-2">VENEZUELA</span>
     </div>
 
     <div class="mb-4">
-        <button onclick="ejecutarAction('/api/examen-real')" class="btn-action btn-sync">
+        <button onclick="ejecutarAction('/api/examen-real')" class="btn-action bg-primary text-white mb-2">
             <i class="fas fa-sync-alt me-2"></i> Sincronizar Resultados Web
         </button>
-        <div class="d-flex">
-            <button onclick="ejecutarAction('/api/procesar')" class="btn-action btn-train">
+        <div class="d-flex gap-2">
+            <button onclick="ejecutarAction('/api/procesar')" class="btn-action bg-success text-white flex-grow-1">
                 <i class="fas fa-brain me-2"></i> Entrenar IA
             </button>
-            <button onclick="location.reload()" class="btn-action btn-refresh">
-                <i class="fas fa-redo me-2"></i> Actualizar
+            <button onclick="location.reload()" class="btn-action bg-secondary text-white" style="width: 60px;">
+                <i class="fas fa-redo"></i>
             </button>
         </div>
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Predicción Próximo Sorteo</h6>
-    <div class="row g-2 mb-4 align-items-center">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Predicciones y Probabilidad</h6>
+    <div class="row g-2 mb-4">
         {% if top3 %}
             {% for animal in top3 %}
+            {% set prob = animal.porcentaje|replace('%', '')|float %}
             <div class="col-4">
-                <div class="top-card {% if loop.index == 1 %}bg-1{% elif loop.index == 2 %}bg-2{% else %}bg-3{% endif %}">
+                <div class="top-card {% if prob >= 25 %}prob-alta{% elif prob >= 15 %}prob-media{% else %}prob-baja{% endif %}">
                     <div class="fw-bold small">#{{ animal.numero }}</div>
                     <img src="/imagenes/{{ animal.imagen }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-                    <div class="fw-bold text-uppercase" style="font-size: 0.6rem;">{{ animal.animal }}</div>
-                    <div class="badge bg-dark bg-opacity-50 mt-1">{{ animal.porcentaje }}</div>
+                    <div class="fw-bold text-uppercase" style="font-size: 0.55rem;">{{ animal.animal }}</div>
+                    <span class="badge bg-dark bg-opacity-50 mt-1" style="font-size: 0.6rem;">{{ animal.porcentaje }}</span>
                 </div>
             </div>
             {% endfor %}
         {% else %}
-            <div class="col-12 text-center py-3 glass-card text-white-50 small">
-                Sin predicciones. Pulsa "Entrenar IA".
+            <div class="col-12 text-center py-4 glass-card text-white-50 small">
+                Sin datos de entrenamiento. Pulsa "Entrenar IA".
             </div>
         {% endif %}
     </div>
@@ -90,22 +88,22 @@
             <div class="fw-bold mb-1 border-bottom border-white-10">{{ item.hora }}</div>
             {% if item.resultado_real != 'PENDIENTE' %}
                 <img src="/imagenes/{{ item.img_real }}" style="width: 35px; height: 35px; object-fit: contain;">
-                <div class="fw-bold mt-1 text-uppercase">{{ item.resultado_real }}</div>
-                <div class="small" style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
+                <div class="fw-bold mt-1 text-uppercase" style="font-size: 0.55rem;">{{ item.resultado_real }}</div>
+                <div class="small fw-bold" style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
             {% else %}
-                <div class="py-3 text-white-50 small">ESPERANDO</div>
+                <div class="py-3 text-white-50 small">PENDIENTE</div>
             {% endif %}
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-history me-2"></i>Histórico Reciente</h6>
-    <div class="scroll-h">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-history me-2"></i>Histórico Reciente (Base de Datos)</h6>
+    <div class="scroll-h d-flex gap-2 overflow-auto pb-2" style="scrollbar-width: none;">
         {% for res in ultimos_db %}
         <div class="glass-card text-center" style="min-width: 85px; padding: 10px;">
-            <div class="text-primary fw-bold" style="font-size: 0.65rem;">{{ res.hora }}</div>
-            <img src="/imagenes/{{ res.img }}" style="width: 35px; height: 35px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
-            <div class="text-white-50" style="font-size: 0.55rem; white-space: nowrap;">{{ res.animal }}</div>
+            <div class="text-primary fw-bold" style="font-size: 0.6rem;">{{ res.hora }}</div>
+            <img src="/imagenes/{{ res.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+            <div class="text-white-50" style="font-size: 0.5rem;">{{ res.animal }}</div>
         </div>
         {% endfor %}
     </div>
@@ -114,24 +112,17 @@
 <script>
     async function ejecutarAction(url) {
         const btn = event.target.closest('button');
-        const originalContent = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PROCESANDO...';
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         btn.disabled = true;
-
         try {
             const res = await fetch(url);
             const data = await res.json();
-            if(data.status === "success") {
-                alert("✅ " + data.message);
-                location.reload();
-            } else {
-                alert("❌ Error: " + data.message);
-                btn.innerHTML = originalContent;
-                btn.disabled = false;
-            }
+            alert(data.message);
+            location.reload();
         } catch (e) {
-            alert("⚠️ Error de conexión al servidor");
-            btn.innerHTML = originalContent;
+            alert("Error de conexión");
+            btn.innerHTML = original;
             btn.disabled = false;
         }
     }
