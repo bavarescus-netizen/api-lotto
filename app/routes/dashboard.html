@@ -14,26 +14,28 @@
         .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 15px; }
         
         /* Botonera Principal */
-        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; transition: 0.2s; border: none; }
-        .btn-sync { background: #3b82f6; color: white; width: 100%; margin-bottom: 10px; }
+        .btn-action { border-radius: 12px; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; padding: 12px; transition: 0.2s; border: none; width: 100%; }
+        .btn-sync { background: #3b82f6; color: white; margin-bottom: 10px; }
         .btn-train { background: #10b981; color: white; flex: 1; }
         .btn-refresh { background: #334155; color: white; flex: 1; margin-left: 10px; }
 
-        /* Sugerencias (Top 3) */
-        .top-card { border-radius: 12px; text-align: center; padding: 10px; position: relative; overflow: hidden; }
-        .bg-1 { background: #fbbf24; color: #000; } /* Amarillo */
-        .bg-2 { background: #22c55e; color: #fff; } /* Verde */
-        .bg-3 { background: #ef4444; color: #fff; } /* Rojo */
-        .animal-img { width: 60px; height: 60px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2)); }
+        /* Sugerencia (Predicción de la IA) */
+        .top-card { border-radius: 12px; text-align: center; padding: 12px; transition: transform 0.2s; }
+        .bg-1 { background: #fbbf24; color: #000; transform: scale(1.05); z-index: 2; } /* Top 1 */
+        .bg-2 { background: #22c55e; color: #fff; } 
+        .bg-3 { background: #ef4444; color: #fff; }
+        .animal-img { width: 65px; height: 65px; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3)); }
 
-        /* Bitácora Hoy (Estilo Tarjeta de Resultado) */
-        .bitacora-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(85px, 1fr)); gap: 10px; }
+        /* Bitácora de Aciertos Hoy */
+        .bitacora-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 10px; }
         .res-item { border-radius: 12px; padding: 10px; text-align: center; font-size: 0.65rem; border: 1px solid rgba(255,255,255,0.1); }
-        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: var(--success); }
-        .miss { background: rgba(239, 68, 68, 0.2); border-color: var(--danger); color: var(--danger); }
-        .wait { background: #1e293b; color: #94a3b8; }
-        
+        .hit { background: rgba(16, 185, 129, 0.2); border-color: var(--success); color: #4ade80; font-weight: bold; }
+        .miss { background: rgba(239, 68, 68, 0.2); border-color: var(--danger); color: #f87171; }
+        .wait { background: #1e293b; color: #94a3b8; border-style: dashed; }
+
+        /* Histórico Reciente */
         .scroll-h { display: flex; overflow-x: auto; gap: 10px; padding-bottom: 10px; scrollbar-width: none; }
+        .scroll-h::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
@@ -48,11 +50,11 @@
     </div>
 
     <div class="mb-4">
-        <button onclick="ejecutar('/api/examen-real')" class="btn-action btn-sync">
+        <button onclick="ejecutarAction('/api/examen-real')" class="btn-action btn-sync">
             <i class="fas fa-sync-alt me-2"></i> Sincronizar Resultados Web
         </button>
         <div class="d-flex">
-            <button onclick="ejecutar('/api/procesar')" class="btn-action btn-train">
+            <button onclick="ejecutarAction('/api/procesar')" class="btn-action btn-train">
                 <i class="fas fa-brain me-2"></i> Entrenar IA
             </button>
             <button onclick="location.reload()" class="btn-action btn-refresh">
@@ -61,22 +63,28 @@
         </div>
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Sugerencia Próximo Sorteo</h6>
-    <div class="row g-2 mb-4">
-        {% for animal in top3 %}
-        <div class="col-4">
-            <div class="top-card {% if loop.index == 1 %}bg-1{% elif loop.index == 2 %}bg-2{% else %}bg-3{% endif %}">
-                <div class="fw-bold small">{{ animal.numero }}</div>
-                <img src="/imagenes/{{ animal.imagen }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-                <div class="fw-bold text-uppercase" style="font-size: 0.55rem;">{{ animal.animal }}</div>
-                <div class="badge bg-dark bg-opacity-25 mt-1" style="font-size: 0.6rem;">{{ animal.porcentaje }}</div>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-magic me-2"></i>Predicción Próximo Sorteo</h6>
+    <div class="row g-2 mb-4 align-items-center">
+        {% if top3 %}
+            {% for animal in top3 %}
+            <div class="col-4">
+                <div class="top-card {% if loop.index == 1 %}bg-1{% elif loop.index == 2 %}bg-2{% else %}bg-3{% endif %}">
+                    <div class="fw-bold small">#{{ animal.numero }}</div>
+                    <img src="/imagenes/{{ animal.imagen }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
+                    <div class="fw-bold text-uppercase" style="font-size: 0.6rem;">{{ animal.animal }}</div>
+                    <div class="badge bg-dark bg-opacity-50 mt-1">{{ animal.porcentaje }}</div>
+                </div>
             </div>
-        </div>
-        {% endfor %}
+            {% endfor %}
+        {% else %}
+            <div class="col-12 text-center py-3 glass-card text-white-50 small">
+                Sin predicciones. Pulsa "Entrenar IA".
+            </div>
+        {% endif %}
     </div>
 
-    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-calendar-check me-2"></i>Bitácora de Aciertos (Hoy)</h6>
-    <div class="bitacora-container mb-4">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-calendar-check me-2"></i>Bitácora de Hoy</h6>
+    <div class="bitacora-grid mb-4">
         {% for item in bitacora %}
         <div class="res-item {% if item.acierto %}hit{% elif item.resultado_real != 'PENDIENTE' %}miss{% else %}wait{% endif %}">
             <div class="fw-bold mb-1 border-bottom border-white-10">{{ item.hora }}</div>
@@ -85,7 +93,7 @@
                 <div class="fw-bold mt-1 text-uppercase">{{ item.resultado_real }}</div>
                 <div class="small" style="font-size: 0.5rem;">{{ 'ACIERTO' if item.acierto else 'FALLO' }}</div>
             {% else %}
-                <div class="py-3 text-white-50 small">PENDIENTE</div>
+                <div class="py-3 text-white-50 small">ESPERANDO</div>
             {% endif %}
         </div>
         {% endfor %}
@@ -94,9 +102,9 @@
     <h6 class="text-secondary small fw-bold text-uppercase mb-3"><i class="fas fa-history me-2"></i>Histórico Reciente</h6>
     <div class="scroll-h">
         {% for res in ultimos_db %}
-        <div class="glass-card text-center" style="min-width: 80px; padding: 10px;">
-            <div class="text-primary fw-bold" style="font-size: 0.6rem;">{{ res.hora }}</div>
-            <img src="/imagenes/{{ res.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+        <div class="glass-card text-center" style="min-width: 85px; padding: 10px;">
+            <div class="text-primary fw-bold" style="font-size: 0.65rem;">{{ res.hora }}</div>
+            <img src="/imagenes/{{ res.img }}" style="width: 35px; height: 35px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
             <div class="text-white-50" style="font-size: 0.55rem; white-space: nowrap;">{{ res.animal }}</div>
         </div>
         {% endfor %}
@@ -104,9 +112,9 @@
 </div>
 
 <script>
-    async function ejecutar(url) {
-        const btn = event.target;
-        const original = btn.innerHTML;
+    async function ejecutarAction(url) {
+        const btn = event.target.closest('button');
+        const originalContent = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PROCESANDO...';
         btn.disabled = true;
 
@@ -114,15 +122,16 @@
             const res = await fetch(url);
             const data = await res.json();
             if(data.status === "success") {
+                alert("✅ " + data.message);
                 location.reload();
             } else {
-                alert("Error: " + data.message);
-                btn.innerHTML = original;
+                alert("❌ Error: " + data.message);
+                btn.innerHTML = originalContent;
                 btn.disabled = false;
             }
         } catch (e) {
-            alert("Error de conexión");
-            btn.innerHTML = original;
+            alert("⚠️ Error de conexión al servidor");
+            btn.innerHTML = originalContent;
             btn.disabled = false;
         }
     }
