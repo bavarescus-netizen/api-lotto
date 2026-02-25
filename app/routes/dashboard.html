@@ -3,73 +3,67 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI PRO V4.5</title>
+    <title>LottoAI V4.5 PRO</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --bg: #0b0f1a; --card: #161e2d; --hoy: #10b981; --ayer: #3b82f6; }
-        body { background: var(--bg); color: #e2e8f0; font-family: 'Segoe UI', Roboto, sans-serif; }
+        :root { --bg: #0a0e17; --card: #151b29; --hoy: #10b981; --ayer: #3b82f6; }
+        body { background: var(--bg); color: #f1f5f9; font-family: 'Inter', sans-serif; }
         .main-container { max-width: 480px; margin: auto; padding: 15px; }
         .glass-card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; }
         
-        /* Sistema de Semáforo */
-        .top-card { border-radius: 12px; text-align: center; padding: 10px; border-bottom: 4px solid transparent; }
-        .alta { border-color: #10b981; background: rgba(16,185,129,0.1); }
-        .media { border-color: #f59e0b; background: rgba(245,158,11,0.1); }
-        .baja { border-color: #ef4444; background: rgba(239,68,68,0.1); }
-
-        /* Grid 3x4 */
-        .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-        .res-box { padding: 8px; border-radius: 8px; text-align: center; font-size: 0.6rem; position: relative; }
-        .box-hoy { border: 1px solid var(--hoy); background: rgba(16,185,129,0.05); }
-        .box-ayer { border: 1px solid var(--ayer); background: rgba(59,130,246,0.05); }
+        /* Grid de Resultados 3x4 */
+        .grid-resultados { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+        .box-res { padding: 8px; border-radius: 8px; text-align: center; font-size: 0.6rem; border-bottom: 3px solid transparent; }
+        .res-hoy { border-color: var(--hoy); background: rgba(16, 185, 129, 0.1); }
+        .res-ayer { border-color: var(--ayer); background: rgba(59, 130, 246, 0.1); }
         
         .animal-img { width: 35px; height: 35px; object-fit: contain; }
-        .btn-main { border-radius: 10px; font-weight: bold; font-size: 0.7rem; padding: 10px; border: none; }
+        .prob-badge { font-size: 0.55rem; padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,0.5); }
     </style>
 </head>
 <body>
 
 <div class="main-container">
-    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center">
+    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center border-primary">
         <div>
-            <h5 class="mb-0 fw-bold text-primary">LottoAI <span class="text-white">CORE</span></h5>
-            <small class="text-secondary">Entrenamiento: 28,450 reg.</small>
+            <h6 class="mb-0 fw-bold">DATOS DE APRENDIZAJE</h6>
+            <small class="text-primary fw-bold">{{ total_data }} registros procesados</small>
         </div>
         <div class="text-end">
-            <div class="h5 mb-0 text-success fw-bold">{{ score }}%</div>
-            <small class="text-secondary" style="font-size: 0.6rem;">EFECTIVIDAD 7D</small>
+            <h5 class="mb-0 text-success fw-bold">{{ efectividad }}%</h5>
+            <small class="text-secondary" style="font-size: 0.5rem;">EFICACIA AYER</small>
         </div>
     </div>
 
     <div class="row g-2 mb-3">
         <div class="col-8">
-            <button onclick="ejecutar('/api/examen-real')" class="btn-main bg-primary text-white w-100">SINCRONIZAR DATOS</button>
+            <button onclick="ejecutar('/api/examen-real')" class="btn btn-primary btn-sm w-100 fw-bold">SINCRONIZAR WEB</button>
         </div>
         <div class="col-4">
-            <button onclick="ejecutar('/api/procesar')" class="btn-main bg-success text-white w-100">IA TRAIN</button>
+            <button onclick="ejecutar('/api/procesar')" class="btn btn-success btn-sm w-100 fw-bold">RE-ENTRENAR</button>
         </div>
     </div>
 
-    <h6 class="small fw-bold text-uppercase text-secondary mb-2">Sugerencias del Motor V4.5</h6>
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Predicción Motor V4.5</h6>
     <div class="row g-2 mb-4">
         {% for a in top3 %}
         {% set p = a.porcentaje|replace('%','')|float %}
         <div class="col-4">
-            <div class="top-card glass-card {% if p >= 25 %}alta{% elif p >= 15 %}media{% else %}baja{% endif %}">
+            <div class="glass-card p-2 text-center {% if p >= 25 %}border-success{% elif p >= 15 %}border-warning{% else %}border-danger{% endif %}" style="border-width: 2px;">
                 <div class="fw-bold small">#{{ a.numero }}</div>
                 <img src="/imagenes/{{ a.imagen }}" class="animal-img my-1">
                 <div class="fw-bold text-uppercase" style="font-size: 0.5rem;">{{ a.animal }}</div>
-                <div class="badge bg-dark bg-opacity-50 mt-1" style="font-size: 0.5rem;">{{ a.porcentaje }}</div>
+                <div class="prob-badge text-white mt-1">{{ a.porcentaje }}</div>
             </div>
         </div>
         {% endfor %}
     </div>
 
-    <h6 class="small fw-bold text-uppercase text-secondary mb-2">Últimos 12 Resultados (Hoy/Ayer)</h6>
-    <div class="res-grid">
+    <h6 class="text-secondary small fw-bold text-uppercase mb-2">Histórico (Verde: Hoy | Azul: Ayer)</h6>
+    <div class="grid-resultados">
         {% for r in ultimos_db %}
-        <div class="res-box {% if r.es_hoy %}box-hoy{% else %}box-ayer{% endif %}">
+        <div class="box-res {% if r.es_hoy %}res-hoy{% else %}res-ayer{% endif %}">
             <div class="fw-bold {% if r.es_hoy %}text-success{% else %}text-primary{% endif %}">{{ r.hora }}</div>
             <img src="/imagenes/{{ r.img }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
             <div class="fw-bold text-white text-uppercase" style="font-size: 0.45rem;">{{ r.animal }}</div>
@@ -80,12 +74,12 @@
 
 <script>
     async function ejecutar(url) {
-        const b = event.target; b.innerText = "PROCESANDO...";
+        const b = event.target; b.disabled = true; b.innerText = "...";
         try {
             const r = await fetch(url);
             const d = await r.json();
             alert(d.message); location.reload();
-        } catch(e) { alert("Error de red"); b.innerText = "REINTENTAR"; }
+        } catch(e) { alert("Error"); b.disabled = false; b.innerText = "Error"; }
     }
 </script>
 </body>
