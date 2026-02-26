@@ -1,94 +1,41 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LottoAI PRO V4.5</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        :root { --bg: #090c14; --card: #121926; --error: #ef4444; --success: #3b82f6; }
-        body { background: var(--bg); color: #f8fafc; font-family: 'Inter', sans-serif; font-size: 14px; }
-        .main-container { max-width: 450px; margin: auto; padding: 10px; }
-        .glass-card { background: var(--card); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); }
-        
-        /* Grid de 12 Cuadros (3x4) */
-        .grid-12 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-        .box-sorteo { 
-            padding: 8px; border-radius: 10px; text-align: center; position: relative;
-            border: 2px solid transparent; transition: 0.3s;
-        }
-        
-        /* Reglas de Color y Opacidad */
-        .hoy { opacity: 1; }
-        .ayer { opacity: 0.4; filter: grayscale(40%); }
-        
-        /* Azul si está bien o pendiente / Rojo si falló */
-        .border-fail { border-color: var(--error) !important; background: rgba(239, 68, 68, 0.1); }
-        .border-ok { border-color: var(--success) !important; background: rgba(59, 130, 246, 0.1); }
-
-        .animal-img { width: 32px; height: 32px; object-fit: contain; }
-        .btn-action { font-size: 0.7rem; font-weight: bold; border-radius: 8px; padding: 8px; }
-    </style>
-</head>
-<body>
-
-<div class="main-container">
-    <div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center">
-        <div>
-            <h6 class="mb-0 fw-bold text-info">SISTEMA APRENDIZAJE</h6>
-            <small class="text-secondary">{{ total_data }} registros analizados</small>
-        </div>
-        <div class="text-end">
-            <h5 class="mb-0 text-success fw-bold">{{ efectividad }}%</h5>
-            <small class="text-secondary" style="font-size: 0.5rem;">EFICACIA 7D</small>
-        </div>
+<div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center" style="border-left: 5px solid #3b82f6;">
+    <div>
+        <h6 class="mb-0 fw-bold">INTELIGENCIA NEURAL</h6>
+        <small class="text-secondary">{{ total_data }} registros base</small>
     </div>
-
-    <h6 class="text-secondary small fw-bold mb-2">PRÓXIMO SORTEO (Predicción IA)</h6>
-    <div class="row g-2 mb-3">
-        {% for a in top3 %}
-        <div class="col-4">
-            <div class="glass-card p-2 text-center" style="border-bottom: 3px solid #3b82f6;">
-                <div class="fw-bold" style="font-size: 0.6rem;">#{{ a.numero }}</div>
-                <img src="/imagenes/{{ a.imagen }}" class="animal-img my-1">
-                <div class="fw-bold text-uppercase" style="font-size: 0.45rem;">{{ a.animal }}</div>
-                <div class="badge bg-primary mt-1" style="font-size: 0.5rem;">{{ a.porcentaje }}</div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-
-    <div class="d-flex gap-2 mb-3">
-        <button onclick="api('/api/examen-real')" class="btn btn-outline-primary btn-action w-100">SINCRONIZAR SEMANA</button>
-        <button onclick="api('/api/procesar')" class="btn btn-primary btn-action w-100">RE-ENTRENAR IA</button>
-    </div>
-
-    <h6 class="text-secondary small fw-bold mb-2">AUDITORÍA (Azul: OK/Pend. | Rojo: Fallo)</h6>
-    <div class="grid-12">
-        {% for r in ultimos_db %}
-        <div class="box-sorteo {{ 'hoy' if r.es_hoy else 'ayer' }} {{ 'border-fail' if r.acierto == False else 'border-ok' }}">
-            <div style="font-size: 0.5rem; color: #94a3b8;">{{ r.hora }}</div>
-            <img src="/imagenes/{{ r.img }}" class="animal-img my-1" onerror="this.src='/imagenes/pendiente.png'">
-            <div class="fw-bold text-white text-uppercase" style="font-size: 0.45rem;">{{ r.animal }}</div>
-            
-            {% if r.acierto == False %}
-            <i class="fas fa-times-circle text-danger" style="position: absolute; top: 2px; right: 2px; font-size: 0.6rem;"></i>
-            {% elif r.acierto == True %}
-            <i class="fas fa-check-circle text-info" style="position: absolute; top: 2px; right: 2px; font-size: 0.6rem;"></i>
-            {% endif %}
-        </div>
-        {% endfor %}
+    <div class="text-end">
+        <h5 class="mb-0 fw-bold {% if efectividad > 0 %}text-success{% else %}text-danger{% endif %}">{{ efectividad }}%</h5>
+        <small class="text-secondary" style="font-size: 0.5rem;">ACIERTO SEMANAL</small>
     </div>
 </div>
 
-<script>
-    async function api(url) {
-        const b = event.target; b.innerText = "...";
-        const r = await fetch(url);
-        const d = await r.json();
-        alert(d.message); location.reload();
-    }
-</script>
-</body>
-</html>
+<h6 class="text-secondary small fw-bold mb-2">Historial de Aprendizaje (Rojo=Fallo | Azul=OK)</h6>
+<div class="grid-12" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+    {% for r in ultimos_db %}
+    <div class="box-sorteo" 
+         style="
+            padding: 8px; border-radius: 10px; text-align: center;
+            background: rgba(18, 25, 38, {{ '1' if r.es_hoy else '0.4' }});
+            border: 2px solid {% if r.acierto == False %}#ef4444{% else %}#3b82f6{% endif %};
+            opacity: {{ '1' if r.es_hoy else '0.6' }};
+            position: relative;
+         ">
+        
+        <div style="font-size: 0.5rem; color: #94a3b8;">{{ r.hora }}</div>
+        <img src="/imagenes/{{ r.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
+        <div class="fw-bold text-white text-uppercase" style="font-size: 0.4rem;">{{ r.animal }}</div>
+
+        {% if r.lo_que_dijo_ia %}
+        <div style="font-size: 0.3rem; color: #64748b;">IA dijo: {{ r.lo_que_dijo_ia[:4] }}</div>
+        {% endif %}
+
+        <div style="position: absolute; top: 2px; right: 2px;">
+            {% if r.acierto == False %}
+                <i class="fas fa-times-circle text-danger" style="font-size: 0.6rem;"></i>
+            {% elif r.acierto == True %}
+                <i class="fas fa-check-circle text-info" style="font-size: 0.6rem;"></i>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
