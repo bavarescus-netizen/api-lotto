@@ -1,41 +1,98 @@
-<div class="glass-card p-3 mb-3 d-flex justify-content-between align-items-center" style="border-left: 5px solid #3b82f6;">
-    <div>
-        <h6 class="mb-0 fw-bold">INTELIGENCIA NEURAL</h6>
-        <small class="text-secondary">{{ total_data }} registros base</small>
-    </div>
-    <div class="text-end">
-        <h5 class="mb-0 fw-bold {% if efectividad > 0 %}text-success{% else %}text-danger{% endif %}">{{ efectividad }}%</h5>
-        <small class="text-secondary" style="font-size: 0.5rem;">ACIERTO SEMANAL</small>
-    </div>
-</div>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LOTTOAI PRO - Venezuela</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0e14;
+            --card-bg: #151b23;
+            --primary-blue: #007bff;
+            --success-green: #28a745;
+            --fail-red: #dc3545;
+            --text-gray: #8b949e;
+            --border-color: #30363d;
+        }
 
-<h6 class="text-secondary small fw-bold mb-2">Historial de Aprendizaje (Rojo=Fallo | Azul=OK)</h6>
-<div class="grid-12" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
-    {% for r in ultimos_db %}
-    <div class="box-sorteo" 
-         style="
-            padding: 8px; border-radius: 10px; text-align: center;
-            background: rgba(18, 25, 38, {{ '1' if r.es_hoy else '0.4' }});
-            border: 2px solid {% if r.acierto == False %}#ef4444{% else %}#3b82f6{% endif %};
-            opacity: {{ '1' if r.es_hoy else '0.6' }};
-            position: relative;
-         ">
-        
-        <div style="font-size: 0.5rem; color: #94a3b8;">{{ r.hora }}</div>
-        <img src="/imagenes/{{ r.img }}" style="width: 30px; height: 30px; object-fit: contain;" onerror="this.src='/imagenes/pendiente.png'">
-        <div class="fw-bold text-white text-uppercase" style="font-size: 0.4rem;">{{ r.animal }}</div>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark);
+            color: white;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
 
-        {% if r.lo_que_dijo_ia %}
-        <div style="font-size: 0.3rem; color: #64748b;">IA dijo: {{ r.lo_que_dijo_ia[:4] }}</div>
-        {% endif %}
+        .container {
+            width: 100%;
+            max-width: 500px;
+        }
 
-        <div style="position: absolute; top: 2px; right: 2px;">
-            {% if r.acierto == False %}
-                <i class="fas fa-times-circle text-danger" style="font-size: 0.6rem;"></i>
-            {% elif r.acierto == True %}
-                <i class="fas fa-check-circle text-info" style="font-size: 0.6rem;"></i>
-            {% endif %}
-        </div>
-    </div>
-    {% endfor %}
-</div>
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            font-weight: bold;
+            font-size: 24px;
+        }
+
+        .logo span { color: var(--primary-blue); }
+
+        .btn-venezuela {
+            background-color: var(--primary-blue);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 15px;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .status-ok { color: var(--success-green); }
+        .status-info { color: #00d4ff; }
+
+        /* Botones de Acción */
+        .action-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .btn-main {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            text-transform: uppercase;
+        }
+
+        .btn-sync { background-color: var(--primary-blue); color: white; }
+        .btn-train { background-color: var(--success-green); color: white; }
+
+        /* Secciones */
+        .section-title {
+            font-size: 14px;
+            color:
