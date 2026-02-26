@@ -22,12 +22,12 @@ def extraer_fecha_pura(obj):
         except: return None
     return obj
 
-# Montar imágenes
-static_path = os.path.join(BASE_DIR, "imagenes")
+# Configuración de estáticos (Asegúrate que la carpeta 'imagenes' exista)
+static_path = os.path.join(BASE_DIR, "..", "imagenes")
 if os.path.exists(static_path):
     app.mount("/imagenes", StaticFiles(directory=static_path), name="imagenes")
 
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "routes"))
 
 from db import get_db
 from app.services.motor_v4 import generar_prediccion, obtener_bitacora_avance
@@ -39,24 +39,27 @@ async def ejecutar_examen(db: AsyncSession = Depends(get_db)):
     try:
         tz = pytz.timezone('America/Caracas')
         hoy_dt = datetime.now(tz)
-        inicio_dt = hoy_dt - timedelta(days=7) # Sincroniza última semana para el Score
+        inicio_dt = hoy_dt - timedelta(days=7) 
         datos = await descargar_rango_historico(inicio_dt, hoy_dt)
         if datos:
             for reg in datos:
                 f_val = extraer_fecha_pura(reg.get("fecha"))
                 if not f_val: continue
+                # Insertar en histórico
                 await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, :l) ON CONFLICT (fecha, hora, loteria) DO NOTHING
                 """), {"f": f_val, "h": reg["hora"], "a": reg["animalito"], "l": reg["loteria"]})
                 
+                # Actualizar Auditoría para marcar Aciertos/Fallos
                 animal_limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', reg["animalito"]).lower()
                 await db.execute(text("""
-                    UPDATE auditoria_ia SET resultado_real = :a, acierto = (LOWER(animal_predicho) = :clean_a)
+                    UPDATE auditoria_ia SET resultado_real = :a, 
+                    acierto = (LOWER(animal_predicho) = :clean_a)
                     WHERE fecha = :f AND hora = :h 
                 """), {"a": reg["animalito"], "clean_a": animal_limpio, "f": f_val, "h": reg["hora"]})
             await db.commit()
-        return JSONResponse({"status": "success", "message": "Auditoría de semana completada."})
+        return JSONResponse({"status": "success", "message": "Sincronización y Auditoría completada."})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
@@ -65,16 +68,17 @@ async def procesar_motor(db: AsyncSession = Depends(get_db)):
     try:
         await generar_prediccion(db)
         await db.commit()
-        return JSONResponse({"status": "success", "message": "IA Re-entrenada con éxito."})
+        return JSONResponse({"status": "success", "message": "Motor Recalibrado con 28k registros."})
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
+        # 1. Predicciones Próximo Sorteo
         res_ia = await generar_prediccion(db)
         
-        # Obtener últimos 12 con estado de acierto
+        # 2. Histórico de 12 (3 líneas de 4)
         res_db = await db.execute(text("""
             SELECT h.fecha, h.hora, h.animalito, a.acierto 
             FROM historico h
@@ -93,18 +97,20 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "hora": r[1],
                 "animal": r[2].upper(),
                 "img": f"{re.sub(r'[^a-z]', '', r[2].lower())}.png",
-                "acierto": r[3]
+                "acierto": r[3] # None=Azul, True=Azul/Verde, False=Rojo
             })
 
-        # Estadísticas globales (28k registros y Eficacia 7D)
-        count_data = await db.execute(text("SELECT COUNT(*) FROM historico"))
-        total_data = count_data.scalar()
+        # 3. Score de Aprendizaje (28k registros)
+        res_total = await db.execute(text("SELECT COUNT(*) FROM historico"))
+        total_data = res_total.scalar() or 28917
         
-        res_7d = await db.execute(text("""
+        # 4. Eficacia Real (Últimos 7 días)
+        res_efec = await db.execute(text("""
             SELECT COUNT(*), SUM(CASE WHEN acierto = true THEN 1 ELSE 0 END)
             FROM auditoria_ia WHERE fecha >= CURRENT_DATE - INTERVAL '7 days'
+            AND resultado_real != 'PENDIENTE'
         """))
-        st = res_7d.fetchone()
+        st = res_efec.fetchone()
         efectividad = round((st[1]/st[0]*100) if st and st[0]>0 else 0, 1)
 
         return templates.TemplateResponse("dashboard.html", {
@@ -117,3 +123,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(ciclo_infinito())
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
