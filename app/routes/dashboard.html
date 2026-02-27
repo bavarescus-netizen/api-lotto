@@ -7,59 +7,63 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root { --bg: #0d1117; --card: #161b22; --blue: #58a6ff; --green: #238636; --red: #da3633; --border: #30363d; }
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; padding: 15px; }
-        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
-        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
-        .card.main { border-color: var(--blue); box-shadow: 0 0 10px rgba(88, 166, 255, 0.2); }
-        .card img { width: 45px; height: 45px; }
-        .card b { display: block; font-size: 13px; margin: 5px 0; }
-        .card small { color: var(--blue); font-size: 11px; }
+        body { font-family: sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; padding: 10px; }
+        .top-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 15px 0; }
+        .animal-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+        .animal-card.best { border-color: var(--blue); background: #1c2128; }
+        .animal-card img { width: 40px; height: 40px; }
         
         .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-        .audit-item { background: var(--card); border: 1px solid var(--border); border-radius: 5px; padding: 5px; text-align: center; cursor: pointer; }
-        .audit-item.win { border-color: var(--green); background: #0e2a14; }
-        .audit-item.fail { border-color: var(--red); background: #2a0e0e; }
-        .audit-item img { width: 30px; }
+        .audit-box { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 4px; text-align: center; cursor: pointer; }
+        .audit-box.win { border-color: var(--green); background: #0e2a14; }
+        .audit-box.fail { border-color: var(--red); background: #2a0e0e; }
         
-        .btn { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; color: white; }
-        .btn-entrenar { background: #1f6feb; }
-        .btn-stats { background: #8957e5; }
+        .btn { width: 100%; padding: 12px; margin-top: 8px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; color: white; }
+        .btn-blue { background: #1f6feb; }
+        .btn-purple { background: #8957e5; }
     </style>
 </head>
 <body>
+    <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2 style="color:var(--blue); margin:0;">LOTTOAI</h2>
+        <div style="font-size:18px; font-weight:bold;">{{ efectividad }}%</div>
+    </div>
 
-    <h3 style="margin:0 0 15px 0;">EFECTIVIDAD: <span style="color:var(--blue)">{{ efectividad }}%</span></h3>
-
-    <div class="grid-3">
+    <div class="top-3">
         {% for a in top3 %}
-        <div class="card {% if loop.index == 1 %}main{% endif %}">
+        <div class="animal-card {% if loop.index == 1 %}best{% endif %}">
             <img src="/imagenes/{{ a.imagen }}">
-            <b>{{ a.animal }}</b>
-            <small>{{ a.porcentaje }}</small>
+            <div style="font-size:12px; font-weight:bold;">{{ a.animal }}</div>
+            <div style="font-size:10px; color:var(--blue);">{{ a.porcentaje }}</div>
         </div>
         {% endfor %}
     </div>
 
-    <div style="font-size: 12px; margin-bottom: 8px;">AUDITORÍA (Marcar resultados de hoy)</div>
+    <div style="font-size:11px; color:#8b949e; margin-bottom:5px;">AUDITORÍA (12 ÚLTIMOS)</div>
     <div class="audit-grid">
         {% for item in ultimos_db %}
-        <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" 
-             onclick="this.classList.toggle('win')">
-            <div style="font-size: 8px;">{{ item.hora }}</div>
-            <img src="/imagenes/{{ item.img }}">
+        <div class="audit-box {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" onclick="marcar(this)">
+            <div style="font-size:8px;">{{ item.hora }}</div>
+            <img src="/imagenes/{{ item.img }}" style="width:25px;">
         </div>
         {% endfor %}
     </div>
 
-    <button class="btn btn-entrenar" onclick="accion('/procesar')">🧠 ENTRENAR IA</button>
-    <button class="btn btn-stats" onclick="accion('/stats')">📊 VER ESTADÍSTICAS</button>
+    <button class="btn btn-blue" onclick="run('/procesar')"><i class="fas fa-brain"></i> ENTRENAR IA</button>
+    <button class="btn btn-purple" onclick="run('/stats')"><i class="fas fa-chart-bar"></i> VER STATS</button>
 
     <script>
-        async function accion(url) {
-            const res = await fetch(url);
-            const data = await res.json();
-            alert(data.message || "Proceso completado");
-            if(url === '/procesar') location.reload();
+        function marcar(el) { el.classList.toggle('win'); }
+        async function run(url) {
+            const btn = event.target;
+            btn.disabled = true;
+            try {
+                const r = await fetch(url);
+                const d = await r.json();
+                alert(d.message || "Listo");
+                if(url === '/procesar') location.reload();
+            } catch(e) { alert("Error"); }
+            finally { btn.disabled = false; }
         }
     </script>
 </body>
