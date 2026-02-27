@@ -7,32 +7,34 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-# IMPORTANTE: Conexión con tus archivos en la carpeta /routes
+# IMPORTANTE: Según tu estructura, los archivos están en 'app.routes'
 from db import get_db
-from routes import entrenar, stats, historico  # Asegúrate que estos archivos tengan "router = APIRouter()"
+from app.routes import entrenar, stats, historico, metricas  # Ruta corregida
 
 app = FastAPI()
 
-# 1. Registro de rutas para que los botones funcionen (Fin del Error 404)
+# 1. Registro de routers (Para que funcionen los botones del dashboard)
 app.include_router(entrenar.router)
 app.include_router(stats.router)
 app.include_router(historico.router)
+app.include_router(metricas.router)
 
-# 2. Configuración de Archivos Estáticos (Imágenes y Templates)
+# 2. Configuración de carpetas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Montamos imágenes desde la raíz
 app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes")), name="imagenes")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "routes"))
+# Buscamos el HTML dentro de app/routes
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 
-# 3. Función para obtener predicciones (Llamada al motor)
-from app.services.motor_v4 import generar_prediccion
+from app.routes.prediccion import generar_prediccion # Ajustado a tu prediccion.py
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # Generamos el Top 3
+        # Llamamos a tu lógica de predicción
         res_ia = await generar_prediccion(db)
         
-        # Consultamos los últimos 12 resultados para la auditoría
+        # Consultamos historial para la tabla de 12 cuadros
         query = text("""
             SELECT h.fecha, h.hora, h.animalito, a.acierto 
             FROM historico h
@@ -43,7 +45,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         ultimos_db = []
         for r in res_db.fetchall():
-            # Limpiamos el nombre para la imagen (ej: "01 CARNERO" -> "carnero.png")
             nombre_limpio = re.sub(r'[^a-z]', '', r[2].lower())
             ultimos_db.append({
                 "hora": r[1],
@@ -52,10 +53,10 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "acierto": r[3]
             })
 
-        # Calculamos la efectividad real
-        res_efec = await db.execute(text("SELECT total, precision FROM metrics WHERE id = 1"))
+        # Buscamos la efectividad en tu tabla de métricas
+        res_efec = await db.execute(text("SELECT precision FROM metrics WHERE id = 1"))
         metric = res_efec.fetchone()
-        efectividad_global = metric[1] if metric else 0.0
+        efectividad_global = metric[0] if metric else 0.0
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -64,5 +65,4 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             "efectividad": efectividad_global
         })
     except Exception as e:
-        print(f"Error en Home: {e}")
-        return HTMLResponse(content="Error interno del servidor", status_code=500)
+        return HTMLResponse(content=f"Error en el servidor: {str(e)}", status_code=500)
