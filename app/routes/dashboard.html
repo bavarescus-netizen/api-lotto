@@ -3,168 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOTTOAI PRO - Panel de Control</title>
+    <title>LOTTOAI PRO</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root {
-            --bg: #0a0e14; --card: #151b23; --blue: #007bff; 
-            --green: #28a745; --red: #dc3545; --border: #30363d; --text: #8b949e;
-        }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; }
-        .container { width: 100%; max-width: 450px; }
+        :root { --bg: #0d1117; --card: #161b22; --blue: #58a6ff; --green: #238636; --red: #da3633; --border: #30363d; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; padding: 15px; }
+        .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+        .card.main { border-color: var(--blue); box-shadow: 0 0 10px rgba(88, 166, 255, 0.2); }
+        .card img { width: 45px; height: 45px; }
+        .card b { display: block; font-size: 13px; margin: 5px 0; }
+        .card small { color: var(--blue); font-size: 11px; }
         
-        /* Header & Metricas */
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .stats-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-        .stat-card { background: var(--card); padding: 10px; border-radius: 8px; border: 1px solid var(--border); text-align: center; }
-        .stat-val { font-size: 18px; font-weight: bold; color: var(--blue); }
-
-        /* Top 3 Animales */
-        .top-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
-        .top-item { background: var(--card); border: 1px solid var(--blue); border-radius: 10px; padding: 8px; text-align: center; position: relative; }
-        .top-item.main { border-width: 2px; background: #1c2533; transform: scale(1.05); }
-        .top-item img { width: 50px; height: 50px; margin: 5px 0; }
-        .top-item b { display: block; font-size: 12px; }
-        .top-item span { font-size: 10px; color: var(--blue); }
-
-        /* Auditoría de 12 Cuadros */
-        .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-        .audit-card { 
-            background: var(--card); border: 1px solid var(--border); border-radius: 6px; 
-            padding: 5px; text-align: center; position: relative; cursor: pointer; transition: 0.2s;
-        }
-        .audit-card img { width: 35px; height: 35px; margin: 2px 0; }
-        .audit-card small { display: block; font-size: 9px; color: var(--text); }
+        .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+        .audit-item { background: var(--card); border: 1px solid var(--border); border-radius: 5px; padding: 5px; text-align: center; cursor: pointer; }
+        .audit-item.win { border-color: var(--green); background: #0e2a14; }
+        .audit-item.fail { border-color: var(--red); background: #2a0e0e; }
+        .audit-item img { width: 30px; }
         
-        /* Estados de Marcado */
-        .win { border-color: var(--green) !important; background: #062211 !important; }
-        .fail { border-color: var(--red) !important; background: #220606 !important; }
-        .check-icon { position: absolute; top: 2px; right: 2px; font-size: 10px; display: none; }
-        .win .check-icon { display: block; color: var(--green); }
-
-        /* Botones */
-        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
-        .btn { 
-            padding: 10px; border-radius: 6px; border: none; font-weight: bold; 
-            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;
-        }
-        .btn-blue { background: var(--blue); color: white; }
-        .btn-purple { background: #6f42c1; color: white; }
-        .btn-save { background: var(--green); color: white; width: 100%; margin-top: 10px; }
-        
-        #loader { display: none; color: var(--blue); font-size: 12px; margin-top: 10px; text-align: center; }
+        .btn { width: 100%; padding: 12px; margin-top: 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; color: white; }
+        .btn-entrenar { background: #1f6feb; }
+        .btn-stats { background: #8957e5; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <div style="font-size: 20px; font-weight: bold;">LOTTO<span style="color:var(--blue)">AI</span> PRO</div>
-        <div style="font-size: 12px; color: var(--green);"><i class="fas fa-circle"></i> VENEZUELA</div>
-    </div>
+    <h3 style="margin:0 0 15px 0;">EFECTIVIDAD: <span style="color:var(--blue)">{{ efectividad }}%</span></h3>
 
-    <div class="stats-bar">
-        <div class="stat-card">
-            <div class="stat-val">{{ efectividad }}%</div>
-            <div style="font-size: 10px; color: var(--text);">EFECTIVIDAD</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-val">28,917</div>
-            <div style="font-size: 10px; color: var(--text);">DATOS BASE</div>
-        </div>
-    </div>
-
-    <div style="font-size: 12px; color: var(--text); margin-bottom: 5px;">PRÓXIMOS SORTEOS</div>
-    <div class="top-grid">
+    <div class="grid-3">
         {% for a in top3 %}
-        <div class="top-item {% if loop.index == 1 %}main{% endif %}">
-            <img src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}">
+        <div class="card {% if loop.index == 1 %}main{% endif %}">
+            <img src="/imagenes/{{ a.imagen }}">
             <b>{{ a.animal }}</b>
-            <span>{{ a.porcentaje }}</span>
+            <small>{{ a.porcentaje }}</small>
         </div>
         {% endfor %}
     </div>
 
-    <div style="font-size: 12px; color: var(--text); margin-bottom: 5px;">AUDITORÍA DE HOY (Clic para marcar)</div>
+    <div style="font-size: 12px; margin-bottom: 8px;">AUDITORÍA (Marcar resultados de hoy)</div>
     <div class="audit-grid">
         {% for item in ultimos_db %}
-        <div class="audit-card {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" 
-             onclick="marcarCelda(this)">
-            <small>{{ item.hora }}</small>
+        <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" 
+             onclick="this.classList.toggle('win')">
+            <div style="font-size: 8px;">{{ item.hora }}</div>
             <img src="/imagenes/{{ item.img }}">
-            <i class="fas fa-check-circle check-icon"></i>
-            <input type="hidden" class="animal-val" value="{{ item.animal }}">
-            <input type="hidden" class="hora-val" value="{{ item.hora }}">
         </div>
         {% endfor %}
     </div>
 
-    <button class="btn btn-save" onclick="enviarResultados()">
-        <i class="fas fa-save"></i> GUARDAR RESULTADOS
-    </button>
+    <button class="btn btn-entrenar" onclick="accion('/procesar')">🧠 ENTRENAR IA</button>
+    <button class="btn btn-stats" onclick="accion('/stats')">📊 VER ESTADÍSTICAS</button>
 
-    <div class="actions">
-        <button class="btn btn-blue" onclick="ejecutarAccion('/procesar', 'Entrenando...')">
-            <i class="fas fa-brain"></i> ENTRENAR
-        </button>
-        <button class="btn btn-purple" onclick="ejecutarAccion('/stats', 'Analizando...')">
-            <i class="fas fa-chart-pie"></i> STATS
-        </button>
-    </div>
-
-    <div id="loader"><i class="fas fa-sync fa-spin"></i> <span id="load-text">Procesando...</span></div>
-</div>
-
-<script>
-    // Función visual para marcar celdas
-    function marcarCelda(el) {
-        if (!el.classList.contains('win') && !el.classList.contains('fail')) {
-            el.classList.add('win');
-        } else if (el.classList.contains('win')) {
-            el.classList.remove('win');
-            el.classList.add('fail');
-        } else {
-            el.classList.remove('fail');
-        }
-    }
-
-    // Función para guardar resultados reales en la DB (Calibrar IA)
-    async function enviarResultados() {
-        const marcados = document.querySelectorAll('.audit-card.win, .audit-card.fail');
-        if (marcados.length === 0) return alert("Marca al menos un resultado.");
-
-        document.getElementById('loader').style.display = 'block';
-        
-        for (let el of marcados) {
-            const formData = new FormData();
-            formData.append('animalito', el.querySelector('.animal-val').value);
-            formData.append('hora', el.querySelector('.hora-val').value);
-
-            try {
-                await fetch('/historico/agregar', { method: 'POST', body: formData });
-            } catch (e) { console.error("Error guardando", e); }
-        }
-        
-        alert("¡IA Calibrada con éxito!");
-        location.reload();
-    }
-
-    // Función genérica para Entrenamiento y Stats
-    async function ejecutarAccion(ruta, texto) {
-        document.getElementById('loader').style.display = 'block';
-        document.getElementById('load-text').innerText = texto;
-        
-        try {
-            const res = await fetch(ruta);
+    <script>
+        async function accion(url) {
+            const res = await fetch(url);
             const data = await res.json();
-            alert(data.message || data.status);
-            if(ruta === '/procesar') location.reload();
-        } catch (e) {
-            alert("Error en la conexión");
-        } finally {
-            document.getElementById('loader').style.display = 'none';
+            alert(data.message || "Proceso completado");
+            if(url === '/procesar') location.reload();
         }
-    }
-</script>
+    </script>
 </body>
 </html>
