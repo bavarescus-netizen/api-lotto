@@ -3,183 +3,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOTTOAI PRO - Venezuela</title>
+    <title>LOTTOAI PRO - Panel de Control</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #0a0e14;
-            --card-bg: #151b23;
-            --primary-blue: #007bff;
-            --success-green: #28a745;
-            --fail-red: #dc3545;
-            --text-gray: #8b949e;
-            --border-color: #30363d;
+            --bg: #0a0e14; --card: #151b23; --blue: #007bff; 
+            --green: #28a745; --red: #dc3545; --border: #30363d; --text: #8b949e;
         }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; }
+        .container { width: 100%; max-width: 450px; }
+        
+        /* Header & Metricas */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .stats-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .stat-card { background: var(--card); padding: 10px; border-radius: 8px; border: 1px solid var(--border); text-align: center; }
+        .stat-val { font-size: 18px; font-weight: bold; color: var(--blue); }
 
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: var(--bg-dark);
-            color: white;
-            margin: 0;
-            padding: 10px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+        /* Top 3 Animales */
+        .top-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+        .top-item { background: var(--card); border: 1px solid var(--blue); border-radius: 10px; padding: 8px; text-align: center; position: relative; }
+        .top-item.main { border-width: 2px; background: #1c2533; transform: scale(1.05); }
+        .top-item img { width: 50px; height: 50px; margin: 5px 0; }
+        .top-item b { display: block; font-size: 12px; }
+        .top-item span { font-size: 10px; color: var(--blue); }
+
+        /* Auditoría de 12 Cuadros */
+        .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        .audit-card { 
+            background: var(--card); border: 1px solid var(--border); border-radius: 6px; 
+            padding: 5px; text-align: center; position: relative; cursor: pointer; transition: 0.2s;
         }
+        .audit-card img { width: 35px; height: 35px; margin: 2px 0; }
+        .audit-card small { display: block; font-size: 9px; color: var(--text); }
+        
+        /* Estados de Marcado */
+        .win { border-color: var(--green) !important; background: #062211 !important; }
+        .fail { border-color: var(--red) !important; background: #220606 !important; }
+        .check-icon { position: absolute; top: 2px; right: 2px; font-size: 10px; display: none; }
+        .win .check-icon { display: block; color: var(--green); }
 
-        .container { width: 100%; max-width: 500px; }
-
-        /* Header */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding: 10px;
+        /* Botones */
+        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }
+        .btn { 
+            padding: 10px; border-radius: 6px; border: none; font-weight: bold; 
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;
         }
-
-        .logo { font-weight: bold; font-size: 22px; }
-        .logo span { color: var(--primary-blue); }
-
-        /* Metricas */
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-
-        .metric-card {
-            background: var(--card-bg);
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            text-align: center;
-        }
-
-        .metric-value { font-size: 20px; font-weight: bold; color: var(--primary-blue); }
-        .metric-label { font-size: 12px; color: var(--text-gray); text-transform: uppercase; }
-
-        /* Predicción Principal (Top 1) */
-        .prediction-main {
-            background: linear-gradient(145deg, #1e2530, #151b23);
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-            border: 1px solid var(--primary-blue);
-            margin-bottom: 25px;
-        }
-
-        .animal-img-large {
-            width: 120px;
-            height: 120px;
-            margin: 10px 0;
-            filter: drop-shadow(0 0 10px var(--primary-blue));
-        }
-
-        /* Grid de Auditoría (12 cuadros) */
-        .audit-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        .audit-item {
-            background: var(--card-bg);
-            border-radius: 8px;
-            padding: 10px;
-            text-align: center;
-            border: 1px solid var(--border-color);
-            position: relative;
-        }
-
-        .audit-item.success { border-color: var(--success-green); background: #062211; }
-        .audit-item.fail { border-color: var(--fail-red); background: #220606; }
-
-        .audit-img { width: 45px; height: 45px; margin-bottom: 5px; }
-        .audit-time { font-size: 10px; color: var(--text-gray); }
-        .audit-name { font-size: 11px; font-weight: bold; display: block; }
-
-        .badge-status {
-            position: absolute;
-            top: 5px;
-            right: 5px;
-            font-size: 9px;
-            padding: 2px 5px;
-            border-radius: 4px;
-        }
-
-        .btn-update {
-            background: var(--primary-blue);
-            color: white;
-            border: none;
-            width: 100%;
-            padding: 12px;
-            border-radius: 8px;
-            font-weight: bold;
-            margin-top: 20px;
-            cursor: pointer;
-        }
-
+        .btn-blue { background: var(--blue); color: white; }
+        .btn-purple { background: #6f42c1; color: white; }
+        .btn-save { background: var(--green); color: white; width: 100%; margin-top: 10px; }
+        
+        #loader { display: none; color: var(--blue); font-size: 12px; margin-top: 10px; text-align: center; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="header">
-        <div class="logo">LOTTO<span>AI</span> PRO</div>
-        <div style="color: var(--success-green); font-size: 12px;">
-            <i class="fas fa-circle"></i> SISTEMA VIVO
+        <div style="font-size: 20px; font-weight: bold;">LOTTO<span style="color:var(--blue)">AI</span> PRO</div>
+        <div style="font-size: 12px; color: var(--green);"><i class="fas fa-circle"></i> VENEZUELA</div>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat-card">
+            <div class="stat-val">{{ efectividad }}%</div>
+            <div style="font-size: 10px; color: var(--text);">EFECTIVIDAD</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-val">28,917</div>
+            <div style="font-size: 10px; color: var(--text);">DATOS BASE</div>
         </div>
     </div>
 
-    <div class="metrics-grid">
-        <div class="metric-card">
-            <div class="metric-value">{{ efectividad }}%</div>
-            <div class="metric-label">Eficacia Semanal</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">28,917</div>
-            <div class="metric-label">Datos Analizados</div>
-        </div>
-    </div>
-
-    {% if top3 %}
-    <div class="prediction-main">
-        <div style="color: var(--text-gray); font-size: 13px;">PRÓXIMO SORTEO</div>
-        <img src="/imagenes/{{ top3[0].imagen }}" class="animal-img-large" alt="{{ top3[0].animal }}">
-        <div style="font-size: 24px; font-weight: bold;">{{ top3[0].numero }} - {{ top3[0].animal }}</div>
-        <div style="color: var(--primary-blue); font-weight: bold; margin-top: 5px;">
-            Confianza: {{ top3[0].porcentaje }}
-        </div>
-    </div>
-    {% endif %}
-
-    <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; color: var(--text-gray);">
-        <i class="fas fa-history"></i> AUDITORÍA DE RESULTADOS (HOY)
-    </div>
-
-    <div class="audit-grid">
-        {% for item in ultimos_db %}
-        <div class="audit-item {% if item.acierto == True %}success{% elif item.acierto == False %}fail{% endif %}">
-            <span class="audit-time">{{ item.hora }}</span>
-            <img src="/imagenes/{{ item.img }}" class="audit-img" alt="{{ item.animal }}">
-            <span class="audit-name">{{ item.animal }}</span>
-            
-            {% if item.acierto == True %}
-                <span class="badge-status" style="background: var(--success-green);">✓</span>
-            {% elif item.acierto == False %}
-                <span class="badge-status" style="background: var(--fail-red);">X</span>
-            {% endif %}
+    <div style="font-size: 12px; color: var(--text); margin-bottom: 5px;">PRÓXIMOS SORTEOS</div>
+    <div class="top-grid">
+        {% for a in top3 %}
+        <div class="top-item {% if loop.index == 1 %}main{% endif %}">
+            <img src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}">
+            <b>{{ a.animal }}</b>
+            <span>{{ a.porcentaje }}</span>
         </div>
         {% endfor %}
     </div>
 
-    <button class="btn-update" onclick="location.reload()">
-        <i class="fas fa-sync"></i> ACTUALIZAR RESULTADOS
+    <div style="font-size: 12px; color: var(--text); margin-bottom: 5px;">AUDITORÍA DE HOY (Clic para marcar)</div>
+    <div class="audit-grid">
+        {% for item in ultimos_db %}
+        <div class="audit-card {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" 
+             onclick="marcarCelda(this)">
+            <small>{{ item.hora }}</small>
+            <img src="/imagenes/{{ item.img }}">
+            <i class="fas fa-check-circle check-icon"></i>
+            <input type="hidden" class="animal-val" value="{{ item.animal }}">
+            <input type="hidden" class="hora-val" value="{{ item.hora }}">
+        </div>
+        {% endfor %}
+    </div>
+
+    <button class="btn btn-save" onclick="enviarResultados()">
+        <i class="fas fa-save"></i> GUARDAR RESULTADOS
     </button>
+
+    <div class="actions">
+        <button class="btn btn-blue" onclick="ejecutarAccion('/procesar', 'Entrenando...')">
+            <i class="fas fa-brain"></i> ENTRENAR
+        </button>
+        <button class="btn btn-purple" onclick="ejecutarAccion('/stats', 'Analizando...')">
+            <i class="fas fa-chart-pie"></i> STATS
+        </button>
+    </div>
+
+    <div id="loader"><i class="fas fa-sync fa-spin"></i> <span id="load-text">Procesando...</span></div>
 </div>
 
+<script>
+    // Función visual para marcar celdas
+    function marcarCelda(el) {
+        if (!el.classList.contains('win') && !el.classList.contains('fail')) {
+            el.classList.add('win');
+        } else if (el.classList.contains('win')) {
+            el.classList.remove('win');
+            el.classList.add('fail');
+        } else {
+            el.classList.remove('fail');
+        }
+    }
+
+    // Función para guardar resultados reales en la DB (Calibrar IA)
+    async function enviarResultados() {
+        const marcados = document.querySelectorAll('.audit-card.win, .audit-card.fail');
+        if (marcados.length === 0) return alert("Marca al menos un resultado.");
+
+        document.getElementById('loader').style.display = 'block';
+        
+        for (let el of marcados) {
+            const formData = new FormData();
+            formData.append('animalito', el.querySelector('.animal-val').value);
+            formData.append('hora', el.querySelector('.hora-val').value);
+
+            try {
+                await fetch('/historico/agregar', { method: 'POST', body: formData });
+            } catch (e) { console.error("Error guardando", e); }
+        }
+        
+        alert("¡IA Calibrada con éxito!");
+        location.reload();
+    }
+
+    // Función genérica para Entrenamiento y Stats
+    async function ejecutarAccion(ruta, texto) {
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('load-text').innerText = texto;
+        
+        try {
+            const res = await fetch(ruta);
+            const data = await res.json();
+            alert(data.message || data.status);
+            if(ruta === '/procesar') location.reload();
+        } catch (e) {
+            alert("Error en la conexión");
+        } finally {
+            document.getElementById('loader').style.display = 'none';
+        }
+    }
+</script>
 </body>
 </html>
