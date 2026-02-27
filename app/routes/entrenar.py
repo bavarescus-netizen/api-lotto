@@ -1,18 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from db import get_db  # Importación fiel a tu estructura
+from fastapi.responses import JSONResponse
+from db import get_db
 
 router = APIRouter()
 
 @router.get("/procesar")
 async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
     try:
-        # 1. Limpieza de datos (Usamos DELETE en lugar de TRUNCATE para mayor seguridad en transacciones)
+        # 1. Limpieza de datos previa
         await db.execute(text("DELETE FROM probabilidades_hora"))
         
         # 2. SQL Maestro: Analiza secuencias y frecuencias horarias
-        # Agregamos un filtrado de pesos para no saturar la tabla con probabilidades de 0.01%
         query = text("""
             INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia)
             WITH secuencia_historica AS (
@@ -38,28 +38,47 @@ async def procesar_entrenamiento(db: AsyncSession = Depends(get_db)):
             )
             SELECT 
                 g.h, g.animalito, g.ocurrencias,
-                -- FÓRMULA GANADORA: Peso equilibrado
                 ((g.prob_base * 0.3) + (COALESCE(r.c_reciente, 0) * 10)) as peso_final,
                 CASE WHEN COALESCE(r.c_reciente, 0) > 0 THEN 'CALIENTE' ELSE 'FRIO' END
             FROM calculo_global g
             LEFT JOIN racha_reciente r ON g.h = r.h AND g.animalito = r.animalito
             WHERE g.h BETWEEN 9 AND 19
-            AND g.prob_base > 0.5  -- Evitamos ruido estadístico
+            AND g.prob_base > 0.5
         """)
         
         await db.execute(query)
+
+        # 3. ACTUALIZACIÓN AUTOMÁTICA DE MÉRICAS (Para que el % en el Dashboard suba)
+        # Esto calcula la precisión basada en la tabla auditoria_ia
+        update_metrics = text("""
+            UPDATE metrics 
+            SET total = (SELECT COUNT(*) FROM auditoria_ia),
+                aciertos = (SELECT COUNT(*) FROM auditoria_ia WHERE acierto = True),
+                precision = (
+                    SELECT CASE 
+                        WHEN COUNT(*) = 0 THEN 0 
+                        ELSE (COUNT(CASE WHEN acierto = True THEN 1 END)::FLOAT / COUNT(*)::FLOAT) * 100 
+                    END 
+                    FROM auditoria_ia
+                )
+            WHERE id = 1
+        """)
+        await db.execute(update_metrics)
         
-        # Confirmamos todos los cambios de una sola vez
+        # Confirmamos cambios
         await db.commit()
         
-        return {
+        # IMPORTANTE: Devolvemos JSONResponse para que el JS lea .message
+        return JSONResponse({
             "status": "success", 
-            "message": "Motor V4.5 PRO recalibrado exitosamente.",
+            "message": "Motor V4.5 PRO recalibrado. Métricas actualizadas.",
             "registros_analizados": 28709
-        }
+        })
         
     except Exception as e:
         await db.rollback()
-        return {"status": "error", "detail": f"Error en entrenamiento: {str(e)}"}
-
-
+        # En caso de error, también devolvemos JSON con código 500
+        return JSONResponse({
+            "status": "error", 
+            "message": f"Error en entrenamiento: {str(e)}"
+        }, status_code=500)
