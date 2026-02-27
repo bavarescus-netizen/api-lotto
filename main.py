@@ -7,34 +7,34 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-# IMPORTANTE: Según tu estructura, los archivos están en 'app.routes'
+# Conexión con tu base de datos y rutas en la carpeta app/routes
 from db import get_db
-from app.routes import entrenar, stats, historico, metricas  # Ruta corregida
+from app.routes import entrenar, stats, historico, metricas, prediccion
 
 app = FastAPI()
 
-# 1. Registro de routers (Para que funcionen los botones del dashboard)
+# 1. REGISTRO DE ROUTERS (Para eliminar los errores 404)
 app.include_router(entrenar.router)
 app.include_router(stats.router)
 app.include_router(historico.router)
 app.include_router(metricas.router)
 
-# 2. Configuración de carpetas
+# 2. CONFIGURACIÓN DE RUTAS DE ARCHIVOS
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Montamos imágenes desde la raíz
-app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes")), name="imagenes")
-# Buscamos el HTML dentro de app/routes
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 
-from app.routes.prediccion import generar_prediccion # Ajustado a tu prediccion.py
+# Montar imágenes (Raíz -> imagenes)
+app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes")), name="imagenes")
+
+# Templates (Raíz -> app -> routes)
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # Llamamos a tu lógica de predicción
-        res_ia = await generar_prediccion(db)
+        # Llamamos a la lógica de predicción desde prediccion.py
+        res_ia = await prediccion.generar_prediccion(db)
         
-        # Consultamos historial para la tabla de 12 cuadros
+        # Obtenemos los últimos 12 registros de la auditoría
         query = text("""
             SELECT h.fecha, h.hora, h.animalito, a.acierto 
             FROM historico h
@@ -45,6 +45,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         ultimos_db = []
         for r in res_db.fetchall():
+            # Limpiar nombre para la imagen: "02 TORO" -> "toro.png"
             nombre_limpio = re.sub(r'[^a-z]', '', r[2].lower())
             ultimos_db.append({
                 "hora": r[1],
@@ -53,10 +54,13 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "acierto": r[3]
             })
 
-        # Buscamos la efectividad en tu tabla de métricas
-        res_efec = await db.execute(text("SELECT precision FROM metrics WHERE id = 1"))
-        metric = res_efec.fetchone()
-        efectividad_global = metric[0] if metric else 0.0
+        # SEGURO PARA TABLA METRICS (Evita el Error 500)
+        try:
+            res_efec = await db.execute(text("SELECT precision FROM metrics WHERE id = 1"))
+            metric = res_efec.fetchone()
+            efectividad_global = metric[0] if metric else 0.0
+        except Exception:
+            efectividad_global = 0.0  # Si la tabla no existe aún, muestra 0.0
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -65,4 +69,4 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
             "efectividad": efectividad_global
         })
     except Exception as e:
-        return HTMLResponse(content=f"Error en el servidor: {str(e)}", status_code=500)
+        return HTMLResponse(content=f"Error Crítico: {str(e)}", status_code=500)
