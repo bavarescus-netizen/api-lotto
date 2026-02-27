@@ -17,82 +17,169 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', sans-serif;
             background-color: var(--bg-dark);
             color: white;
             margin: 0;
-            padding: 20px;
+            padding: 10px;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
 
-        .container {
-            width: 100%;
-            max-width: 500px;
-        }
+        .container { width: 100%; max-width: 500px; }
 
         /* Header */
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            width: 100%;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
+            padding: 10px;
         }
 
-        .logo {
-            font-weight: bold;
-            font-size: 24px;
-        }
-
+        .logo { font-weight: bold; font-size: 22px; }
         .logo span { color: var(--primary-blue); }
 
-        .btn-venezuela {
-            background-color: var(--primary-blue);
-            border: none;
-            color: white;
-            padding: 8px 15px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-
-        .status-bar {
-            display: flex;
-            gap: 15px;
-            font-size: 14px;
+        /* Metricas */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
             margin-bottom: 20px;
         }
 
-        .status-ok { color: var(--success-green); }
-        .status-info { color: #00d4ff; }
-
-        /* Botones de Acción */
-        .action-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-bottom: 30px;
+        .metric-card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            text-align: center;
         }
 
-        .btn-main {
+        .metric-value { font-size: 20px; font-weight: bold; color: var(--primary-blue); }
+        .metric-label { font-size: 12px; color: var(--text-gray); text-transform: uppercase; }
+
+        /* Predicción Principal (Top 1) */
+        .prediction-main {
+            background: linear-gradient(145deg, #1e2530, #151b23);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid var(--primary-blue);
+            margin-bottom: 25px;
+        }
+
+        .animal-img-large {
+            width: 120px;
+            height: 120px;
+            margin: 10px 0;
+            filter: drop-shadow(0 0 10px var(--primary-blue));
+        }
+
+        /* Grid de Auditoría (12 cuadros) */
+        .audit-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .audit-item {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .audit-item.success { border-color: var(--success-green); background: #062211; }
+        .audit-item.fail { border-color: var(--fail-red); background: #220606; }
+
+        .audit-img { width: 45px; height: 45px; margin-bottom: 5px; }
+        .audit-time { font-size: 10px; color: var(--text-gray); }
+        .audit-name { font-size: 11px; font-weight: bold; display: block; }
+
+        .badge-status {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            font-size: 9px;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        .btn-update {
+            background: var(--primary-blue);
+            color: white;
+            border: none;
             width: 100%;
             padding: 12px;
             border-radius: 8px;
-            border: none;
             font-weight: bold;
+            margin-top: 20px;
             cursor: pointer;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            text-transform: uppercase;
         }
 
-        .btn-sync { background-color: var(--primary-blue); color: white; }
-        .btn-train { background-color: var(--success-green); color: white; }
+    </style>
+</head>
+<body>
 
-        /* Secciones */
-        .section-title {
-            font-size: 14px;
-            color:
+<div class="container">
+    <div class="header">
+        <div class="logo">LOTTO<span>AI</span> PRO</div>
+        <div style="color: var(--success-green); font-size: 12px;">
+            <i class="fas fa-circle"></i> SISTEMA VIVO
+        </div>
+    </div>
+
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-value">{{ efectividad }}%</div>
+            <div class="metric-label">Eficacia Semanal</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">28,917</div>
+            <div class="metric-label">Datos Analizados</div>
+        </div>
+    </div>
+
+    {% if top3 %}
+    <div class="prediction-main">
+        <div style="color: var(--text-gray); font-size: 13px;">PRÓXIMO SORTEO</div>
+        <img src="/imagenes/{{ top3[0].imagen }}" class="animal-img-large" alt="{{ top3[0].animal }}">
+        <div style="font-size: 24px; font-weight: bold;">{{ top3[0].numero }} - {{ top3[0].animal }}</div>
+        <div style="color: var(--primary-blue); font-weight: bold; margin-top: 5px;">
+            Confianza: {{ top3[0].porcentaje }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div style="margin-bottom: 10px; font-size: 14px; font-weight: bold; color: var(--text-gray);">
+        <i class="fas fa-history"></i> AUDITORÍA DE RESULTADOS (HOY)
+    </div>
+
+    <div class="audit-grid">
+        {% for item in ultimos_db %}
+        <div class="audit-item {% if item.acierto == True %}success{% elif item.acierto == False %}fail{% endif %}">
+            <span class="audit-time">{{ item.hora }}</span>
+            <img src="/imagenes/{{ item.img }}" class="audit-img" alt="{{ item.animal }}">
+            <span class="audit-name">{{ item.animal }}</span>
+            
+            {% if item.acierto == True %}
+                <span class="badge-status" style="background: var(--success-green);">✓</span>
+            {% elif item.acierto == False %}
+                <span class="badge-status" style="background: var(--fail-red);">X</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <button class="btn-update" onclick="location.reload()">
+        <i class="fas fa-sync"></i> ACTUALIZAR RESULTADOS
+    </button>
+</div>
+
+</body>
+</html>
