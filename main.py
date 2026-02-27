@@ -1,40 +1,39 @@
 import os
 import re
-from fastapi import FastAPI, Request, Depends, Form
+from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-# Conexión con tu base de datos y rutas en la carpeta app/routes
+# Importaciones siguiendo tu estructura de carpetas exacta
 from db import get_db
 from app.routes import entrenar, stats, historico, metricas, prediccion
 
-app = FastAPI()
+app = FastAPI(title="LOTTOAI PRO")
 
-# 1. REGISTRO DE ROUTERS (Para eliminar los errores 404)
+# Registro de rutas (Routers)
 app.include_router(entrenar.router)
 app.include_router(stats.router)
 app.include_router(historico.router)
 app.include_router(metricas.router)
 
-# 2. CONFIGURACIÓN DE RUTAS DE ARCHIVOS
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Montar imágenes (Raíz -> imagenes)
+# Montaje de estáticos e imágenes
 app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes")), name="imagenes")
 
-# Templates (Raíz -> app -> routes)
+# Configuración de Templates apuntando a app/routes
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # Llamamos a la lógica de predicción desde prediccion.py
+        # 1. Obtener Predicciones (Top 3)
         res_ia = await prediccion.generar_prediccion(db)
         
-        # Obtenemos los últimos 12 registros de la auditoría
+        # 2. Obtener Auditoría (Últimos 12)
         query = text("""
             SELECT h.fecha, h.hora, h.animalito, a.acierto 
             FROM historico h
@@ -45,28 +44,28 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         
         ultimos_db = []
         for r in res_db.fetchall():
-            # Limpiar nombre para la imagen: "02 TORO" -> "toro.png"
-            nombre_limpio = re.sub(r'[^a-z]', '', r[2].lower())
+            # Limpieza de nombre para la imagen (ej: "03 CIEMPIES" -> "ciempies.png")
+            nombre_img = re.sub(r'[^a-z]', '', r[2].lower())
             ultimos_db.append({
                 "hora": r[1],
                 "animal": r[2],
-                "img": f"{nombre_limpio}.png",
+                "img": f"{nombre_img}.png",
                 "acierto": r[3]
             })
 
-        # SEGURO PARA TABLA METRICS (Evita el Error 500)
+        # 3. Obtener Métricas (Seguro contra tabla vacía)
         try:
-            res_efec = await db.execute(text("SELECT precision FROM metrics WHERE id = 1"))
-            metric = res_efec.fetchone()
-            efectividad_global = metric[0] if metric else 0.0
-        except Exception:
-            efectividad_global = 0.0  # Si la tabla no existe aún, muestra 0.0
+            res_met = await db.execute(text("SELECT precision FROM metrics WHERE id = 1"))
+            metric = res_met.fetchone()
+            efectividad = metric[0] if metric else 0.0
+        except:
+            efectividad = 0.0
 
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "top3": res_ia.get("top3", []),
             "ultimos_db": ultimos_db,
-            "efectividad": efectividad_global
+            "efectividad": efectividad
         })
     except Exception as e:
-        return HTMLResponse(content=f"Error Crítico: {str(e)}", status_code=500)
+        return HTMLResponse(content=f"Error en Home: {str(e)}", status_code=500)
