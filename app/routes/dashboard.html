@@ -6,64 +6,90 @@
     <title>LOTTOAI PRO</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        :root { --bg: #0d1117; --card: #161b22; --blue: #58a6ff; --green: #238636; --red: #da3633; --border: #30363d; }
-        body { font-family: sans-serif; background: var(--bg); color: #c9d1d9; margin: 0; padding: 10px; }
-        .top-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 15px 0; }
-        .animal-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
-        .animal-card.best { border-color: var(--blue); background: #1c2128; }
-        .animal-card img { width: 40px; height: 40px; }
+        :root { --bg: #0d1117; --card: #161b22; --blue: #58a6ff; --green: #238636; --red: #da3633; --border: #30363d; --text: #c9d1d9; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; }
         
-        .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
-        .audit-box { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 4px; text-align: center; cursor: pointer; }
-        .audit-box.win { border-color: var(--green); background: #0e2a14; }
-        .audit-box.fail { border-color: var(--red); background: #2a0e0e; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .efec-badge { background: #1c2128; border: 1px solid var(--blue); padding: 5px 12px; border-radius: 20px; color: var(--blue); font-weight: bold; }
+
+        /* Los 3 Animales de Predicción */
+        .top-predictions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        .pred-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; }
+        .pred-card.top { border-color: var(--blue); transform: scale(1.03); background: #1c2533; }
+        .pred-card img { width: 45px; height: 45px; }
+        .pred-card b { display: block; font-size: 11px; margin-top: 5px; }
+        .pred-card span { font-size: 10px; color: var(--blue); }
+
+        /* Cuadrícula de Auditoría */
+        .audit-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 20px; }
+        .audit-item { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 5px; text-align: center; position: relative; }
+        .audit-item.win { border-color: var(--green); background: #0e2a14; }
+        .audit-item.fail { border-color: var(--red); background: #2a0e0e; }
+        .audit-item img { width: 30px; height: 30px; }
+        .audit-item small { display: block; font-size: 8px; color: #8b949e; }
+
+        /* Botones */
+        .btn { width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; color: white; }
+        .btn-train { background: #1f6feb; }
+        .btn-stats { background: #8957e5; }
         
-        .btn { width: 100%; padding: 12px; margin-top: 8px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; color: white; }
-        .btn-blue { background: #1f6feb; }
-        .btn-purple { background: #8957e5; }
+        #loader { display: none; text-align: center; font-size: 12px; margin-top: 10px; color: var(--blue); }
     </style>
 </head>
 <body>
-    <div style="display:flex; justify-content: space-between; align-items: center;">
-        <h2 style="color:var(--blue); margin:0;">LOTTOAI</h2>
-        <div style="font-size:18px; font-weight:bold;">{{ efectividad }}%</div>
+
+    <div class="header">
+        <b style="font-size: 18px;">LOTTO<span style="color:var(--blue)">AI</span> PRO</b>
+        <div class="efec-badge">{{ efectividad }}%</div>
     </div>
 
-    <div class="top-3">
+    <div style="font-size: 11px; color: #8b949e; margin-bottom: 8px;">PRÓXIMOS SORTEOS (TOP 3)</div>
+    <div class="top-predictions">
         {% for a in top3 %}
-        <div class="animal-card {% if loop.index == 1 %}best{% endif %}">
-            <img src="/imagenes/{{ a.imagen }}">
-            <div style="font-size:12px; font-weight:bold;">{{ a.animal }}</div>
-            <div style="font-size:10px; color:var(--blue);">{{ a.porcentaje }}</div>
+        <div class="pred-card {% if loop.index == 1 %}top{% endif %}">
+            <img src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}">
+            <b>{{ a.animal }}</b>
+            <span>{{ a.porcentaje }}</span>
         </div>
         {% endfor %}
     </div>
 
-    <div style="font-size:11px; color:#8b949e; margin-bottom:5px;">AUDITORÍA (12 ÚLTIMOS)</div>
+    <div style="font-size: 11px; color: #8b949e; margin-bottom: 8px;">AUDITORÍA (ÚLTIMOS 12)</div>
     <div class="audit-grid">
         {% for item in ultimos_db %}
-        <div class="audit-box {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}" onclick="marcar(this)">
-            <div style="font-size:8px;">{{ item.hora }}</div>
-            <img src="/imagenes/{{ item.img }}" style="width:25px;">
+        <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}">
+            <small>{{ item.hora }}</small>
+            <img src="/imagenes/{{ item.img }}">
         </div>
         {% endfor %}
     </div>
 
-    <button class="btn btn-blue" onclick="run('/procesar')"><i class="fas fa-brain"></i> ENTRENAR IA</button>
-    <button class="btn btn-purple" onclick="run('/stats')"><i class="fas fa-chart-bar"></i> VER STATS</button>
+    <button class="btn btn-train" onclick="runTask('/procesar', 'Entrenando...')">
+        <i class="fas fa-brain"></i> ENTRENAR IA
+    </button>
+    <button class="btn btn-stats" onclick="runTask('/stats', 'Analizando...')">
+        <i class="fas fa-chart-line"></i> VER RESULTADOS
+    </button>
+
+    <div id="loader"><i class="fas fa-spinner fa-spin"></i> <span id="msg">Procesando...</span></div>
 
     <script>
-        function marcar(el) { el.classList.toggle('win'); }
-        async function run(url) {
-            const btn = event.target;
-            btn.disabled = true;
+        async function runTask(url, text) {
+            const loader = document.getElementById('loader');
+            const msg = document.getElementById('msg');
+            loader.style.display = 'block';
+            msg.innerText = text;
+
             try {
-                const r = await fetch(url);
-                const d = await r.json();
-                alert(d.message || "Listo");
-                if(url === '/procesar') location.reload();
-            } catch(e) { alert("Error"); }
-            finally { btn.disabled = false; }
+                const response = await fetch(url);
+                const data = await response.json();
+                alert(data.message || "Operación completada");
+                if (url === '/procesar') location.reload();
+            } catch (error) {
+                alert("Error de conexión");
+            } finally {
+                loader.style.display = 'none';
+            }
         }
     </script>
 </body>
