@@ -1,58 +1,59 @@
 import asyncio
 from datetime import datetime
 import logging
+from sqlalchemy import text
+from db import get_db
 
-# Configuración de logs para que los veas en el panel de Render
+# IMPORTACIONES REALES DE TU PROYECTO
+from app.routes.cargarhist import procesar_ultimo_sorteo # Tu función de scraping
+from app.routes.entrenar import procesar_entrenamiento # Tu motor de IA
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Variable para evitar procesar el mismo sorteo dos veces
 ULTIMO_SORTEO_PROCESADO = None
-
-# Importa aquí tus funciones necesarias (ajusta las rutas si es necesario)
-# from app.services.scraper import obtener_ultimo_resultado
-# from app.services.guardar_sorteo import guardar_sorteo
-# from app.services.evaluar_prediccion import evaluar
 
 async def ciclo_infinito():
     global ULTIMO_SORTEO_PROCESADO
-    logger.info("🚀 Sistema Vivo: Monitoreo Inteligente (9 AM - 7:30 PM)")
+    logger.info("🚀 Sistema Vivo: Monitoreo Inteligente LottoAI")
 
     while True:
         try:
             ahora = datetime.now()
-            # Solo actuar entre las 9:00 y las 19:30
+            # 1. HORARIO OPERATIVO (9 AM a 7:30 PM)
             if 9 <= ahora.hour <= 19:
                 minuto = ahora.minute
                 
-                # REVISIÓN SOLO EN LA VENTANA DEL SORTEO (Minutos 05 al 25)
-                if 5 <= minuto <= 25:
-                    # NOTA: Asegúrate de que estas funciones estén importadas o definidas
-                    # data = await obtener_ultimo_resultado()
-                    data = None # Placeholder para evitar error si no están las funciones
-                    
-                    if data and data != ULTIMO_SORTEO_PROCESADO:
-                        # guardado = await guardar_sorteo(data)
-                        guardado = True 
+                # 2. VENTANA DE ACECHO (Minutos 03 al 25 para capturar el PIN)
+                if 3 <= minuto <= 25:
+                    async for db in get_db():
+                        # Intentamos capturar el resultado real
+                        # exito debe devolver True si guardó un nuevo animalito
+                        exito = await procesar_ultimo_sorteo(db)
                         
-                        if guardado:
-                            # await evaluar(data)
-                            ULTIMO_SORTEO_PROCESADO = data
-                            logger.info(f"✅ Sorteo registrado: {data.get('hora')}. Durmiendo hasta la próxima hora.")
-                            # Dormir hasta el minuto 05 de la siguiente hora
-                            espera = (60 - minuto + 5) * 60
+                        if exito:
+                            logger.info(f"✅ ¡NUEVO RESULTADO DETECTADO! Hora: {ahora.hour}:00")
+                            
+                            # 3. LANZAR ENTRENAMIENTO AUTOMÁTICO
+                            # Esto recalibra el motor con el nuevo dato recién guardado
+                            await procesar_entrenamiento(db)
+                            logger.info("🧠 Motor IA Recalibrado exitosamente.")
+                            
+                            # 4. EVITAR DUPLICADOS: Dormir hasta la próxima hora + 3 min
+                            ULTIMO_SORTEO_PROCESADO = f"{ahora.hour}-{ahora.day}"
+                            espera = (60 - minuto + 3) * 60
                         else:
-                            espera = 300 # Reintento en 5 min si falló DB
-                    else:
-                        espera = 300 # No ha salido el dato aún, reintento corto
+                            # No ha salido el resultado, reintento en 3 min (el PIN que pediste)
+                            logger.info(f"⏳ [{ahora.strftime('%H:%M')}] Resultado no disponible. Reintentando en 180s...")
+                            espera = 180 
                 else:
-                    # Si estamos fuera de la ventana 05-25, calculamos espera al próximo sorteo
-                    if minuto < 5:
-                        espera = (5 - minuto) * 60
+                    # Fuera de ventana de sorteo, calcular espera al próximo minuto 03
+                    if minuto < 3:
+                        espera = (3 - minuto) * 60
                     else:
-                        espera = (60 - minuto + 5) * 60
+                        espera = (60 - minuto + 3) * 60
             else:
-                logger.info("🌙 Fuera de horario. Durmiendo 30 min...")
+                logger.info("🌙 Fuera de horario de sorteos. Durmiendo 30 min...")
                 espera = 1800
                 
             await asyncio.sleep(espera)
