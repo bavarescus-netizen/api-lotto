@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio # <--- Nuevo: Para manejar el bot en segundo plano
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -10,6 +11,7 @@ from sqlalchemy import text
 # Importamos tus módulos de la carpeta app.routes
 from db import get_db
 from app.routes import entrenar, stats, historico, metricas, prediccion
+from app.core.scheduler import ciclo_infinito # <--- Nuevo: Importamos tu bot
 
 app = FastAPI(title="LOTTOAI PRO")
 
@@ -26,6 +28,13 @@ app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes"))
 
 # 3. Configuración de Templates (Ruta donde está tu HTML)
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
+
+# EVENTO DE ARRANQUE: Aquí es donde el bot se despierta
+@app.on_event("startup")
+async def iniciar_bot_vigilancia():
+    # Lanzamos el ciclo infinito sin bloquear la web
+    asyncio.create_task(ciclo_infinito())
+    print("🚀 BOT DE VIGILANCIA: Activado y acechando resultados...")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
