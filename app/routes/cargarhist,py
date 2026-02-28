@@ -1,83 +1,31 @@
-import requests
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from bs4 import BeautifulSoup
+from db import get_db
+import logging
 
-URL_API = "https://api-lotto-t6p5.onrender.com/api/historico/agregar"
+router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# HTML Combinado con todas las fechas que me pasaste
-html_content = """
-<table class="table-semanal">
-    <thead>
-        <tr><th>Horario</th><th>2026-02-02</th><th>2026-02-03</th><th>2026-02-04</th><th>2026-02-05</th><th>2026-02-06</th><th>2026-02-07</th><th>2026-02-08</th></tr>
-    </thead>
-    <tbody>
-        <tr><th>08:00 AM</th><td>Zamuro</td><td>Camello</td><td>Ardilla</td><td>Elefante</td><td>Carnero</td><td>Camello</td><td>Elefante</td></tr>
-        <tr><th>09:00 AM</th><td>Gallina</td><td>Elefante</td><td>Camello</td><td>Delfin</td><td>Ballena</td><td>Leon</td><td>Iguana</td></tr>
-        <tr><th>10:00 AM</th><td>Caballo</td><td>Ardilla</td><td>Rana</td><td>Chivo</td><td>Delfin</td><td>Lapa</td><td>Lapa</td></tr>
-        <tr><th>11:00 AM</th><td>Leon</td><td>Cebra</td><td>Ballena</td><td>Pavo</td><td>Gallina</td><td>Pavo</td><td>Jirafa</td></tr>
-        <tr><th>12:00 PM</th><td>Aguila</td><td>Chivo</td><td>Tigre</td><td>Toro</td><td>Cebra</td><td>Raton</td><td>Delfin</td></tr>
-        <tr><th>01:00 PM</th><td>Caiman</td><td>Ciempies</td><td>Elefante</td><td>Ardilla</td><td>Gallina</td><td>Delfin</td><td>Zamuro</td></tr>
-        <tr><th>02:00 PM</th><td>Vaca</td><td>Perro</td><td>Caballo</td><td>Iguana</td><td>Raton</td><td>Oso</td><td>Gallo</td></tr>
-        <tr><th>03:00 PM</th><td>Pescado</td><td>Oso</td><td>Chivo</td><td>Zamuro</td><td>Zamuro</td><td>Gallina</td><td>Mono</td></tr>
-        <tr><th>04:00 PM</th><td>Camello</td><td>Zorro</td><td>Zamuro</td><td>Leon</td><td>Paloma</td><td>Caiman</td><td>Caiman</td></tr>
-        <tr><th>05:00 PM</th><td>Aguila</td><td>Pescado</td><td>Lapa</td><td>Caballo</td><td>Leon</td><td>Lapa</td><td>Ballena</td></tr>
-        <tr><th>06:00 PM</th><td>Cochino</td><td>Burro</td><td>Cochino</td><td>Carnero</td><td>Delfin</td><td>Iguana</td><td>Gallina</td></tr>
-        <tr><th>07:00 PM</th><td>Mono</td><td>Caiman</td><td>Camello</td><td>Lapa</td><td>Culebra</td><td>Rana</td><td>Cebra</td></tr>
-    </tbody>
-</table>
+# Tu HTML de febrero
+html_content = """ ... (tus tablas aquí) ... """
 
-<table class="table-semanal">
-    <thead>
-        <tr><th>Horario</th><th>2026-02-16</th><th>2026-02-17</th><th>2026-02-18</th><th>2026-02-19</th></tr>
-    </thead>
-    <tbody>
-        <tr><th>08:00 AM</th><td>Caiman</td><td>Rana</td><td>Chivo</td><td>Ballena</td></tr>
-        <tr><th>09:00 AM</th><td>Cebra</td><td>Ardilla</td><td>Culebra</td><td>Pavo</td></tr>
-        <tr><th>10:00 AM</th><td>Gallo</td><td>Chivo</td><td>Carnero</td><td>Paloma</td></tr>
-        <tr><th>11:00 AM</th><td>Toro</td><td>Raton</td><td>Iguana</td><td>Culebra</td></tr>
-        <tr><th>12:00 PM</th><td>Culebra</td><td>Zamuro</td><td>Oso</td><td>Paloma</td></tr>
-        <tr><th>01:00 PM</th><td>Oso</td><td>Cebra</td><td>Vaca</td><td>Ardilla</td></tr>
-        <tr><th>02:00 PM</th><td>Jirafa</td><td>Gallo</td><td>Gato</td><td>Jirafa</td></tr>
-        <tr><th>03:00 PM</th><td>Cochino</td><td>Vaca</td><td>Burro</td><td>Perro</td></tr>
-        <tr><th>04:00 PM</th><td>Gato</td><td>Perico</td><td>Pavo</td><td>Vaca</td></tr>
-        <tr><th>05:00 PM</th><td>Carnero</td><td>Venado</td><td>Pescado</td><td>Gallina</td></tr>
-        <tr><th>06:00 PM</th><td>Leon</td><td>Mono</td><td>Pavo</td><td>Jirafa</td></tr>
-        <tr><th>07:00 PM</th><td>Ballena</td><td>Raton</td><td>Gallo</td><td>Toro</td></tr>
-    </tbody>
-</table>
-"""
+@router.get("/cargar-manual")
+async def cargar_manual(db: AsyncSession = Depends(get_db)):
+    # ... tu lógica de BeautifulSoup aquí ...
+    await db.commit()
+    return {"status": "ok"}
 
-def cargar():
-    soup = BeautifulSoup(html_content, 'html.parser')
-    tables = soup.find_all('table')
-    
-    total_exitos = 0
-    
-    for table in tables:
-        headers = [th.text.strip() for th in table.find('thead').find_all('th')]
-        rows = table.find('tbody').find_all('tr')
-        
-        for row in rows:
-            cols = row.find_all(['th', 'td'])
-            hora = cols[0].text.strip()
-            
-            for i in range(1, len(cols)):
-                animal = cols[i].text.strip().lower()
-                fecha = headers[i]
-                
-                if animal:
-                    payload = {"animalito": animal, "hora": hora, "fecha": fecha}
-                    try:
-                        r = requests.post(URL_API, json=payload, timeout=5)
-                        if r.status_code in [200, 201]:
-                            print(f"✅ Cargado: {fecha} {hora} -> {animal}")
-                            total_exitos += 1
-                        else:
-                            print(f"⚠️ Error {r.status_code} en {fecha}")
-                    except:
-                        print("❌ Error de conexión")
-
-    print(f"\n🚀 ¡LISTO! Se cargaron {total_exitos} resultados nuevos.")
-
-if __name__ == "__main__":
-    cargar()
-
+# ESTA ES LA FUNCIÓN QUE BUSCA EL SCHEDULER
+async def procesar_ultimo_sorteo(db: AsyncSession):
+    """
+    Función puente para que el scheduler no falle.
+    Por ahora retorna False porque la carga es manual.
+    """
+    try:
+        # Aquí podrías poner lógica de scraping automático en el futuro
+        return False 
+    except Exception as e:
+        logger.error(f"Error en procesar_ultimo_sorteo: {e}")
+        return False
