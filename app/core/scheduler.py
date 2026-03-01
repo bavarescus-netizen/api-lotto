@@ -1,93 +1,102 @@
+"""
+SCHEDULER V2 — LOTTOAI PRO
+Ciclo automático: capturar → calibrar → entrenar → predecir
+Reemplaza: scheduler.py (versión anterior)
+"""
+
 import asyncio
 from datetime import datetime
 import logging
+import pytz
 from sqlalchemy import text
 from db import get_db
-
-# Importaciones
 from app.routes.cargarhist import procesar_ultimo_sorteo
-from app.routes.entrenar import procesar_entrenamiento
+from app.services.motor_v5 import entrenar_modelo, calibrar_predicciones, generar_prediccion
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-ULTIMO_SORTEO_PROCESADO = None
+TZ = pytz.timezone('America/Caracas')
+
+# Horarios de sorteo (horas en Venezuela)
+HORAS_SORTEO = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
 
 async def ciclo_infinito():
-    global ULTIMO_SORTEO_PROCESADO
-    logger.info("🚀 Sistema Vivo: Monitoreo con Auditoría Automática")
+    logger.info("🚀 LOTTOAI PRO — Sistema de vigilancia activo")
 
     while True:
         try:
-            ahora = datetime.now()
-            # Horario de operación: 9 AM a 7 PM
-            if 9 <= ahora.hour <= 19:
-                minuto = ahora.minute
-                
-                # Ventana de acecho (minutos 3 al 25)
-                if 3 <= minuto <= 25:
-                    async for db in get_db():
-                        # Intentar capturar resultado
-                        exito = await procesar_ultimo_sorteo(db)
-                        
-                        if exito:
-                            logger.info(f"✅ Nuevo resultado detectado a las {ahora.hour}:00")
-                            
-                            try:
-                                # 1. AUDITORÍA: ¿Acertamos la predicción previa?
-                                # Formateamos la hora para que coincida con la DB (ej: '10:00:00')
-                                hora_str = f"{ahora.hour:02d}:00:00"
-                                
-                                sql_auditar = text("""
-                                    INSERT INTO auditoria_ia (fecha, hora, animalito_real, acierto)
-                                    SELECT h.fecha, h.hora, h.animalito, 
-                                           CASE WHEN p.animalito = h.animalito THEN TRUE ELSE FALSE END
-                                    FROM historico h
-                                    LEFT JOIN predicciones p ON h.fecha = p.fecha AND h.hora = p.hora
-                                    WHERE h.fecha = CURRENT_DATE AND h.hora = :hora_sorteo
-                                    ON CONFLICT (fecha, hora) DO UPDATE SET 
-                                        animalito_real = EXCLUDED.animalito_real,
-                                        acierto = EXCLUDED.acierto;
-                                """)
-                                await db.execute(sql_auditar, {"hora_sorteo": hora_str})
-                                
-                                # 2. RE-ENTRENAR: Aprender del nuevo dato
-                                await procesar_entrenamiento(db)
-                                
-                                # 3. ACTUALIZAR MÉTRICAS GLOBALES
-                                await db.execute(text("""
-                                    UPDATE metrics SET 
-                                        total = (SELECT COUNT(*) FROM auditoria_ia),
-                                        aciertos = (SELECT COUNT(*) FROM auditoria_ia WHERE acierto = True),
-                                        precision = (SELECT (COUNT(CASE WHEN acierto = True THEN 1 END)::FLOAT / NULLIF(COUNT(*), 0)::FLOAT) * 100 FROM auditoria_ia)
-                                    WHERE id = 1
-                                """))
-                                
-                                await db.commit()
-                                logger.info("📊 IA Auditada y Recalibrada.")
-                                
-                            except Exception as audit_err:
-                                logger.error(f"⚠️ Error en auditoría/entrenamiento: {audit_err}")
-                                await db.rollback()
-                            
-                            ULTIMO_SORTEO_PROCESADO = f"{ahora.day}-{ahora.hour}"
-                            # Dormir hasta la próxima hora
+            ahora = datetime.now(TZ)
+            hora = ahora.hour
+            minuto = ahora.minute
+
+            # Solo operar en horario de sorteos
+            if hora not in HORAS_SORTEO:
+                logger.info(f"🌙 [{ahora.strftime('%H:%M')}] Fuera de horario. Durmiendo 30 min.")
+                await asyncio.sleep(1800)
+                continue
+
+            # ─────────────────────────────────────────────
+            # VENTANA DE CAPTURA: minutos 3 al 20
+            # El sorteo ocurre a la hora en punto,
+            # esperamos unos minutos para que aparezca en la web
+            # ─────────────────────────────────────────────
+            if 3 <= minuto <= 20:
+                logger.info(f"🔍 [{ahora.strftime('%H:%M')}] Buscando resultado del sorteo de las {hora}:00...")
+
+                async for db in get_db():
+                    try:
+                        # PASO 1: Capturar resultado nuevo
+                        nuevo = await procesar_ultimo_sorteo(db)
+
+                        if nuevo:
+                            logger.info(f"✅ Nuevo resultado capturado — {ahora.strftime('%H:%M')}")
+
+                            # PASO 2: Calibrar predicciones pendientes
+                            cal = await calibrar_predicciones(db)
+                            logger.info(f"🎯 Calibración: {cal.get('calibradas', 0)} predicciones validadas")
+
+                            # PASO 3: Re-entrenar con el nuevo dato
+                            ent = await entrenar_modelo(db)
+                            logger.info(f"🧠 {ent.get('message', 'Entrenamiento completado')}")
+
+                            # PASO 4: Generar predicción para el próximo sorteo
+                            pred = await generar_prediccion(db)
+                            if pred.get("top3"):
+                                top1 = pred["top3"][0]
+                                logger.info(f"🔮 Próxima predicción: {top1['animal']} ({top1['porcentaje']})")
+
+                            # Dormir hasta 3 minutos después del próximo sorteo
                             espera = (60 - minuto + 3) * 60
+                            logger.info(f"⏰ Próxima revisión en {(espera//60)} minutos")
+
                         else:
-                            logger.info(f"⏳ [{ahora.strftime('%H:%M')}] Esperando resultado... Reintento en 3 min")
-                            espera = 180 
-                else:
-                    # Cálculo de espera para entrar en la ventana del minuto 3
-                    if minuto < 3:
-                        espera = (3 - minuto) * 60
-                    else:
-                        espera = (60 - minuto + 3) * 60
+                            # Resultado no disponible aún, reintentar en 3 minutos
+                            logger.info(f"⏳ Resultado aún no disponible. Reintento en 3 min.")
+                            espera = 180
+
+                    except Exception as e:
+                        logger.error(f"⚠️ Error en ciclo principal: {e}")
+                        await db.rollback()
+                        espera = 180
+
+                    break  # Salir del async for
+
+                await asyncio.sleep(espera)
+
             else:
-                logger.info("🌙 Fuera de horario. Modo ahorro energía.")
-                espera = 1800 # 30 min
-                
-            await asyncio.sleep(espera)
-                
+                # Calcular cuánto falta para el minuto 3
+                if minuto < 3:
+                    espera = (3 - minuto) * 60
+                else:
+                    # Ya pasó el minuto 20, esperar al próximo sorteo
+                    minutos_restantes = (60 - minuto + 3)
+                    espera = minutos_restantes * 60
+
+                logger.info(f"⏰ [{ahora.strftime('%H:%M')}] Esperando ventana de captura. {espera//60} min restantes.")
+                await asyncio.sleep(espera)
+
         except Exception as e:
-            logger.error(f"⚠️ Error crítico en ciclo: {e}")
+            logger.error(f"💥 Error crítico en ciclo: {e}")
             await asyncio.sleep(60)
