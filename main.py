@@ -93,3 +93,5 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "LOTTOAI PRO V5"}
+
+
