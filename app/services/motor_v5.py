@@ -77,7 +77,7 @@ async def generar_prediccion(db: AsyncSession) -> dict:
         # ─────────────────────────────────────────
         # SEÑAL 2: Tendencia reciente (últimos 15 días, misma hora)
         # ─────────────────────────────────────────
-        fecha_15 = (ahora - timedelta(days=15)).strftime("%Y-%m-%d")
+        fecha_15 = (ahora - timedelta(days=15)).date()
         res2 = await db.execute(text("""
             SELECT animalito, COUNT(*) as total
             FROM historico
@@ -391,7 +391,7 @@ async def obtener_estadisticas(db: AsyncSession) -> dict:
                 COUNT(*) as total,
                 COUNT(CASE WHEN acierto = TRUE THEN 1 END) as aciertos,
                 ROUND(
-                    (COUNT(CASE WHEN acierto = TRUE THEN 1 END)::FLOAT / 
+                    (COUNT(CASE WHEN acierto = TRUE THEN 1 END)::NUMERIC / 
                     NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END), 0)) * 100
                 , 1) as precision
             FROM auditoria_ia
@@ -434,4 +434,3 @@ async def obtener_estadisticas(db: AsyncSession) -> dict:
     except Exception as e:
         print(f"❌ Error estadísticas: {e}")
         return {"efectividad_global": 0, "aciertos_hoy": 0, "sorteos_hoy": 0}
-        
