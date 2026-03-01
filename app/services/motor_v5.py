@@ -434,3 +434,4 @@ async def obtener_estadisticas(db: AsyncSession) -> dict:
     except Exception as e:
         print(f"❌ Error estadísticas: {e}")
         return {"efectividad_global": 0, "aciertos_hoy": 0, "sorteos_hoy": 0}
+        
