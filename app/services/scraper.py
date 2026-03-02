@@ -1,89 +1,130 @@
-import httpx
+import requests
 from bs4 import BeautifulSoup
-import re
-from datetime import datetime, timedelta, date
-import asyncio
+import psycopg2
+from datetime import datetime, timedelta
 
-URL_ULTIMO = "https://loteriadehoy.com/animalito/lottoactivo/resultados/"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# 🔹 CONFIGURACIÓN DB
+DB_CONFIG = {
+    "host": "localhost",
+    "database": "tu_base",
+    "user": "tu_usuario",
+    "password": "tu_password"
+}
 
-def normalizar_animal(texto):
-    if not texto: return ""
-    limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ]', '', texto)
-    return limpio.lower().strip()
+BASE_URL = "https://loteriadehoy.com/animalito/lottoactivo/historico/{}/{}"
 
-async def obtener_ultimo_resultado():
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(URL_ULTIMO, headers=HEADERS, timeout=10)
-            if r.status_code != 200: return None
-            soup = BeautifulSoup(r.text, "html.parser")
-            fila = soup.select_one("table tr:nth-of-type(2)") 
-            if not fila: return None
-            columnas = fila.find_all("td")
-            if len(columnas) < 3: return None
 
-            return {
-                "fecha": columnas[0].text.strip(), # Esto suele ser un string
-                "hora": columnas[1].text.strip().upper(),
-                "animalito": normalizar_animal(columnas[2].text.strip()),
-                "loteria": "Lotto Activo"
-            }
-    except Exception as e:
-        print(f"❌ Error en Scraper: {e}")
-        return None
+# -------------------------------------------------
+# 🔎 OBTENER ÚLTIMA FECHA EN BASE
+# -------------------------------------------------
+def obtener_ultima_fecha(conn):
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT fecha 
+            FROM historico 
+            ORDER BY fecha DESC, hora DESC 
+            LIMIT 1
+        """)
+        result = cur.fetchone()
 
-async def descargar_rango_historico(fecha_inicio, fecha_fin):
-    # Aseguramos que sean objetos datetime para que timedelta funcione
-    if isinstance(fecha_inicio, date) and not isinstance(fecha_inicio, datetime):
-        fecha_inicio = datetime.combine(fecha_inicio, datetime.min.time())
-    if isinstance(fecha_fin, date) and not isinstance(fecha_fin, datetime):
-        fecha_fin = datetime.combine(fecha_fin, datetime.min.time())
+        if result:
+            return result[0]  # tipo DATE
+        else:
+            raise Exception("La tabla historico está vacía.")
 
-    datos = []
-    fecha_actual = fecha_inicio
-    
-    async with httpx.AsyncClient() as client:
-        while fecha_actual <= fecha_fin:
-            fin_rango = fecha_actual + timedelta(days=6)
-            url = (
-                f"https://loteriadehoy.com/animalito/lottoactivo/historico/"
-                f"{fecha_actual.strftime('%Y-%m-%d')}/"
-                f"{fin_rango.strftime('%Y-%m-%d')}/"
-            )
+
+# -------------------------------------------------
+# 🧮 CALCULAR RANGO
+# -------------------------------------------------
+def calcular_rango(conn):
+    ultima_fecha = obtener_ultima_fecha(conn)
+    fecha_inicio = ultima_fecha  # IMPORTANTE: NO sumamos día
+    fecha_fin = datetime.now().date() - timedelta(days=1)
+
+    if fecha_inicio > fecha_fin:
+        print("Base ya está actualizada hasta ayer.")
+        return None, None
+
+    return fecha_inicio, fecha_fin
+
+
+# -------------------------------------------------
+# 🌐 SCRAPEAR WEB
+# -------------------------------------------------
+def scrapear_rango(fecha_inicio, fecha_fin):
+    url = BASE_URL.format(fecha_inicio, fecha_fin)
+    print(f"Scrapeando: {url}")
+
+    response = requests.get(url)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    resultados = []
+
+    filas = soup.find_all("tr")
+
+    for fila in filas:
+        columnas = fila.find_all("td")
+
+        if len(columnas) >= 4:
+            fecha = columnas[0].text.strip()
+            hora = columnas[1].text.strip()
+            numero = columnas[2].text.strip()
+            animal = columnas[3].text.strip()
 
             try:
-                print(f"📡 Descargando bloque: {fecha_actual.date()}")
-                r = await client.get(url, headers=HEADERS, timeout=15)
-                if r.status_code == 200:
-                    soup = BeautifulSoup(r.text, "html.parser")
-                    tabla = soup.find("table")
-                    if tabla:
-                        fechas_encabezado = [th.text.strip() for th in tabla.find_all("th")[1:]]
-                        for fila in tabla.find_all("tr")[1:]:
-                            hora_tag = fila.find("th")
-                            if not hora_tag: continue
-                            hora = hora_tag.text.strip().upper()
-                            
-                            for i, td in enumerate(fila.find_all("td")):
-                                if i < len(fechas_encabezado) and td.text.strip():
-                                    # --- CORRECCIÓN CLAVE: Convertir string de th a objeto date ---
-                                    try:
-                                        f_str = fechas_encabezado[i]
-                                        f_obj = datetime.strptime(f_str, '%Y-%m-%d').date()
-                                    except:
-                                        f_obj = f_str # Fallback por si acaso
+                fecha_convertida = datetime.strptime(fecha, "%d/%m/%Y").date()
+            except:
+                continue
 
-                                    datos.append({
-                                        "fecha": f_obj,
-                                        "hora": hora,
-                                        "animalito": normalizar_animal(td.text.strip()),
-                                        "loteria": "Lotto Activo"
-                                    })
-            except Exception as e:
-                print(f"⚠️ Error en bloque {fecha_actual.date()}: {e}")
-            
-            fecha_actual += timedelta(days=7)
-            await asyncio.sleep(0.5)
-            
-    return datos
+            resultados.append((fecha_convertida, hora, numero, animal))
+
+    print(f"{len(resultados)} registros encontrados.")
+    return resultados
+
+
+# -------------------------------------------------
+# 💾 INSERTAR EN DB
+# -------------------------------------------------
+def insertar_resultados(conn, datos):
+    with conn.cursor() as cur:
+        for registro in datos:
+            cur.execute("""
+                INSERT INTO historico (fecha, hora, numero, animal)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (fecha, hora) DO NOTHING
+            """, registro)
+
+    conn.commit()
+    print("Datos insertados correctamente.")
+
+
+# -------------------------------------------------
+# 🚀 FUNCIÓN PRINCIPAL
+# -------------------------------------------------
+def actualizar_historico():
+    conn = psycopg2.connect(**DB_CONFIG)
+
+    try:
+        fecha_inicio, fecha_fin = calcular_rango(conn)
+
+        if not fecha_inicio:
+            return
+
+        datos = scrapear_rango(fecha_inicio, fecha_fin)
+
+        if datos:
+            insertar_resultados(conn, datos)
+        else:
+            print("No se encontraron nuevos datos.")
+
+    finally:
+        conn.close()
+
+
+# -------------------------------------------------
+# ▶ EJECUCIÓN DIRECTA
+# -------------------------------------------------
+if __name__ == "__main__":
+    actualizar_historico()
