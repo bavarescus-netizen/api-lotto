@@ -15,6 +15,7 @@ BASE_URL = "https://loteriadehoy.com/animalito/lottoactivo"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 LOTERIA = "Lotto Activo"
 
+# --- FUNCIONES DE LIMPIEZA ---
 def normalizar_animal(texto):
     if not texto: return ""
     limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ\s]', '', texto)
@@ -28,6 +29,7 @@ def normalizar_hora(hora_texto):
         return f"{partes[0].zfill(2)}:{':'.join(partes[1:])}"
     return hora
 
+# --- SCRAPERS ---
 async def obtener_resultados_hoy():
     url = f"{BASE_URL}/resultados/"
     try:
@@ -90,13 +92,13 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date):
         logger.error(f"Error histórico: {e}")
         return []
 
-# --- FUNCIÓN DE GUARDADO SEGURA ---
+# --- LÓGICA DE BASE DE DATOS ---
 async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
     if not resultados: return 0
     insertados = 0
     for r in resultados:
         try:
-            # IMPORTANTE: Eliminado RETURNING id para evitar error en Neon
+            # SQL CORREGIDO: Se eliminó 'RETURNING id' para evitar error de columna
             await db.execute(text("""
                 INSERT INTO historico (fecha, hora, animalito, loteria)
                 VALUES (:fecha, :hora, :animalito, :loteria)
@@ -104,36 +106,46 @@ async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
             """), r)
             insertados += 1
         except Exception as e:
-            # Rollback individual para no bloquear la conexión
+            # El rollback es vital para no bloquear la transacción actual
             await db.rollback()
-            logger.warning(f"Salto de registro por error: {e}")
+            logger.warning(f"Fallo en inserción individual: {e}")
             continue 
             
     if insertados > 0:
         await db.commit()
     return insertados
 
-# --- RUTAS ---
+# --- FUNCIÓN PARA EL BOT DE VIGILANCIA ---
+async def procesar_ultimo_sorteo(db: AsyncSession) -> bool:
+    """Importante: Esta función la llama el scheduler"""
+    resultados = await obtener_resultados_hoy()
+    if not resultados:
+        return False
+    # Guardamos los resultados encontrados hoy
+    num = await guardar_resultados(db, resultados)
+    return num > 0
 
+# --- RUTAS ---
 @router.get("/cargar-ultimo")
 async def api_cargar_ultimo(db: AsyncSession = Depends(get_db)):
-    resultados = await obtener_resultados_hoy()
-    insertados = await guardar_resultados(db, resultados)
-    return {"status": "success", "nuevos": insertados}
+    exito = await procesar_ultimo_sorteo(db)
+    return {"status": "success", "procesado": exito}
 
 @router.get("/cargar-rango")
 async def api_cargar_rango(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
     try:
-        fecha_inicio = datetime.strptime(desde, "%Y-%m-%d").date()
-        fecha_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
+        f_inicio = datetime.strptime(desde, "%Y-%m-%d").date()
+        f_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
     except:
-        return {"status": "error", "message": "Formato YYYY-MM-DD requerido"}
+        return {"status": "error", "message": "Use el formato YYYY-MM-DD"}
     
     total = 0
-    fecha_actual = fecha_inicio
-    while fecha_actual <= fecha_fin:
-        fin_bloque = min(fecha_actual + timedelta(days=6), fecha_fin)
-        resultados = await obtener_historico_semana(fecha_actual, fin_bloque)
-        total += await guardar_resultados(db, resultados)
-        fecha_actual += timedelta(days=7)
-    return {"status": "success", "total_cargado": total}
+    actual = f_inicio
+    while actual <= f_fin:
+        # Se cargan bloques de 7 días
+        bloque_fin = min(actual + timedelta(days=6), f_fin)
+        res = await obtener_historico_semana(actual, bloque_fin)
+        total += await guardar_resultados(db, res)
+        actual += timedelta(days=7)
+    
+    return {"status": "success", "total_animalitos_guardados": total}
