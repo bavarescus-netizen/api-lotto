@@ -77,3 +77,113 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date):
             if not tabla:
                 return []
             fechas = []
+            for th in tabla.find_all("th")[1:]:
+                try:
+                    fechas.append(datetime.strptime(th.text.strip(), "%Y-%m-%d").date())
+                except:
+                    pass
+            resultados = []
+            for fila in tabla.find_all("tr")[1:]:
+                th_hora = fila.find("th")
+                if not th_hora:
+                    continue
+                hora = normalizar_hora(th_hora.text.strip())
+                for i, celda in enumerate(fila.find_all("td")):
+                    if i >= len(fechas):
+                        break
+                    animal = normalizar_animal(celda.text.strip())
+                    if animal:
+                        resultados.append({
+                            "fecha": fechas[i],
+                            "hora": hora,
+                            "animalito": animal,
+                            "loteria": LOTERIA
+                        })
+            logger.info(f"Historico {fecha_inicio} a {fecha_fin}: {len(resultados)} registros")
+            return resultados
+    except Exception as e:
+        logger.error(f"Error historico: {e}")
+        return []
+
+
+async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
+    if not resultados:
+        return 0
+    insertados = 0
+    for r in resultados:
+        try:
+            res = await db.execute(text("""
+                INSERT INTO historico (fecha, hora, animalito, loteria)
+                VALUES (:fecha, :hora, :animalito, :loteria)
+                ON CONFLICT (fecha, hora) DO NOTHING
+                RETURNING id
+            """), r)
+            if res.fetchone():
+                insertados += 1
+        except Exception as e:
+            logger.warning(f"Error insertando: {e}")
+    if insertados > 0:
+        await db.commit()
+    return insertados
+
+
+async def procesar_ultimo_sorteo(db: AsyncSession) -> bool:
+    resultados = await obtener_resultados_hoy()
+    if not resultados:
+        return False
+    insertados = await guardar_resultados(db, resultados)
+    return insertados > 0
+
+
+@router.get("/cargar-ultimo")
+async def api_cargar_ultimo(db: AsyncSession = Depends(get_db)):
+    resultados = await obtener_resultados_hoy()
+    insertados = await guardar_resultados(db, resultados)
+    return {
+        "status": "success",
+        "encontrados": len(resultados),
+        "nuevos": insertados,
+        "message": f"Hoy: {len(resultados)} encontrados, {insertados} nuevos guardados."
+    }
+
+
+@router.get("/cargar-semana")
+async def api_cargar_semana(db: AsyncSession = Depends(get_db)):
+    hoy = date.today()
+    total = 0
+    for offset in range(0, 14, 7):
+        fecha_fin = hoy - timedelta(days=offset)
+        fecha_inicio = fecha_fin - timedelta(days=6)
+        resultados = await obtener_historico_semana(fecha_inicio, fecha_fin)
+        total += await guardar_resultados(db, resultados)
+    return {
+        "status": "success",
+        "nuevos_registros": total,
+        "message": f"{total} registros nuevos en los ultimos 14 dias."
+    }
+
+
+@router.get("/cargar-rango")
+async def api_cargar_rango(
+    desde: str,
+    hasta: str,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        fecha_inicio = datetime.strptime(desde, "%Y-%m-%d").date()
+        fecha_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
+    except:
+        return {"status": "error", "message": "Formato invalido. Use YYYY-MM-DD"}
+    total = 0
+    fecha_actual = fecha_inicio
+    while fecha_actual <= fecha_fin:
+        fin_bloque = min(fecha_actual + timedelta(days=6), fecha_fin)
+        resultados = await obtener_historico_semana(fecha_actual, fin_bloque)
+        total += await guardar_resultados(db, resultados)
+        fecha_actual += timedelta(days=7)
+    return {
+        "status": "success",
+        "rango": f"{desde} al {hasta}",
+        "nuevos_registros": total,
+        "message": f"{total} registros nuevos."
+    }
