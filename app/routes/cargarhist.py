@@ -87,16 +87,16 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date):
                         })
             return resultados
     except Exception as e:
-        logger.error(f"Error historico: {e}")
+        logger.error(f"Error histórico: {e}")
         return []
 
-# --- FUNCIÓN DE GUARDADO CORREGIDA (Sin RETURNING id y con Rollback) ---
+# --- FUNCIÓN DE GUARDADO SEGURA ---
 async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
     if not resultados: return 0
     insertados = 0
     for r in resultados:
         try:
-            # Quitamos 'RETURNING id' porque tu tabla en Neon no tiene esa columna
+            # IMPORTANTE: Eliminado RETURNING id para evitar error en Neon
             await db.execute(text("""
                 INSERT INTO historico (fecha, hora, animalito, loteria)
                 VALUES (:fecha, :hora, :animalito, :loteria)
@@ -104,49 +104,22 @@ async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
             """), r)
             insertados += 1
         except Exception as e:
-            # Importante: rollback si falla uno para no bloquear la transacción
+            # Rollback individual para no bloquear la conexión
             await db.rollback()
-            logger.warning(f"Error insertando registro {r.get('fecha')} {r.get('hora')}: {e}")
+            logger.warning(f"Salto de registro por error: {e}")
             continue 
             
     if insertados > 0:
-        try:
-            await db.commit()
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"Error al hacer commit: {e}")
-            return 0
+        await db.commit()
     return insertados
 
-async def procesar_ultimo_sorteo(db: AsyncSession) -> bool:
-    resultados = await obtener_resultados_hoy()
-    if not resultados: return False
-    insertados = await guardar_resultados(db, resultados)
-    return insertados > 0
-
-# --- RUTAS API ---
+# --- RUTAS ---
 
 @router.get("/cargar-ultimo")
 async def api_cargar_ultimo(db: AsyncSession = Depends(get_db)):
     resultados = await obtener_resultados_hoy()
     insertados = await guardar_resultados(db, resultados)
-    return {
-        "status": "success",
-        "encontrados": len(resultados),
-        "nuevos": insertados,
-        "message": f"Proceso completado. {insertados} registros procesados."
-    }
-
-@router.get("/cargar-semana")
-async def api_cargar_semana(db: AsyncSession = Depends(get_db)):
-    hoy = date.today()
-    total = 0
-    for offset in range(0, 14, 7):
-        fecha_fin = hoy - timedelta(days=offset)
-        fecha_inicio = fecha_fin - timedelta(days=6)
-        resultados = await obtener_historico_semana(fecha_inicio, fecha_fin)
-        total += await guardar_resultados(db, resultados)
-    return {"status": "success", "nuevos_registros": total}
+    return {"status": "success", "nuevos": insertados}
 
 @router.get("/cargar-rango")
 async def api_cargar_rango(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
@@ -154,7 +127,7 @@ async def api_cargar_rango(desde: str, hasta: str, db: AsyncSession = Depends(ge
         fecha_inicio = datetime.strptime(desde, "%Y-%m-%d").date()
         fecha_fin = datetime.strptime(hasta, "%Y-%m-%d").date()
     except:
-        return {"status": "error", "message": "Formato inválido. Use YYYY-MM-DD"}
+        return {"status": "error", "message": "Formato YYYY-MM-DD requerido"}
     
     total = 0
     fecha_actual = fecha_inicio
