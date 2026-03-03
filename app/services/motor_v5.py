@@ -1,8 +1,9 @@
 """
 MOTOR V6 — LOTTOAI PRO
-Motor estadístico avanzado. Reemplaza motor_v5.py.
-Señales: Deuda estadística, Frecuencia reciente, Patrón día,
-         Anti-racha, Secuencia. + Backtesting + Índice de Confianza.
+Reemplaza motor_v5.py directamente (mismo nombre de funciones).
+CORRECCIONES:
+  1. calcular_deuda: LAG en subconsulta separada antes de AVG (GroupingError fix)
+  2. entrenar_modelo: convierte hora texto -> integer para tabla probabilidades_hora
 """
 
 from sqlalchemy import text
@@ -26,42 +27,48 @@ MAPA_ANIMALES = {
 NUMERO_POR_ANIMAL = {v: k for k, v in MAPA_ANIMALES.items()}
 
 
-def hora_a_str(ahora: datetime) -> str:
-    """Convierte datetime a formato '08:00 AM'"""
-    return ahora.strftime("%I:%M %p").upper().lstrip("0").zfill(8)
-
-
 # ══════════════════════════════════════════════════════
 # SEÑAL 1 — ÍNDICE DE DEUDA (peso 0.35)
-# Qué % del ciclo normal lleva ausente en esta hora
-# GALLINA 469% = ha pasado casi 5 veces su ciclo sin aparecer
+# FIX: LAG en CTE separado, luego AVG en otro CTE
+# PostgreSQL no permite AVG(LAG()) en la misma query
 # ══════════════════════════════════════════════════════
 async def calcular_deuda(db: AsyncSession, hora_str: str, fecha_limite: date = None) -> dict:
     if fecha_limite is None:
         fecha_limite = date.today()
 
     res = await db.execute(text("""
-        WITH ultima_vez AS (
-            SELECT animalito,
-                MAX(fecha) as ultima,
-                :hoy - MAX(fecha) as dias_ausente
+        WITH apariciones AS (
+            SELECT animalito, fecha,
+                LAG(fecha) OVER (PARTITION BY animalito ORDER BY fecha) AS fecha_anterior
             FROM historico
             WHERE hora = :hora AND fecha < :hoy
-            GROUP BY animalito
+        ),
+        gaps AS (
+            SELECT animalito,
+                (fecha - fecha_anterior) AS gap_dias
+            FROM apariciones
+            WHERE fecha_anterior IS NOT NULL
         ),
         ciclos AS (
             SELECT animalito,
-                AVG(fecha - LAG(fecha) OVER (PARTITION BY animalito ORDER BY fecha)) as ciclo_prom,
-                COUNT(*) as apariciones
+                AVG(gap_dias) AS ciclo_prom,
+                COUNT(*) AS apariciones
+            FROM gaps
+            GROUP BY animalito
+            HAVING COUNT(*) >= 3
+        ),
+        ultima_vez AS (
+            SELECT animalito,
+                MAX(fecha) AS ultima,
+                :hoy - MAX(fecha) AS dias_ausente
             FROM historico
             WHERE hora = :hora AND fecha < :hoy
             GROUP BY animalito
-            HAVING COUNT(*) >= 3
         )
         SELECT u.animalito,
             u.dias_ausente,
-            ROUND(c.ciclo_prom::numeric, 1) as ciclo_prom,
-            ROUND((u.dias_ausente / NULLIF(c.ciclo_prom, 0) * 100)::numeric, 1) as pct_deuda,
+            ROUND(c.ciclo_prom::numeric, 1) AS ciclo_prom,
+            ROUND((u.dias_ausente / NULLIF(c.ciclo_prom, 0) * 100)::numeric, 1) AS pct_deuda,
             c.apariciones
         FROM ultima_vez u
         JOIN ciclos c ON u.animalito = c.animalito
@@ -91,7 +98,6 @@ async def calcular_deuda(db: AsyncSession, hora_str: str, fecha_limite: date = N
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 2 — FRECUENCIA RECIENTE 90 días (peso 0.20)
-# Qué sale más en esta hora en período reciente
 # ══════════════════════════════════════════════════════
 async def calcular_frecuencia_reciente(db: AsyncSession, hora_str: str, fecha_limite: date = None) -> dict:
     if fecha_limite is None:
@@ -99,7 +105,7 @@ async def calcular_frecuencia_reciente(db: AsyncSession, hora_str: str, fecha_li
     fecha_90 = fecha_limite - timedelta(days=90)
 
     res = await db.execute(text("""
-        SELECT animalito, COUNT(*) as veces
+        SELECT animalito, COUNT(*) AS veces
         FROM historico
         WHERE hora = :hora AND fecha >= :desde AND fecha < :hasta
         GROUP BY animalito ORDER BY veces DESC
@@ -121,14 +127,13 @@ async def calcular_frecuencia_reciente(db: AsyncSession, hora_str: str, fecha_li
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 3 — PATRÓN DÍA SEMANA + HORA (peso 0.15)
-# Lunes a las 8AM tiene su propio patrón histórico
 # ══════════════════════════════════════════════════════
 async def calcular_patron_dia(db: AsyncSession, hora_str: str, dia_semana: int, fecha_limite: date = None) -> dict:
     if fecha_limite is None:
         fecha_limite = date.today()
 
     res = await db.execute(text("""
-        SELECT animalito, COUNT(*) as veces
+        SELECT animalito, COUNT(*) AS veces
         FROM historico
         WHERE hora = :hora
           AND EXTRACT(DOW FROM fecha) = :dia
@@ -152,16 +157,15 @@ async def calcular_patron_dia(db: AsyncSession, hora_str: str, dia_semana: int, 
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 4 — ANTI-RACHA (peso 0.20)
-# Si salió hace poco en esta hora → penalizar
-# Si lleva mucho tiempo sin salir → bonificar
 # ══════════════════════════════════════════════════════
 async def calcular_anti_racha(db: AsyncSession, hora_str: str, fecha_limite: date = None) -> dict:
     if fecha_limite is None:
         fecha_limite = date.today()
 
     res = await db.execute(text("""
-        SELECT animalito, MAX(fecha) as ultima, :hoy - MAX(fecha) as dias
-        FROM historico WHERE hora = :hora AND fecha < :hoy
+        SELECT animalito, MAX(fecha) AS ultima, :hoy - MAX(fecha) AS dias
+        FROM historico
+        WHERE hora = :hora AND fecha < :hoy
         GROUP BY animalito
     """), {"hora": hora_str, "hoy": fecha_limite})
 
@@ -185,7 +189,6 @@ async def calcular_anti_racha(db: AsyncSession, hora_str: str, fecha_limite: dat
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 5 — SECUENCIA (peso 0.10)
-# Qué animal suele salir después del último resultado
 # ══════════════════════════════════════════════════════
 async def calcular_secuencia(db: AsyncSession, fecha_limite: date = None) -> dict:
     if fecha_limite is None:
@@ -203,11 +206,12 @@ async def calcular_secuencia(db: AsyncSession, fecha_limite: date = None) -> dic
     res = await db.execute(text("""
         WITH seq AS (
             SELECT animalito,
-                LEAD(animalito) OVER (ORDER BY fecha, hora) as siguiente
+                LEAD(animalito) OVER (ORDER BY fecha, hora) AS siguiente
             FROM historico WHERE fecha < :hoy
         )
-        SELECT siguiente, COUNT(*) as veces
-        FROM seq WHERE animalito = :ultimo AND siguiente IS NOT NULL
+        SELECT siguiente, COUNT(*) AS veces
+        FROM seq
+        WHERE animalito = :ultimo AND siguiente IS NOT NULL
         GROUP BY siguiente ORDER BY veces DESC LIMIT 15
     """), {"ultimo": ultimo, "hoy": fecha_limite})
 
@@ -222,8 +226,6 @@ async def calcular_secuencia(db: AsyncSession, fecha_limite: date = None) -> dic
 
 # ══════════════════════════════════════════════════════
 # ÍNDICE DE CONFIANZA 0-100
-# Mide cuán concentrada está la señal en 1-2 animales
-# < 40 = NO OPERAR | 40-60 = CAUTELA | > 60 = OPERAR
 # ══════════════════════════════════════════════════════
 def calcular_indice_confianza(scores: dict) -> tuple:
     if not scores:
@@ -258,16 +260,7 @@ async def generar_prediccion(db: AsyncSession) -> dict:
     try:
         tz = pytz.timezone('America/Caracas')
         ahora = datetime.now(tz)
-        hora_str = ahora.strftime("%I:00 %p").upper()
-        if hora_str.startswith("0"):
-            hora_str = hora_str[1:]
-        # Normalizar a "08:00 AM" format
-        try:
-            hora_dt = datetime.strptime(hora_str, "%I:00 %p")
-            hora_str = hora_dt.strftime("%I:%M %p").upper()
-        except:
-            pass
-
+        hora_str = ahora.strftime("%I:00 %p").upper()  # "08:00 AM"
         dia_semana = ahora.weekday()
         hoy = ahora.date()
 
@@ -365,15 +358,13 @@ async def generar_prediccion(db: AsyncSession) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# BACKTESTING — sin data leakage
-# Simula el motor en rango histórico usando solo datos
-# anteriores a cada sorteo (como si fuera en tiempo real)
+# BACKTESTING sin data leakage
 # ══════════════════════════════════════════════════════
 async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> dict:
     try:
         res = await db.execute(text("""
             SELECT fecha, hora, animalito,
-                EXTRACT(DOW FROM fecha)::int as dia_semana
+                EXTRACT(DOW FROM fecha)::int AS dia_semana
             FROM historico
             WHERE fecha BETWEEN :desde AND :hasta
             ORDER BY fecha, hora
@@ -393,8 +384,6 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
             fecha_s, hora_s, real, dia_s = sorteo
             dia_s = int(dia_s)
 
-            # Calcular todas las señales con fecha_limite = fecha del sorteo
-            # Esto evita que el motor "vea el futuro"
             d = await calcular_deuda(db, hora_s, fecha_s)
             r = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
             p = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
@@ -403,9 +392,9 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
 
             PESOS = {"deuda":0.35,"reciente":0.20,"patron":0.15,"anti":0.20,"secuencia":0.10}
             todos = set(list(d)+list(r)+list(p)+list(a)+list(s))
-            scores = {}
+            sc = {}
             for animal in todos:
-                scores[animal] = (
+                sc[animal] = (
                     d.get(animal,{}).get("score",0)*PESOS["deuda"] +
                     r.get(animal,{}).get("score",0)*PESOS["reciente"] +
                     p.get(animal,{}).get("score",0)*PESOS["patron"] +
@@ -413,14 +402,13 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
                     s.get(animal,{}).get("score",0)*PESOS["secuencia"]
                 )
 
-            if not scores:
+            if not sc:
                 continue
 
-            confianza_idx, _ = calcular_indice_confianza(scores)
-            predicho = max(scores, key=scores.get)
+            confianza_idx, _ = calcular_indice_confianza(sc)
+            predicho = max(sc, key=sc.get)
             acerto = predicho.lower() == real.lower()
             alta_conf = confianza_idx >= 60
-            deuda_top = d.get(predicho, {}).get("pct_deuda", 0)
 
             total += 1
             if acerto: aciertos += 1
@@ -436,7 +424,7 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
                 "acierto": acerto,
                 "confianza": confianza_idx,
                 "alta_confianza": alta_conf,
-                "pct_deuda": round(deuda_top, 1)
+                "pct_deuda": round(d.get(predicho, {}).get("pct_deuda", 0), 1)
             })
 
         ef_global = round(aciertos/total*100, 1) if total > 0 else 0
@@ -451,7 +439,7 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
             "alta_confianza_total": alta_conf_total,
             "alta_confianza_aciertos": alta_conf_aciertos,
             "efectividad_alta_confianza": ef_alta,
-            "mensaje": f"En sorteos de ALTA CONFIANZA: {ef_alta}% de efectividad ({alta_conf_aciertos}/{alta_conf_total})",
+            "mensaje": f"Alta confianza: {ef_alta}% ({alta_conf_aciertos}/{alta_conf_total}) | Global: {ef_global}% ({aciertos}/{total})",
             "detalle": detalle[-100:]
         }
     except Exception as e:
@@ -460,37 +448,60 @@ async def backtest(db: AsyncSession, fecha_desde: date, fecha_hasta: date) -> di
 
 
 # ══════════════════════════════════════════════════════
-# ENTRENAR — recalcula probabilidades + calibra + métricas
+# ENTRENAR
+# FIX: probabilidades_hora.hora es INTEGER
+# Convierte "08:00 AM" → 8, "12:00 PM" → 12, etc.
 # ══════════════════════════════════════════════════════
 async def entrenar_modelo(db: AsyncSession) -> dict:
     try:
         await db.execute(text("DELETE FROM probabilidades_hora"))
+
         await db.execute(text("""
             INSERT INTO probabilidades_hora
                 (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
             WITH base AS (
-                SELECT hora, animalito, COUNT(*) as total_hist
-                FROM historico GROUP BY hora, animalito
+                SELECT
+                    CASE
+                        WHEN hora LIKE '12:%AM' THEN 0
+                        WHEN hora LIKE '12:%PM' THEN 12
+                        WHEN hora LIKE '%PM'
+                            THEN CAST(SPLIT_PART(hora, ':', 1) AS INT) + 12
+                        ELSE CAST(SPLIT_PART(hora, ':', 1) AS INT)
+                    END AS hora_int,
+                    animalito,
+                    COUNT(*) AS total_hist
+                FROM historico
+                GROUP BY 1, 2
             ),
             reciente AS (
-                SELECT hora, animalito, COUNT(*) as total_rec
+                SELECT
+                    CASE
+                        WHEN hora LIKE '12:%AM' THEN 0
+                        WHEN hora LIKE '12:%PM' THEN 12
+                        WHEN hora LIKE '%PM'
+                            THEN CAST(SPLIT_PART(hora, ':', 1) AS INT) + 12
+                        ELSE CAST(SPLIT_PART(hora, ':', 1) AS INT)
+                    END AS hora_int,
+                    animalito,
+                    COUNT(*) AS total_rec
                 FROM historico
                 WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
-                GROUP BY hora, animalito
+                GROUP BY 1, 2
             ),
             totales AS (
-                SELECT hora, SUM(total_hist) as gran_total FROM base GROUP BY hora
+                SELECT hora_int, SUM(total_hist) AS gran_total
+                FROM base GROUP BY hora_int
             )
-            SELECT b.hora, b.animalito, b.total_hist,
+            SELECT b.hora_int, b.animalito, b.total_hist,
                 ROUND((b.total_hist::FLOAT / NULLIF(t.gran_total,0) * 100)::numeric, 2),
                 CASE WHEN COALESCE(r.total_rec,0) >= 2 THEN 'CALIENTE' ELSE 'FRIO' END,
                 NOW()
             FROM base b
-            JOIN totales t ON b.hora = t.hora
-            LEFT JOIN reciente r ON b.hora = r.hora AND b.animalito = r.animalito
+            JOIN totales t ON b.hora_int = t.hora_int
+            LEFT JOIN reciente r ON b.hora_int = r.hora_int AND b.animalito = r.animalito
+            WHERE b.hora_int BETWEEN 7 AND 19
         """))
 
-        # Calibrar predicciones pendientes — comparación case-insensitive
         await db.execute(text("""
             UPDATE auditoria_ia a
             SET acierto = (LOWER(TRIM(a.animal_predicho)) = LOWER(TRIM(h.animalito))),
@@ -517,22 +528,17 @@ async def entrenar_modelo(db: AsyncSession) -> dict:
 
         res_hist = await db.execute(text("SELECT COUNT(*) FROM historico"))
         total_hist = res_hist.scalar() or 0
-
-        res_cal = await db.execute(text(
-            "SELECT COUNT(*) FROM auditoria_ia WHERE acierto IS NOT NULL"))
+        res_cal = await db.execute(text("SELECT COUNT(*) FROM auditoria_ia WHERE acierto IS NOT NULL"))
         calibradas = res_cal.scalar() or 0
-
-        res_ac = await db.execute(text(
-            "SELECT COUNT(*) FROM auditoria_ia WHERE acierto = TRUE"))
+        res_ac = await db.execute(text("SELECT COUNT(*) FROM auditoria_ia WHERE acierto = TRUE"))
         ac = res_ac.scalar() or 0
-
         efectividad = round(ac / calibradas * 100, 1) if calibradas > 0 else 0
-        await db.commit()
 
+        await db.commit()
         return {
             "status": "success",
-            "message": (f"✅ Motor V6 entrenado. {total_hist:,} registros analizados. "
-                       f"Efectividad actual: {efectividad}% ({ac}/{calibradas} calibradas)."),
+            "message": (f"✅ Motor V6 entrenado. {total_hist:,} registros. "
+                       f"Efectividad: {efectividad}% ({ac}/{calibradas})."),
             "registros_analizados": total_hist,
             "efectividad": efectividad,
             "calibradas": calibradas,
@@ -544,7 +550,7 @@ async def entrenar_modelo(db: AsyncSession) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# CALIBRAR predicciones pendientes
+# CALIBRAR
 # ══════════════════════════════════════════════════════
 async def calibrar_predicciones(db: AsyncSession) -> dict:
     try:
@@ -565,13 +571,13 @@ async def calibrar_predicciones(db: AsyncSession) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# BITÁCORA DEL DÍA
+# BITÁCORA
 # ══════════════════════════════════════════════════════
 async def obtener_bitacora(db: AsyncSession) -> list:
     try:
         res = await db.execute(text("""
             SELECT a.hora, a.animal_predicho,
-                COALESCE(a.resultado_real,'PENDIENTE') as resultado_real,
+                COALESCE(a.resultado_real,'PENDIENTE') AS resultado_real,
                 a.acierto, a.confianza_pct
             FROM auditoria_ia a
             WHERE a.fecha = CURRENT_DATE
@@ -596,17 +602,17 @@ async def obtener_bitacora(db: AsyncSession) -> list:
 
 
 # ══════════════════════════════════════════════════════
-# ESTADÍSTICAS GENERALES
+# ESTADÍSTICAS
 # ══════════════════════════════════════════════════════
 async def obtener_estadisticas(db: AsyncSession) -> dict:
     try:
         res_ef = await db.execute(text("""
-            SELECT COUNT(*) as total,
-                COUNT(CASE WHEN acierto=TRUE THEN 1 END) as aciertos,
+            SELECT COUNT(*) AS total,
+                COUNT(CASE WHEN acierto=TRUE THEN 1 END) AS aciertos,
                 ROUND(
                     (COUNT(CASE WHEN acierto=TRUE THEN 1 END)::NUMERIC /
                     NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)) * 100
-                , 1) as precision
+                , 1) AS precision
             FROM auditoria_ia
         """))
         ef = res_ef.fetchone()
@@ -622,7 +628,7 @@ async def obtener_estadisticas(db: AsyncSession) -> dict:
         total_hist = res_total.scalar() or 0
 
         res_top = await db.execute(text("""
-            SELECT animalito, COUNT(*) as veces
+            SELECT animalito, COUNT(*) AS veces
             FROM historico WHERE fecha >= CURRENT_DATE - INTERVAL '30 days'
             GROUP BY animalito ORDER BY veces DESC LIMIT 5
         """))
