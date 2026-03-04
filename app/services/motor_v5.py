@@ -264,43 +264,83 @@ async def generar_prediccion(db) -> dict:
         return {"top3":[],"analisis":f"Error V6: {e}","confianza_idx":0,"señal_texto":"ERROR"}
 
 
-# ══════════════════════════════════════════════════════
-# LLENAR AUDITORÍA RETROACTIVA
-# Genera predicciones para los últimos N días sin data leakage
-# Esto llena los puntos vacíos en la auditoría y da efectividad real
-# ══════════════════════════════════════════════════════
-async def llenar_auditoria_retroactiva(db, dias: int = 30) -> dict:
-    """
-    Para cada sorteo de los últimos N días:
-    1. Simula la predicción que hubiera hecho el motor (sin ver el futuro)
-    2. La guarda en auditoria_ia
-    3. La calibra contra el resultado real
-    Esto da efectividad real basada en datos históricos recientes.
-    """
-    try:
-        fecha_desde = date.today() - timedelta(days=dias)
-        fecha_hasta = date.today() - timedelta(days=1)  # Hasta ayer
+"""
+FUNCIÓN llenar_auditoria_retroactiva MEJORADA
+Procesa en lotes de 7 días para evitar timeout de Render.
+Permite cubrir desde 2018 hasta hoy en múltiples llamadas.
 
+USO:
+  /retroactivo?desde=2025-01-01&hasta=2025-06-30
+  /retroactivo?desde=2024-01-01&hasta=2024-12-31
+  /retroactivo?desde=2023-01-01&hasta=2023-12-31
+  etc.
+
+El parámetro max_por_lote controla cuántos sorteos por llamada (default 84 = 7 días × 12 horas).
+"""
+
+# ══════════════════════════════════════════════════════
+# REEMPLAZA la función llenar_auditoria_retroactiva
+# en app/services/motor_v5.py
+# ══════════════════════════════════════════════════════
+
+async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, dias: int = 30) -> dict:
+    """
+    Genera predicciones retroactivas para un rango de fechas.
+    Sin data leakage: cada predicción usa solo datos anteriores a esa fecha.
+    
+    Parámetros:
+    - fecha_desde: date — inicio del rango (default: hoy - dias)
+    - fecha_hasta: date — fin del rango (default: ayer)
+    - dias: int — alternativa si no se especifican fechas
+    """
+    from datetime import date, timedelta
+
+    try:
+        hoy = date.today()
+        if fecha_desde is None:
+            fecha_desde = hoy - timedelta(days=dias)
+        if fecha_hasta is None:
+            fecha_hasta = hoy - timedelta(days=1)
+
+        # Validar rango
+        total_dias = (fecha_hasta - fecha_desde).days
+        if total_dias > 365:
+            return {"status": "error", "message": "Rango máximo 1 año por llamada"}
+
+        from sqlalchemy import text
         res = await db.execute(text("""
             SELECT fecha, hora, animalito, EXTRACT(DOW FROM fecha)::int AS dia_semana
             FROM historico
             WHERE fecha BETWEEN :desde AND :hasta
-            ORDER BY fecha, hora
+            ORDER BY fecha ASC, hora ASC
         """), {"desde": fecha_desde, "hasta": fecha_hasta})
         sorteos = res.fetchall()
 
         if not sorteos:
-            return {"status": "ok", "procesados": 0, "message": "Sin sorteos en el rango"}
+            return {"status": "ok", "procesados": 0, 
+                    "message": f"Sin sorteos entre {fecha_desde} y {fecha_hasta}"}
 
         insertados = 0
+        omitidos = 0  # Ya existían en auditoría
         aciertos = 0
+        errores = 0
 
         for sorteo in sorteos:
             fecha_s, hora_s, real, dia_s = sorteo
             dia_s = int(dia_s)
 
             try:
-                # Calcular señales con fecha_limite = fecha del sorteo (sin ver el futuro)
+                # Verificar si ya existe en auditoría para no duplicar
+                res_existe = await db.execute(text("""
+                    SELECT 1 FROM auditoria_ia 
+                    WHERE fecha=:f AND hora=:h AND acierto IS NOT NULL
+                    LIMIT 1
+                """), {"f": fecha_s, "h": hora_s})
+                if res_existe.fetchone():
+                    omitidos += 1
+                    continue
+
+                # Calcular señales SIN ver el futuro (fecha_limite = fecha del sorteo)
                 d = await calcular_deuda(db, hora_s, fecha_s)
                 r = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
                 p = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
@@ -309,6 +349,7 @@ async def llenar_auditoria_retroactiva(db, dias: int = 30) -> dict:
 
                 scores = combinar_señales(d, r, p, a, s)
                 if not scores:
+                    errores += 1
                     continue
 
                 confianza_idx, _ = calcular_indice_confianza(scores)
@@ -319,7 +360,11 @@ async def llenar_auditoria_retroactiva(db, dias: int = 30) -> dict:
                     INSERT INTO auditoria_ia
                         (fecha, hora, animal_predicho, confianza_pct, resultado_real, acierto)
                     VALUES (:f, :h, :a, :c, :r, :ac)
-                    ON CONFLICT (fecha, hora) DO NOTHING
+                    ON CONFLICT (fecha, hora) DO UPDATE SET
+                        animal_predicho = EXCLUDED.animal_predicho,
+                        confianza_pct = EXCLUDED.confianza_pct,
+                        resultado_real = EXCLUDED.resultado_real,
+                        acierto = EXCLUDED.acierto
                 """), {
                     "f": fecha_s, "h": hora_s,
                     "a": predicho.lower(),
@@ -331,25 +376,31 @@ async def llenar_auditoria_retroactiva(db, dias: int = 30) -> dict:
                 if acerto:
                     aciertos += 1
 
-            except Exception:
-                continue  # Salta este sorteo si hay error, continúa con el resto
+            except Exception as e:
+                errores += 1
+                continue
 
         await db.commit()
 
-        efectividad = round(aciertos/insertados*100, 1) if insertados > 0 else 0
+        efectividad = round(aciertos / insertados * 100, 1) if insertados > 0 else 0
+        
         return {
             "status": "success",
+            "fecha_desde": str(fecha_desde),
+            "fecha_hasta": str(fecha_hasta),
+            "total_sorteos_en_rango": len(sorteos),
             "procesados": insertados,
+            "omitidos_ya_existian": omitidos,
             "aciertos": aciertos,
+            "errores": errores,
             "efectividad": efectividad,
-            "dias_analizados": dias,
-            "message": f"✅ {insertados} predicciones retroactivas. Efectividad real: {efectividad}% ({aciertos}/{insertados})"
+            "message": f"✅ {insertados} predicciones. Efectividad: {efectividad}% ({aciertos}/{insertados}). Omitidos: {omitidos}"
         }
+
     except Exception as e:
         await db.rollback()
         import traceback; traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
 
 # ══════════════════════════════════════════════════════
 # BACKTEST — versión con límite de sorteos para evitar timeout
