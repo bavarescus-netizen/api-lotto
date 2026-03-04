@@ -1,7 +1,9 @@
 """
-SCHEDULER V3 — LOTTOAI PRO
-Ciclo automático: capturar → calibrar → entrenar → predecir
-Al arrancar: carga los últimos 14 días para rellenar huecos
+SCHEDULER V4 — LOTTOAI PRO
+Fixes:
+  1. Al arrancar: carga TODOS los sorteos del día actual (no solo histórico semanal)
+  2. Al entrar en ventana horaria: si hay sorteos pasados sin capturar, los captura todos
+  3. Retry inteligente: si no encuentra resultado, reintenta cada 3 min hasta 5 veces
 """
 
 import asyncio
@@ -16,41 +18,89 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 TZ = pytz.timezone('America/Caracas')
-HORAS_SORTEO = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+# Sorteos: 8AM a 7PM = horas 8..19
+HORAS_SORTEO = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
 
 async def carga_inicial():
-    """Al arrancar: rellena los últimos 14 días automáticamente"""
+    """
+    Al arrancar:
+    1. Rellena los últimos 14 días históricos
+    2. Captura TODOS los sorteos del día actual (para no perder nada si el servidor se reinició)
+    3. Entrena y calibra
+    """
     logger.info("📦 Carga inicial — sincronizando últimos 14 días...")
     try:
         async for db in get_db():
             hoy = date.today()
             total = 0
+
+            # Histórico últimas 2 semanas
             for offset in range(0, 14, 7):
                 fecha_fin = hoy - timedelta(days=offset)
                 fecha_inicio = fecha_fin - timedelta(days=6)
                 resultados = await obtener_historico_semana(fecha_inicio, fecha_fin)
                 total += await guardar_resultados(db, resultados)
-            # También carga hoy
+
+            # ── FIX CRÍTICO: capturar resultados de HOY completo ──
+            # Esto evita que un reinicio del servidor pierda sorteos del día
             hoy_resultados = await obtener_resultados_hoy()
-            total += await guardar_resultados(db, hoy_resultados)
-            logger.info(f"✅ Carga inicial: {total} registros nuevos sincronizados")
-            # Entrenar con los datos frescos
+            nuevos_hoy = await guardar_resultados(db, hoy_resultados)
+            total += nuevos_hoy
+            logger.info(f"✅ Carga inicial: {total} registros nuevos ({nuevos_hoy} de hoy)")
+
+            # Entrenar con datos frescos
             ent = await entrenar_modelo(db)
-            logger.info(f"🧠 {ent.get('message', 'Entrenamiento inicial OK')}")
+            logger.info(f"🧠 {ent.get('message', 'Entrenamiento OK')}")
+
             # Calibrar predicciones pendientes
             cal = await calibrar_predicciones(db)
             logger.info(f"🎯 Calibración inicial: {cal.get('calibradas', 0)} validadas")
+
+            # Generar predicción para la hora actual
+            ahora = datetime.now(TZ)
+            if ahora.hour in HORAS_SORTEO:
+                pred = await generar_prediccion(db)
+                if pred.get("top3"):
+                    top1 = pred["top3"][0]
+                    logger.info(f"🔮 Predicción inicial: {top1['animal']} ({top1['porcentaje']}) — Confianza: {pred.get('confianza_idx', 0)}/100")
             break
+
     except Exception as e:
         logger.error(f"⚠️ Error en carga inicial: {e}")
+        import traceback; traceback.print_exc()
+
+
+async def capturar_y_procesar(db):
+    """Captura resultado, calibra, entrena y predice. Retorna True si hubo nuevos."""
+    hoy_resultados = await obtener_resultados_hoy()
+    nuevos = await guardar_resultados(db, hoy_resultados)
+
+    if nuevos > 0:
+        logger.info(f"✅ {nuevos} nuevo(s) resultado(s) capturado(s)")
+
+        cal = await calibrar_predicciones(db)
+        logger.info(f"🎯 Calibración: {cal.get('calibradas', 0)} validadas")
+
+        ent = await entrenar_modelo(db)
+        logger.info(f"🧠 {ent.get('message', 'OK')}")
+
+        pred = await generar_prediccion(db)
+        if pred.get("top3"):
+            top1 = pred["top3"][0]
+            conf = pred.get("confianza_idx", 0)
+            señal = pred.get("señal_texto", "")
+            logger.info(f"🔮 Predicción: {top1['animal']} ({top1['porcentaje']}) | Conf: {conf}/100 | {señal}")
+
+        return True
+    return False
 
 
 async def ciclo_infinito():
     logger.info("🚀 LOTTOAI PRO — Sistema de vigilancia activo")
-
-    # Carga inicial al arrancar
     await carga_inicial()
+
+    intentos_fallidos = 0  # Cuenta reintentos si no llega resultado
 
     while True:
         try:
@@ -58,60 +108,71 @@ async def ciclo_infinito():
             hora = ahora.hour
             minuto = ahora.minute
 
+            # ── Fuera de horario de sorteos ──
             if hora not in HORAS_SORTEO:
+                # Si ya pasaron todos los sorteos del día (después de 7PM)
+                # hacer una captura final para asegurar que nada quedó pendiente
+                if hora == 20 and minuto < 5:
+                    logger.info("🌙 Captura final del día...")
+                    async for db in get_db():
+                        try:
+                            await capturar_y_procesar(db)
+                        except Exception as e:
+                            logger.error(f"Error captura final: {e}")
+                            await db.rollback()
+                        break
+
                 logger.info(f"🌙 [{ahora.strftime('%H:%M')}] Fuera de horario. Durmiendo 30 min.")
                 await asyncio.sleep(1800)
                 continue
 
-            if 3 <= minuto <= 20:
+            # ── Ventana de captura: minutos 3-25 de cada hora ──
+            # (ampliamos a 25 para dar más margen si el resultado tarda)
+            if 3 <= minuto <= 25:
                 logger.info(f"🔍 [{ahora.strftime('%H:%M')}] Buscando resultado sorteo {hora}:00...")
-                espera = 180
 
                 async for db in get_db():
                     try:
-                        # PASO 1: Capturar resultado nuevo
-                        hoy_resultados = await obtener_resultados_hoy()
-                        nuevos = await guardar_resultados(db, hoy_resultados)
+                        encontrado = await capturar_y_procesar(db)
 
-                        if nuevos > 0:
-                            logger.info(f"✅ {nuevos} nuevo(s) resultado(s) capturado(s)")
-
-                            # PASO 2: Calibrar predicciones pendientes
-                            cal = await calibrar_predicciones(db)
-                            logger.info(f"🎯 Calibración: {cal.get('calibradas', 0)} validadas")
-
-                            # PASO 3: Re-entrenar
-                            ent = await entrenar_modelo(db)
-                            logger.info(f"🧠 {ent.get('message', 'OK')}")
-
-                            # PASO 4: Generar predicción próximo sorteo
-                            pred = await generar_prediccion(db)
-                            if pred.get("top3"):
-                                top1 = pred["top3"][0]
-                                logger.info(f"🔮 Predicción: {top1['animal']} ({top1['porcentaje']})")
-
-                            espera = (60 - minuto + 3) * 60
-                            logger.info(f"⏰ Próxima revisión en {espera//60} min")
+                        if encontrado:
+                            intentos_fallidos = 0
+                            # Esperar hasta 3 minutos después de la próxima hora
+                            minutos_restantes = 60 - minuto + 3
+                            logger.info(f"⏰ Próxima revisión en {minutos_restantes} min")
+                            await asyncio.sleep(minutos_restantes * 60)
                         else:
-                            logger.info("⏳ Sin resultado nuevo. Reintento en 3 min.")
-                            espera = 180
+                            intentos_fallidos += 1
+                            if intentos_fallidos >= 5:
+                                # Después de 5 intentos, asumir que no hay más sorteos
+                                # y saltar a la próxima hora
+                                logger.warning(f"⚠️ {intentos_fallidos} intentos sin resultado. Saltando a próxima hora.")
+                                intentos_fallidos = 0
+                                minutos_restantes = 60 - minuto + 3
+                                await asyncio.sleep(minutos_restantes * 60)
+                            else:
+                                logger.info(f"⏳ Sin resultado nuevo (intento {intentos_fallidos}/5). Reintento en 3 min.")
+                                await asyncio.sleep(180)
 
                     except Exception as e:
                         logger.error(f"⚠️ Error en ciclo: {e}")
+                        import traceback; traceback.print_exc()
                         await db.rollback()
-                        espera = 180
+                        await asyncio.sleep(180)
                     break
 
-                await asyncio.sleep(espera)
-
+            # ── Esperando ventana ──
             else:
                 if minuto < 3:
                     espera = (3 - minuto) * 60
+                    logger.info(f"⏰ [{ahora.strftime('%H:%M')}] Esperando ventana. {3-minuto} min restantes.")
                 else:
+                    # minuto > 25: esperar hasta minuto 3 de la próxima hora
                     espera = (60 - minuto + 3) * 60
-                logger.info(f"⏰ [{ahora.strftime('%H:%M')}] Esperando ventana. {espera//60} min restantes.")
+                    logger.info(f"⏰ [{ahora.strftime('%H:%M')}] Esperando ventana. {(espera)//60} min restantes.")
                 await asyncio.sleep(espera)
 
         except Exception as e:
-            logger.error(f"💥 Error crítico: {e}")
+            logger.error(f"💥 Error crítico en ciclo: {e}")
+            import traceback; traceback.print_exc()
             await asyncio.sleep(60)
