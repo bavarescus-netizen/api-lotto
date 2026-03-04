@@ -61,9 +61,6 @@ async def iniciar_bot():
     print("🚀 LOTTOAI PRO iniciado — Bot de vigilancia activo")
 
 
-# ══════════════════════════════════════════════
-# HOME
-# ══════════════════════════════════════════════
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
@@ -102,31 +99,66 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
 
-# ══════════════════════════════════════════════
-# PROCESAR — Entrenar
-# ══════════════════════════════════════════════
 @app.get("/procesar")
 async def procesar(db: AsyncSession = Depends(get_db)):
     return await entrenar_modelo(db)
 
 
 # ══════════════════════════════════════════════
-# RETROACTIVO — Llena auditoría con predicciones
-# retroactivas de los últimos N días.
-# Ejemplo: /retroactivo?dias=30
-# Esto resuelve la efectividad 0% mostrando datos reales.
-# ⚠️ Puede tardar 2-5 min. Llamar una sola vez.
+# RETROACTIVO — acepta rango de fechas
+#
+# Uso por rango (recomendado, máx 1 año por llamada):
+#   /retroactivo?desde=2025-01-01&hasta=2025-12-31
+#   /retroactivo?desde=2024-01-01&hasta=2024-12-31
+#   /retroactivo?desde=2023-01-01&hasta=2023-12-31
+#   etc.
+#
+# Uso por días (compatibilidad):
+#   /retroactivo?dias=30
+#
+# Plan para cubrir 2018-2025 completo (8 llamadas):
+#   /retroactivo?desde=2025-01-01&hasta=2025-12-31
+#   /retroactivo?desde=2024-01-01&hasta=2024-12-31
+#   /retroactivo?desde=2023-01-01&hasta=2023-12-31
+#   /retroactivo?desde=2022-01-01&hasta=2022-12-31
+#   /retroactivo?desde=2021-01-01&hasta=2021-12-31
+#   /retroactivo?desde=2020-01-01&hasta=2020-12-31
+#   /retroactivo?desde=2019-01-01&hasta=2019-12-31
+#   /retroactivo?desde=2018-01-01&hasta=2018-12-31
 # ══════════════════════════════════════════════
 @app.get("/retroactivo")
-async def retroactivo(dias: int = 30, db: AsyncSession = Depends(get_db)):
-    if dias > 60:
-        return {"error": "Máximo 60 días para evitar timeout"}
-    return await llenar_auditoria_retroactiva(db, dias)
+async def retroactivo(
+    desde: str = None,
+    hasta: str = None,
+    dias: int = 30,
+    db: AsyncSession = Depends(get_db)
+):
+    from datetime import date
+    fecha_desde = None
+    fecha_hasta = None
+
+    if desde:
+        try:
+            fecha_desde = date.fromisoformat(desde)
+        except ValueError:
+            return {"error": "Formato 'desde' inválido. Use YYYY-MM-DD"}
+
+    if hasta:
+        try:
+            fecha_hasta = date.fromisoformat(hasta)
+        except ValueError:
+            return {"error": "Formato 'hasta' inválido. Use YYYY-MM-DD"}
+
+    if fecha_desde and fecha_hasta:
+        rango = (fecha_hasta - fecha_desde).days
+        if rango > 366:
+            return {"error": "Rango máximo 1 año por llamada. Divide en múltiples llamadas por año."}
+        if rango < 1:
+            return {"error": "'hasta' debe ser posterior a 'desde'"}
+
+    return await llenar_auditoria_retroactiva(db, fecha_desde, fecha_hasta, dias)
 
 
-# ══════════════════════════════════════════════
-# STATS
-# ══════════════════════════════════════════════
 @app.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
     stats_data = await obtener_estadisticas(db)
@@ -134,10 +166,6 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": stats_data, "bitacora_hoy": bitacora}
 
 
-# ══════════════════════════════════════════════
-# BACKTEST — máx 100 sorteos para evitar timeout
-# Ejemplo: /backtest?desde=2025-01-01&hasta=2025-03-31
-# ══════════════════════════════════════════════
 @app.get("/backtest")
 async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
     from datetime import date
@@ -151,9 +179,6 @@ async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db
         return {"error": "Formato inválido. Use YYYY-MM-DD"}
 
 
-# ══════════════════════════════════════════════
-# ESTADO
-# ══════════════════════════════════════════════
 @app.get("/estado")
 async def estado_sistema(db: AsyncSession = Depends(get_db)):
     try:
@@ -255,9 +280,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         return {"estado": f"❌ ERROR: {str(e)}"}
 
 
-# ══════════════════════════════════════════════
-# HEALTH
-# ══════════════════════════════════════════════
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "LOTTOAI PRO V6"}
