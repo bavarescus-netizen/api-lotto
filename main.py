@@ -3,15 +3,15 @@ import re
 import asyncio
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from db import get_db
 from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
 from app.core.scheduler import ciclo_infinito
 
-# ── Motor V6 importado con el nombre de motor_v5 (sin cambiar rutas) ──
 from app.services.motor_v5 import (
     generar_prediccion,
     obtener_estadisticas,
@@ -22,6 +22,15 @@ from app.services.motor_v5 import (
 )
 
 app = FastAPI(title="LOTTOAI PRO")
+
+# ── CORS: permite conexión desde Claude.ai y cualquier origen ──
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 app.include_router(entrenar.router)
 app.include_router(stats.router)
@@ -52,15 +61,11 @@ async def iniciar_bot():
     print("🚀 LOTTOAI PRO iniciado — Bot de vigilancia activo")
 
 
-# ══════════════════════════════════════════════
-# HOME — Dashboard principal
-# ══════════════════════════════════════════════
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         res_ia = await generar_prediccion(db)
         stats_data = await obtener_estadisticas(db)
-
         query = text("""
             SELECT h.fecha, h.hora, h.animalito, a.acierto, a.animal_predicho
             FROM historico h
@@ -80,7 +85,6 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
                 "acierto": r[3],
                 "predicho": predicho_raw
             })
-
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "top3": res_ia.get("top3", []),
@@ -99,18 +103,11 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
 
-# ══════════════════════════════════════════════
-# PROCESAR — Entrenar motor manualmente
-# ══════════════════════════════════════════════
 @app.get("/procesar")
 async def procesar(db: AsyncSession = Depends(get_db)):
-    resultado = await entrenar_modelo(db)
-    return resultado
+    return await entrenar_modelo(db)
 
 
-# ══════════════════════════════════════════════
-# STATS — Estadísticas + bitácora del día
-# ══════════════════════════════════════════════
 @app.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
     stats_data = await obtener_estadisticas(db)
@@ -118,9 +115,6 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": stats_data, "bitacora_hoy": bitacora}
 
 
-# ══════════════════════════════════════════════
-# BACKTEST — Prueba histórica con rango de fechas
-# ══════════════════════════════════════════════
 @app.get("/backtest")
 async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
     from datetime import date
@@ -128,72 +122,42 @@ async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db
         fecha_desde = date.fromisoformat(desde)
         fecha_hasta = date.fromisoformat(hasta)
         if (fecha_hasta - fecha_desde).days > 180:
-            return {"error": "Rango máximo: 6 meses (el backtest es intensivo)"}
-        resultado = await backtest(db, fecha_desde, fecha_hasta)
-        return resultado
+            return {"error": "Rango máximo: 6 meses"}
+        return await backtest(db, fecha_desde, fecha_hasta)
     except ValueError:
         return {"error": "Formato inválido. Use YYYY-MM-DD"}
 
 
-# ══════════════════════════════════════════════
-# ESTADO — Panel de salud del sistema en tiempo real
-# Muestra: última captura, última predicción, efectividad,
-# próximo sorteo y estado del scheduler
-# ══════════════════════════════════════════════
 @app.get("/estado")
 async def estado_sistema(db: AsyncSession = Depends(get_db)):
     try:
-        # Último registro capturado
-        res_ultimo = await db.execute(text("""
-            SELECT fecha, hora, animalito FROM historico
-            ORDER BY fecha DESC, hora DESC LIMIT 1
-        """))
+        res_ultimo = await db.execute(text(
+            "SELECT fecha, hora, animalito FROM historico ORDER BY fecha DESC, hora DESC LIMIT 1"))
         ultimo = res_ultimo.fetchone()
 
-        # Última predicción guardada
-        res_pred = await db.execute(text("""
-            SELECT fecha, hora, animal_predicho, confianza_pct, resultado_real, acierto
-            FROM auditoria_ia
-            ORDER BY fecha DESC, hora DESC LIMIT 1
-        """))
+        res_pred = await db.execute(text(
+            "SELECT fecha, hora, animal_predicho, confianza_pct, resultado_real, acierto FROM auditoria_ia ORDER BY fecha DESC, hora DESC LIMIT 1"))
         pred = res_pred.fetchone()
 
-        # Métricas generales
         res_met = await db.execute(text("""
-            SELECT COUNT(*) as total,
-                COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END) as calibradas,
-                COUNT(CASE WHEN acierto = TRUE THEN 1 END) as aciertos,
-                ROUND(
-                    COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric /
-                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END), 0) * 100
-                , 1) as efectividad
+            SELECT COUNT(*),
+                COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),
+                COUNT(CASE WHEN acierto = TRUE THEN 1 END),
+                ROUND(COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric /
+                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,1)
             FROM auditoria_ia
         """))
         met = res_met.fetchone()
 
-        # Predicciones de hoy
-        res_hoy = await db.execute(text("""
-            SELECT hora, animal_predicho, resultado_real, acierto, confianza_pct
-            FROM auditoria_ia
-            WHERE fecha = CURRENT_DATE
-            ORDER BY hora
-        """))
-        hoy = []
-        for r in res_hoy.fetchall():
-            hoy.append({
-                "hora": r[0],
-                "predicho": r[1],
-                "real": r[2],
-                "acierto": r[3],
-                "confianza": round(float(r[4] or 0))
-            })
+        res_hoy = await db.execute(text(
+            "SELECT hora, animal_predicho, resultado_real, acierto, confianza_pct FROM auditoria_ia WHERE fecha = CURRENT_DATE ORDER BY hora"))
+        hoy = [{"hora": r[0], "predicho": r[1], "real": r[2],
+                "acierto": r[3], "confianza": round(float(r[4] or 0))}
+               for r in res_hoy.fetchall()]
 
-        # Total histórico
         res_hist = await db.execute(text("SELECT COUNT(*), MIN(fecha), MAX(fecha) FROM historico"))
         hist = res_hist.fetchone()
 
-        # Animales con mayor deuda hoy (señal principal del motor)
-        from datetime import date
         import pytz
         from datetime import datetime
         tz = pytz.timezone('America/Caracas')
@@ -211,7 +175,7 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                 FROM apariciones WHERE fecha_anterior IS NOT NULL
             ),
             ciclos AS (
-                SELECT animalito, AVG(gap_dias) AS ciclo_prom, COUNT(*) AS n
+                SELECT animalito, AVG(gap_dias) AS ciclo_prom
                 FROM gaps GROUP BY animalito HAVING COUNT(*) >= 3
             ),
             ultima AS (
@@ -219,19 +183,14 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                 FROM historico WHERE hora = :hora GROUP BY animalito
             )
             SELECT u.animalito, u.dias_ausente,
-                ROUND(c.ciclo_prom::numeric,1) as ciclo,
-                ROUND((u.dias_ausente / NULLIF(c.ciclo_prom,0)*100)::numeric,1) as deuda_pct
+                ROUND(c.ciclo_prom::numeric,1),
+                ROUND((u.dias_ausente/NULLIF(c.ciclo_prom,0)*100)::numeric,1)
             FROM ultima u JOIN ciclos c ON u.animalito = c.animalito
-            ORDER BY deuda_pct DESC LIMIT 5
+            ORDER BY 4 DESC LIMIT 5
         """), {"hora": hora_actual})
-        top_deuda = []
-        for r in res_deuda.fetchall():
-            top_deuda.append({
-                "animal": r[0],
-                "dias_ausente": int(r[1]),
-                "ciclo_prom": float(r[2]),
-                "deuda_pct": float(r[3])
-            })
+        top_deuda = [{"animal": r[0], "dias_ausente": int(r[1]),
+                      "ciclo_prom": float(r[2]), "deuda_pct": float(r[3])}
+                     for r in res_deuda.fetchall()]
 
         return {
             "estado": "✅ SISTEMA ACTIVO",
@@ -270,9 +229,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         return {"estado": f"❌ ERROR: {str(e)}"}
 
 
-# ══════════════════════════════════════════════
-# HEALTH
-# ══════════════════════════════════════════════
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "LOTTOAI PRO V6"}
