@@ -44,17 +44,29 @@ MAPA_ANIMALES = {
 NUMERO_POR_ANIMAL = {v: k for k, v in MAPA_ANIMALES.items()}
 
 HORAS_PREMIUM = {
-    "11:00 AM": 1.15, "12:00 PM": 1.10, "06:00 PM": 1.08,
-    "03:00 PM": 1.05, "02:00 PM": 1.05,
+    "11:00 AM": 1.15,  # 3.11% efectividad real — mejor hora
+    "12:00 PM": 1.10,  # 2.85% efectividad real
+    "06:00 PM": 1.08,  # 2.67% efectividad real
+    "02:00 PM": 1.05,  # 2.66% efectividad real
+    "01:00 PM": 1.05,  # 2.60% efectividad real
 }
 HORAS_PENALIZAR = {
-    "04:00 PM": 0.92, "05:00 PM": 0.92, "07:00 PM": 0.92,
+    "08:00 AM": 0.70,  # ⚠️ Solo 429 sorteos históricos — genera falsa confianza alta
+    "04:00 PM": 0.90,  # 2.40% efectividad
+    "05:00 PM": 0.90,  # 2.33% efectividad
+    "07:00 PM": 0.88,  # 2.34% efectividad + pocos datos (1541)
 }
+# Solo horas con datos sólidos (>2000 sorteos) tienen bonus de animal
 ANIMALES_HORA_ESPECIALES = {
-    "08:00 AM": {"jirafa": 1.20, "elefante": 1.15},
-    "06:00 PM": {"jirafa": 1.10},
-    "07:00 PM": {"cebra": 1.10},
-    "01:00 PM": {"lapa": 1.08},
+    "06:00 PM": {"jirafa": 1.10},   # 3.5% hist. real en 06PM
+    "07:00 PM": {"cebra": 1.10},    # 3.5% hist. real en 07PM
+    "01:00 PM": {"lapa": 1.08},     # 3.5% hist. real en 01PM
+}
+# Animales con mejor efectividad global (datos reales 29k sorteos)
+ANIMALES_PREMIUM = {
+    "venado": 1.08,   # 3.7% efectividad global
+    "ciempies": 1.06, # 3.4% efectividad global
+    "caballo": 1.05,  # 3.3% efectividad global
 }
 
 
@@ -79,8 +91,8 @@ async def obtener_pesos_actuales(db) -> dict:
             }
     except Exception:
         pass
-    # Defaults V7 si no hay tabla
-    return {"reciente":0.30,"deuda":0.25,"anti":0.25,"patron":0.10,"secuencia":0.10}
+    # Pesos aprendidos por el motor en generación 2 (mejor resultado hasta ahora)
+    return {"reciente":0.2799,"deuda":0.2811,"anti":0.2253,"patron":0.0919,"secuencia":0.1219}
 
 
 async def guardar_pesos(db, pesos: dict, efectividad: float, total: int, aciertos_n: int, generacion: int):
@@ -233,21 +245,43 @@ def combinar_señales(deuda, reciente, patron, anti, secuencia, hora_str, pesos)
             secuencia.get(animal,{}).get("score",0)* pesos["secuencia"]
         )
         animal_mult = especiales.get(animal.lower(), 1.0)
+        # Bonus adicional para animales con mejor efectividad global
+        animal_mult *= ANIMALES_PREMIUM.get(animal.lower(), 1.0)
         scores[animal] = base * hora_mult * animal_mult
     return scores
 
 
 def calcular_indice_confianza(scores):
+    """
+    V8 recalibrado: más estricto para evitar falsos positivos.
+    El 96% de casos tenía confianza 15-25 con fórmula anterior.
+    Nueva fórmula premia más la separación entre TOP1 y TOP2.
+    """
     if not scores: return 0, "🔴 SIN DATOS"
     valores = sorted(scores.values(), reverse=True)
-    if len(valores)<3: return 20, "🔴 DATOS INSUFICIENTES"
-    top1, top2 = valores[0], valores[1]
+    if len(valores) < 3: return 10, "🔴 DATOS INSUFICIENTES"
+    top1, top2, top3 = valores[0], valores[1], valores[2]
     promedio = sum(valores)/len(valores)
-    separacion = top1-top2
-    dominio = top1/promedio if promedio>0 else 1
-    confianza = min(100, int((separacion*50)+(min(dominio-1,1)*35)+(min(top1,1)*15)))
-    if confianza>=65: return confianza, "🟢 ALTA CONFIANZA — OPERAR"
-    elif confianza>=40: return confianza, "🟡 MEDIA CONFIANZA — OPERAR CON CAUTELA"
+
+    # Separación relativa entre #1 y #2 (normalizada)
+    separacion_rel = (top1 - top2) / top1 if top1 > 0 else 0
+
+    # Dominio del top1 sobre el promedio
+    dominio = top1 / promedio if promedio > 0 else 1
+
+    # Brecha adicional entre #2 y #3 (si #1 se separa del grupo)
+    brecha_grupo = (top2 - top3) / top2 if top2 > 0 else 0
+
+    # Nueva fórmula más selectiva
+    confianza = int(
+        separacion_rel * 60 +      # Peso principal: separación #1 vs #2
+        min(dominio - 1, 1) * 30 + # Dominio sobre promedio
+        brecha_grupo * 10           # Bonus si #2 también se separa de #3
+    )
+    confianza = min(100, max(0, confianza))
+
+    if confianza >= 55: return confianza, "🟢 ALTA CONFIANZA — OPERAR"
+    elif confianza >= 35: return confianza, "🟡 MEDIA CONFIANZA — OPERAR CON CAUTELA"
     else: return confianza, "🔴 BAJA CONFIANZA — NO OPERAR"
 
 
