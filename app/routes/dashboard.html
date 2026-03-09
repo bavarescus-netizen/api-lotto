@@ -46,7 +46,6 @@
             border-bottom: 1px solid var(--border);
             margin-bottom: 16px;
         }
-
         .logo {
             font-family: var(--mono);
             font-size: 20px;
@@ -73,10 +72,37 @@
             border-radius: 50%;
             animation: pulse 1.5s infinite;
         }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* ── TABS ── */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+            gap: 0;
         }
+        .tab-btn {
+            flex: 1;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-dim);
+            font-family: var(--mono);
+            font-size: 9px;
+            letter-spacing: 1px;
+            padding: 8px 4px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            color: var(--blue);
+            border-bottom-color: var(--blue);
+        }
+        .tab-btn:hover:not(.active) { color: var(--text); }
+
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
 
         /* ── MÉTRICAS ROW ── */
         .metrics-row {
@@ -133,7 +159,6 @@
             gap: 8px;
             margin-bottom: 20px;
         }
-
         .pred-card {
             background: var(--card);
             border: 1px solid var(--border);
@@ -158,38 +183,17 @@
         .pred-card.rank-2 { border-color: #2a3a4a; }
         .pred-card.rank-3 { border-color: #1e2830; opacity: 0.85; }
 
-        .pred-num {
-            font-family: var(--mono);
-            font-size: 9px;
-            color: var(--text-dim);
-            margin-bottom: 4px;
-        }
+        .pred-num { font-family: var(--mono); font-size: 9px; color: var(--text-dim); margin-bottom: 4px; }
         .pred-img {
-            width: 48px;
-            height: 48px;
-            object-fit: contain;
+            width: 48px; height: 48px; object-fit: contain;
             filter: drop-shadow(0 2px 4px rgba(0,212,255,0.2));
         }
-        .rank-1 .pred-img {
-            filter: drop-shadow(0 0 8px rgba(0,212,255,0.5));
-        }
-        .pred-name {
-            font-family: var(--mono);
-            font-size: 9px;
-            font-weight: 700;
-            color: white;
-            margin-top: 5px;
-            letter-spacing: 1px;
-        }
-        .pred-pct {
-            font-size: 11px;
-            color: var(--blue);
-            font-weight: 600;
-            margin-top: 2px;
-        }
+        .rank-1 .pred-img { filter: drop-shadow(0 0 8px rgba(0,212,255,0.5)); }
+        .pred-name { font-family: var(--mono); font-size: 9px; font-weight: 700; color: white; margin-top: 5px; letter-spacing: 1px; }
+        .pred-pct { font-size: 11px; color: var(--blue); font-weight: 600; margin-top: 2px; }
         .rank-1 .pred-pct { color: var(--green); }
 
-        /* ── AUDITORÍA ── */
+        /* ── AUDITORÍA — FIXED ── */
         .audit-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -202,6 +206,7 @@
             border-radius: 8px;
             padding: 6px 4px;
             text-align: center;
+            position: relative;
         }
         .audit-item.win {
             border-color: var(--green-dim);
@@ -212,24 +217,49 @@
             background: #150608;
         }
         .audit-item img {
-            width: 28px;
-            height: 28px;
-            object-fit: contain;
+            width: 26px; height: 26px; object-fit: contain;
+            display: block; margin: 2px auto;
         }
+        /* HORA */
         .audit-item .hora-tag {
             font-family: var(--mono);
             font-size: 7px;
             color: var(--text-dim);
             display: block;
-            margin-bottom: 2px;
         }
-        .audit-icon {
-            font-size: 8px;
-            margin-top: 2px;
+        /* FECHA — NUEVA */
+        .audit-item .fecha-tag {
+            font-family: var(--mono);
+            font-size: 6px;
+            color: var(--blue-dim);
             display: block;
+            margin-bottom: 1px;
         }
-        .audit-item.win .audit-icon { color: var(--green); }
-        .audit-item.fail .audit-icon { color: var(--red); }
+        /* NOMBRE ANIMAL — NUEVO */
+        .audit-item .animal-tag {
+            font-family: var(--mono);
+            font-size: 6px;
+            color: var(--text);
+            display: block;
+            margin-top: 1px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 100%;
+        }
+        /* ✓ / ✗ badge — MEJORADO */
+        .audit-badge {
+            position: absolute;
+            top: 3px; right: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .audit-item.win .audit-badge { color: var(--green); }
+        .audit-item.fail .audit-badge { color: var(--red); }
+        .audit-item:not(.win):not(.fail) .audit-badge { color: var(--text-dim); }
 
         /* ── ÚLTIMO RESULTADO ── */
         .ultimo-bar {
@@ -244,12 +274,7 @@
             font-size: 12px;
         }
         .ultimo-bar .label { color: var(--text-dim); font-size: 10px; }
-        .ultimo-bar .value {
-            font-family: var(--mono);
-            color: var(--gold);
-            font-size: 13px;
-            font-weight: 700;
-        }
+        .ultimo-bar .value { font-family: var(--mono); color: var(--gold); font-size: 13px; font-weight: 700; }
 
         /* ── BOTONES ── */
         .btn-row {
@@ -277,20 +302,14 @@
             overflow: hidden;
         }
         .btn:active { transform: scale(0.97); }
-        .btn-train {
-            background: linear-gradient(135deg, #0044aa, #0066ff);
-            border: 1px solid #0055cc;
-        }
-        .btn-stats {
-            background: linear-gradient(135deg, #440099, #7700ff);
-            border: 1px solid #5500aa;
-        }
+        .btn-train { background: linear-gradient(135deg, #0044aa, #0066ff); border: 1px solid #0055cc; }
+        .btn-stats  { background: linear-gradient(135deg, #440099, #7700ff); border: 1px solid #5500aa; }
+        .btn-historial { background: linear-gradient(135deg, #005544, #008866); border: 1px solid #006655; }
         .btn-cargar {
             grid-column: span 2;
             background: linear-gradient(135deg, #004422, #00882a);
             border: 1px solid #006622;
-            padding: 11px;
-            font-size: 11px;
+            padding: 11px; font-size: 11px;
         }
 
         /* ── LOADER ── */
@@ -314,6 +333,144 @@
             color: var(--text-dim);
             text-align: center;
             margin-top: 8px;
+        }
+
+        /* ── HISTORIAL PAGE ── */
+        .historial-filters {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .filter-row { display: flex; gap: 8px; }
+        .filter-input {
+            flex: 1;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .filter-input:focus { border-color: var(--blue-dim); }
+        .filter-select {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 10px;
+            outline: none;
+            min-width: 90px;
+        }
+
+        .hist-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .hs-box {
+            border-radius: 8px;
+            padding: 10px 8px;
+            text-align: center;
+            border: 1px solid;
+        }
+        .hs-box.green { background: #061510; border-color: var(--green-dim); }
+        .hs-box.red   { background: #150608; border-color: var(--red-dim); }
+        .hs-box.blue  { background: #071018; border-color: var(--blue-dim); }
+        .hs-box .hv   { font-family: var(--mono); font-size: 20px; font-weight: 700; }
+        .hs-box.green .hv { color: var(--green); }
+        .hs-box.red .hv   { color: var(--red); }
+        .hs-box.blue .hv  { color: var(--blue); }
+        .hs-box .hl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; margin-top: 3px; }
+
+        .hist-list { max-height: 460px; overflow-y: auto; }
+        .hist-item {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 6px;
+            position: relative;
+        }
+        .hist-item.win  { background: #061510; border-color: var(--green-dim); border-left: 3px solid var(--green); }
+        .hist-item.fail { background: #150608; border-color: var(--red-dim);   border-left: 3px solid var(--red); }
+
+        .hist-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .hist-fecha { font-family: var(--mono); font-size: 9px; color: var(--blue); }
+        .hist-hora  { font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
+        .hist-conf  { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-left: auto; }
+        .hist-badge {
+            font-family: var(--mono);
+            font-size: 8px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
+        .hist-item.win  .hist-badge { background: #0a2a18; color: var(--green); border: 1px solid var(--green-dim); }
+        .hist-item.fail .hist-badge { background: #2a0a10; color: var(--red);   border: 1px solid var(--red-dim); }
+
+        .hist-body {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .hist-preds {
+            display: flex;
+            gap: 4px;
+            flex: 1;
+        }
+        .hist-pred-chip {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 3px 6px;
+            border-radius: 5px;
+            background: var(--card2);
+            border: 1px solid var(--border);
+            font-family: var(--mono);
+            font-size: 8px;
+            color: var(--text);
+        }
+        .hist-pred-chip.match {
+            background: #0a2a18;
+            border-color: var(--green-dim);
+            color: var(--green);
+        }
+        .hist-arrow { color: var(--text-dim); font-size: 10px; padding: 0 2px; }
+        .hist-result {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: #1a1200;
+            border: 1px solid #3a2a00;
+            font-family: var(--mono);
+            font-size: 9px;
+            color: var(--gold);
+            font-weight: 700;
+        }
+        .hist-result img {
+            width: 20px; height: 20px; object-fit: contain;
+        }
+
+        .hist-empty {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-dim);
+            font-family: var(--mono);
+            font-size: 11px;
         }
 
         /* ── MODAL STATS ── */
@@ -342,18 +499,9 @@
             align-items: center;
             margin-bottom: 14px;
         }
-        .modal-title {
-            font-family: var(--mono);
-            font-size: 13px;
-            color: var(--blue);
-        }
-        .btn-close {
-            background: none;
-            border: none;
-            color: var(--text-dim);
-            font-size: 18px;
-            cursor: pointer;
-        }
+        .modal-title { font-family: var(--mono); font-size: 13px; color: var(--blue); }
+        .btn-close { background: none; border: none; color: var(--text-dim); font-size: 18px; cursor: pointer; }
+
         .stats-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -367,18 +515,9 @@
             padding: 10px;
             text-align: center;
         }
-        .stat-item .sv {
-            font-family: var(--mono);
-            font-size: 20px;
-            color: var(--blue);
-            font-weight: 700;
-        }
-        .stat-item .sl {
-            font-size: 9px;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            margin-top: 2px;
-        }
+        .stat-item .sv { font-family: var(--mono); font-size: 20px; color: var(--blue); font-weight: 700; }
+        .stat-item .sl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; margin-top: 2px; }
+
         .bitacora-list { margin-top: 10px; }
         .bit-item {
             display: flex;
@@ -390,14 +529,15 @@
             background: var(--card2);
             font-size: 11px;
         }
-        .bit-item.win { background: #061510; border-left: 3px solid var(--green); }
+        .bit-item.win  { background: #061510; border-left: 3px solid var(--green); }
         .bit-item.fail { background: #150608; border-left: 3px solid var(--red); }
         .bit-item.pending { border-left: 3px solid var(--text-dim); }
-        .bit-hora { font-family: var(--mono); font-size: 10px; color: var(--text-dim); width: 60px; }
+
+        .bit-hora    { font-family: var(--mono); font-size: 10px; color: var(--text-dim); width: 60px; }
         .bit-animals { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; }
-        .bit-animal { font-family: var(--mono); font-size: 10px; }
-        .bit-arrow { color: var(--text-dim); font-size: 10px; }
-        .bit-result { font-size: 12px; }
+        .bit-animal  { font-family: var(--mono); font-size: 10px; }
+        .bit-arrow   { color: var(--text-dim); font-size: 10px; }
+        .bit-result  { font-size: 12px; }
     </style>
 </head>
 <body>
@@ -407,7 +547,7 @@
         <div class="logo">LOTTO<span>AI</span> PRO</div>
         <div class="live-badge">
             <div class="live-dot"></div>
-            V5 LIVE
+            V8 LIVE
         </div>
     </div>
 
@@ -427,73 +567,137 @@
         </div>
     </div>
 
-    <!-- ÚLTIMO RESULTADO -->
-    <div class="ultimo-bar">
-        <span class="label">ÚLTIMO RESULTADO</span>
-        <span class="value">{{ ultimo_resultado | upper }}</span>
-    </div>
-
-    <!-- PREDICCIONES -->
-    <div class="section-label">
-        <i class="fas fa-brain" style="color: var(--blue); font-size: 10px;"></i>
-        PRÓXIMO SORTEO — TOP 3
-    </div>
-    <div class="predictions-grid">
-        {% for a in top3 %}
-        <div class="pred-card rank-{{ loop.index }}">
-            <div class="pred-num">#{{ a.numero }}</div>
-            <img class="pred-img" src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}"
-                 onerror="this.src='/imagenes/pendiente.png'">
-            <div class="pred-name">{{ a.animal }}</div>
-            <div class="pred-pct">{{ a.porcentaje }}</div>
-        </div>
-        {% endfor %}
-        {% if not top3 %}
-        <div class="pred-card" style="grid-column: span 3; padding: 20px; color: var(--text-dim); font-size: 11px;">
-            Sin datos suficientes. Entrena el motor primero.
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- AUDITORÍA -->
-    <div class="section-label">
-        <i class="fas fa-history" style="color: var(--text-dim); font-size: 10px;"></i>
-        AUDITORÍA — ÚLTIMOS 12
-    </div>
-    <div class="audit-grid">
-        {% for item in ultimos_db %}
-        <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}">
-            <small class="hora-tag">{{ item.hora[:5] }}</small>
-            <img src="/imagenes/{{ item.img }}" alt="{{ item.animal }}"
-                 onerror="this.src='/imagenes/pendiente.png'">
-            <span class="audit-icon">
-                {% if item.acierto == True %}✓{% elif item.acierto == False %}✗{% else %}·{% endif %}
-            </span>
-        </div>
-        {% endfor %}
-    </div>
-
-    <!-- BOTONES -->
-    <div class="btn-row">
-        <button class="btn btn-train" onclick="runTask('/procesar', 'Entrenando Motor V5...')">
-            <i class="fas fa-brain"></i> ENTRENAR
+    <!-- TABS -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('dashboard', this)">
+            <i class="fas fa-home"></i> Dashboard
         </button>
-        <button class="btn btn-stats" onclick="loadStats()">
-            <i class="fas fa-chart-line"></i> STATS
-        </button>
-        <button class="btn btn-cargar" onclick="runTask('/cargar-ultimo', 'Capturando resultado...')">
-            <i class="fas fa-download"></i> CAPTURAR ÚLTIMO SORTEO
+        <button class="tab-btn" onclick="switchTab('historial', this)">
+            <i class="fas fa-chart-bar"></i> Historial
         </button>
     </div>
 
-    <div id="loader">
-        <i class="fas fa-circle-notch fa-spin"></i> <span id="loader-msg">Procesando...</span>
-    </div>
+    <!-- ══════════ TAB: DASHBOARD ══════════ -->
+    <div id="tab-dashboard" class="tab-pane active">
 
-    <!-- ANÁLISIS BAR -->
-    <div class="analisis-bar">{{ analisis }}</div>
+        <!-- ÚLTIMO RESULTADO -->
+        <div class="ultimo-bar">
+            <span class="label">ÚLTIMO RESULTADO</span>
+            <span class="value">{{ ultimo_resultado | upper }}</span>
+        </div>
 
-    <!-- MODAL STATS -->
+        <!-- PREDICCIONES -->
+        <div class="section-label">
+            <i class="fas fa-brain" style="color: var(--blue); font-size: 10px;"></i>
+            PRÓXIMO SORTEO — TOP 3
+        </div>
+        <div class="predictions-grid">
+            {% for a in top3 %}
+            <div class="pred-card rank-{{ loop.index }}">
+                <div class="pred-num">#{{ a.numero }}</div>
+                <img class="pred-img" src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}"
+                     onerror="this.src='/imagenes/pendiente.png'">
+                <div class="pred-name">{{ a.animal }}</div>
+                <div class="pred-pct">{{ a.porcentaje }}</div>
+            </div>
+            {% endfor %}
+            {% if not top3 %}
+            <div class="pred-card" style="grid-column: span 3; padding: 20px; color: var(--text-dim); font-size: 11px;">
+                Sin datos suficientes. Entrena el motor primero.
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- AUDITORÍA — FIXED: ahora muestra fecha + nombre + ✓/✗ -->
+        <div class="section-label">
+            <i class="fas fa-history" style="color: var(--text-dim); font-size: 10px;"></i>
+            AUDITORÍA — ÚLTIMOS 12
+        </div>
+        <div class="audit-grid">
+            {% for item in ultimos_db %}
+            <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}">
+
+                <!-- ✓ / ✗ badge arriba derecha -->
+                <span class="audit-badge">
+                    {% if item.acierto == True %}✓{% elif item.acierto == False %}✗{% else %}·{% endif %}
+                </span>
+
+                <!-- Fecha (nueva) -->
+                <small class="fecha-tag">{{ item.fecha if item.fecha else '—' }}</small>
+
+                <!-- Hora -->
+                <small class="hora-tag">{{ item.hora[:5] if item.hora else '—' }}</small>
+
+                <!-- Imagen animal -->
+                <img src="/imagenes/{{ item.img }}" alt="{{ item.animal }}"
+                     onerror="this.src='/imagenes/pendiente.png'">
+
+                <!-- Nombre animal (nuevo) -->
+                <span class="animal-tag">{{ item.animal | upper if item.animal else '?' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- BOTONES -->
+        <div class="btn-row">
+            <button class="btn btn-train" onclick="runTask('/procesar', 'Entrenando Motor V8...')">
+                <i class="fas fa-brain"></i> ENTRENAR
+            </button>
+            <button class="btn btn-stats" onclick="loadStats()">
+                <i class="fas fa-chart-line"></i> STATS
+            </button>
+            <button class="btn btn-cargar" onclick="runTask('/cargar-ultimo', 'Capturando resultado...')">
+                <i class="fas fa-download"></i> CAPTURAR ÚLTIMO SORTEO
+            </button>
+        </div>
+
+        <div id="loader">
+            <i class="fas fa-circle-notch fa-spin"></i> <span id="loader-msg">Procesando...</span>
+        </div>
+
+        <!-- ANÁLISIS BAR -->
+        <div class="analisis-bar">{{ analisis }}</div>
+
+    </div><!-- /tab-dashboard -->
+
+    <!-- ══════════ TAB: HISTORIAL ══════════ -->
+    <div id="tab-historial" class="tab-pane">
+
+        <!-- Resumen stats -->
+        <div class="hist-summary" id="hist-summary">
+            <div class="hs-box green"><div class="hv" id="hs-aciertos">—</div><div class="hl">Aciertos</div></div>
+            <div class="hs-box red">  <div class="hv" id="hs-fallos">—</div>  <div class="hl">Fallos</div></div>
+            <div class="hs-box blue"> <div class="hv" id="hs-efectividad">—</div><div class="hl">Efectiv.</div></div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="historial-filters">
+            <div class="filter-row">
+                <input type="date" id="f-fecha" class="filter-input" placeholder="Fecha" oninput="applyFilters()">
+                <select id="f-resultado" class="filter-select" onchange="applyFilters()">
+                    <option value="all">Todos</option>
+                    <option value="win">✓ Aciertos</option>
+                    <option value="fail">✗ Fallos</option>
+                </select>
+            </div>
+            <input type="text" id="f-animal" class="filter-input"
+                   placeholder="🔍 Buscar animal (predicho o resultado)..."
+                   oninput="applyFilters()">
+        </div>
+
+        <!-- Lista de predicciones -->
+        <div class="hist-list" id="hist-list">
+            <div class="hist-empty">
+                <i class="fas fa-circle-notch fa-spin" style="color: var(--blue); font-size: 20px;"></i>
+                <br><br>Cargando historial...
+            </div>
+        </div>
+
+        <div id="hist-footer" style="text-align:center; font-family: var(--mono); font-size: 9px; color: var(--text-dim); margin-top: 8px;"></div>
+
+    </div><!-- /tab-historial -->
+
+    <!-- ── MODAL STATS ── -->
     <div class="modal-overlay" id="statsModal">
         <div class="modal">
             <div class="modal-header">
@@ -501,94 +705,176 @@
                 <button class="btn-close" onclick="closeStats()">✕</button>
             </div>
             <div id="stats-content">
-                <div style="text-align:center; color: var(--text-dim); padding: 20px; font-size: 12px;">
-                    Cargando...
-                </div>
+                <div style="text-align:center; color: var(--text-dim); padding: 20px; font-size: 12px;">Cargando...</div>
             </div>
         </div>
     </div>
 
     <script>
-        async function runTask(url, msg) {
-            const loader = document.getElementById('loader');
-            const loaderMsg = document.getElementById('loader-msg');
-            loader.style.display = 'block';
-            loaderMsg.textContent = msg;
+    // ── TAB SWITCHER ──────────────────────────────────────────
+    function switchTab(name, btn) {
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+        if (name === 'historial') loadHistorial();
+    }
 
-            try {
-                const res = await fetch(url);
-                const data = await res.json();
-                alert(data.message || '✅ Completado');
-                if (url === '/procesar') location.reload();
-            } catch (e) {
-                alert('⚠️ Error de conexión');
-            } finally {
-                loader.style.display = 'none';
+    // ── RUN TASK ──────────────────────────────────────────────
+    async function runTask(url, msg) {
+        const loader = document.getElementById('loader');
+        const loaderMsg = document.getElementById('loader-msg');
+        loader.style.display = 'block';
+        loaderMsg.textContent = msg;
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            alert(data.message || '✅ Completado');
+            if (url === '/procesar') location.reload();
+        } catch (e) {
+            alert('⚠️ Error de conexión');
+        } finally {
+            loader.style.display = 'none';
+        }
+    }
+
+    // ── STATS MODAL ───────────────────────────────────────────
+    async function loadStats() {
+        document.getElementById('statsModal').classList.add('active');
+        document.getElementById('stats-content').innerHTML =
+            '<div style="text-align:center; padding:20px; color:#5a7080; font-size:11px; font-family:monospace;">Cargando estadísticas...</div>';
+        try {
+            const res = await fetch('/stats');
+            const data = await res.json();
+            const s = data.stats;
+            const bitacora = data.bitacora_hoy || [];
+            let bitHtml = bitacora.map(b => {
+                const cls  = b.acierto === true ? 'win' : b.acierto === false ? 'fail' : 'pending';
+                const icon = b.acierto === true ? '✓'  : b.acierto === false ? '✗'   : '·';
+                return `
+                    <div class="bit-item ${cls}">
+                        <span class="bit-hora">${b.hora || '--'}</span>
+                        <div class="bit-animals">
+                            <span class="bit-animal">${b.animal_predicho || '?'}</span>
+                            <span class="bit-arrow">→</span>
+                            <span class="bit-animal">${b.resultado_real || '?'}</span>
+                        </div>
+                        <span class="bit-result">${icon}</span>
+                    </div>`;
+            }).join('');
+            document.getElementById('stats-content').innerHTML = `
+                <div class="stats-grid">
+                    <div class="stat-item"><div class="sv" style="color:var(--gold)">${s.efectividad_global || 0}%</div><div class="sl">Efectividad</div></div>
+                    <div class="stat-item"><div class="sv" style="color:var(--green)">${s.aciertos_hoy || 0}/${s.sorteos_hoy || 0}</div><div class="sl">Hoy</div></div>
+                    <div class="stat-item"><div class="sv">${(s.total_historico || 0).toLocaleString()}</div><div class="sl">Históricos</div></div>
+                    <div class="stat-item"><div class="sv">${s.aciertos_total || 0}</div><div class="sl">Aciertos totales</div></div>
+                </div>
+                <div class="section-label" style="margin:12px 0 8px;">BITÁCORA HOY</div>
+                <div class="bitacora-list">${bitHtml || '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:10px;">Sin sorteos hoy aún</div>'}</div>`;
+        } catch (e) {
+            document.getElementById('stats-content').innerHTML =
+                '<div style="color:var(--red);font-size:11px;padding:10px;">Error al cargar estadísticas</div>';
+        }
+    }
+    function closeStats() {
+        document.getElementById('statsModal').classList.remove('active');
+    }
+    document.getElementById('statsModal').addEventListener('click', function(e) {
+        if (e.target === this) closeStats();
+    });
+
+    // ── HISTORIAL ─────────────────────────────────────────────
+    let _histData = [];
+    let _histLoaded = false;
+
+    async function loadHistorial() {
+        if (_histLoaded) { applyFilters(); return; }
+        document.getElementById('hist-list').innerHTML =
+            '<div class="hist-empty"><i class="fas fa-circle-notch fa-spin" style="color:var(--blue);font-size:20px;"></i><br><br>Cargando historial...</div>';
+        try {
+            const res = await fetch('/historial');
+            const data = await res.json();
+            _histData = data.predicciones || [];
+            _histLoaded = true;
+            applyFilters();
+        } catch (e) {
+            document.getElementById('hist-list').innerHTML =
+                '<div class="hist-empty" style="color:var(--red);">Error al cargar. Verifica que /historial esté disponible.</div>';
+        }
+    }
+
+    function applyFilters() {
+        const fFecha    = document.getElementById('f-fecha').value;
+        const fAnimal   = document.getElementById('f-animal').value.trim().toLowerCase();
+        const fRes      = document.getElementById('f-resultado').value;
+
+        let filtered = _histData.filter(p => {
+            if (fFecha && !p.fecha.startsWith(fFecha)) return false;
+            if (fAnimal) {
+                const haystack = [p.pred1, p.pred2, p.pred3, p.resultado].join(' ').toLowerCase();
+                if (!haystack.includes(fAnimal)) return false;
             }
-        }
-
-        async function loadStats() {
-            document.getElementById('statsModal').classList.add('active');
-            document.getElementById('stats-content').innerHTML = '<div style="text-align:center; padding:20px; color: #5a7080; font-size:11px; font-family: monospace;">Cargando estadísticas...</div>';
-
-            try {
-                const res = await fetch('/stats');
-                const data = await res.json();
-                const s = data.stats;
-                const bitacora = data.bitacora_hoy || [];
-
-                let bitHtml = bitacora.map(b => {
-                    const cls = b.acierto === true ? 'win' : b.acierto === false ? 'fail' : 'pending';
-                    const icon = b.acierto === true ? '✓' : b.acierto === false ? '✗' : '·';
-                    return `
-                        <div class="bit-item ${cls}">
-                            <span class="bit-hora">${b.hora || '--'}</span>
-                            <div class="bit-animals">
-                                <span class="bit-animal">${b.animal_predicho || '?'}</span>
-                                <span class="bit-arrow">→</span>
-                                <span class="bit-animal">${b.resultado_real || '?'}</span>
-                            </div>
-                            <span class="bit-result">${icon}</span>
-                        </div>`;
-                }).join('');
-
-                document.getElementById('stats-content').innerHTML = `
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="sv" style="color: var(--gold)">${s.efectividad_global || 0}%</div>
-                            <div class="sl">Efectividad</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="sv" style="color: var(--green)">${s.aciertos_hoy || 0}/${s.sorteos_hoy || 0}</div>
-                            <div class="sl">Hoy</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="sv">${(s.total_historico || 0).toLocaleString()}</div>
-                            <div class="sl">Históricos</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="sv">${s.aciertos_total || 0}</div>
-                            <div class="sl">Aciertos totales</div>
-                        </div>
-                    </div>
-                    <div class="section-label" style="margin: 12px 0 8px;">
-                        BITÁCORA HOY
-                    </div>
-                    <div class="bitacora-list">${bitHtml || '<div style="color: var(--text-dim); font-size: 11px; text-align: center; padding: 10px;">Sin sorteos hoy aún</div>'}</div>
-                `;
-            } catch (e) {
-                document.getElementById('stats-content').innerHTML = '<div style="color: var(--red); font-size: 11px; padding: 10px;">Error al cargar estadísticas</div>';
-            }
-        }
-
-        function closeStats() {
-            document.getElementById('statsModal').classList.remove('active');
-        }
-
-        // Cerrar modal al tocar fuera
-        document.getElementById('statsModal').addEventListener('click', function(e) {
-            if (e.target === this) closeStats();
+            if (fRes === 'win'  && !p.acierto) return false;
+            if (fRes === 'fail' &&  p.acierto) return false;
+            return true;
         });
+
+        const total    = filtered.length;
+        const aciertos = filtered.filter(p => p.acierto).length;
+        const fallos   = total - aciertos;
+        const efectiv  = total > 0 ? ((aciertos / total) * 100).toFixed(1) + '%' : '—';
+
+        document.getElementById('hs-aciertos').textContent    = aciertos;
+        document.getElementById('hs-fallos').textContent      = fallos;
+        document.getElementById('hs-efectividad').textContent = efectiv;
+
+        if (filtered.length === 0) {
+            document.getElementById('hist-list').innerHTML =
+                '<div class="hist-empty">🔍<br><br>No hay registros para este filtro</div>';
+            document.getElementById('hist-footer').textContent = '';
+            return;
+        }
+
+        const html = filtered.slice(0, 150).map(p => {
+            const cls = p.acierto ? 'win' : 'fail';
+            const badge = p.acierto
+                ? '<span class="hist-badge">✓ ACIERTO</span>'
+                : '<span class="hist-badge">✗ FALLO</span>';
+
+            // top-3 chips — la que coincide con resultado se marca
+            const chips = [p.pred1, p.pred2, p.pred3].map(a => {
+                const match = a && p.resultado && a.toLowerCase() === p.resultado.toLowerCase();
+                return `<span class="hist-pred-chip ${match ? 'match' : ''}">
+                    <img src="/imagenes/${a}.png" style="width:12px;height:12px;object-fit:contain"
+                         onerror="this.style.display='none'">
+                    ${(a || '?').toUpperCase()}
+                </span>`;
+            }).join('');
+
+            return `
+            <div class="hist-item ${cls}">
+                <div class="hist-meta">
+                    <span class="hist-fecha">${p.fecha || '—'}</span>
+                    <span class="hist-hora">${(p.hora || '—').substring(0,5)}</span>
+                    ${badge}
+                    <span class="hist-conf">Conf: ${p.confianza || '—'}%</span>
+                </div>
+                <div class="hist-body">
+                    <div class="hist-preds">${chips}</div>
+                    <span class="hist-arrow">→</span>
+                    <div class="hist-result">
+                        <img src="/imagenes/${p.resultado}.png"
+                             onerror="this.style.display='none'">
+                        ${(p.resultado || '?').toUpperCase()}
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        document.getElementById('hist-list').innerHTML = html;
+        document.getElementById('hist-footer').textContent =
+            `Mostrando ${Math.min(filtered.length, 150)} de ${filtered.length} registros · Motor V8 RL`;
+    }
     </script>
 </body>
 </html>
