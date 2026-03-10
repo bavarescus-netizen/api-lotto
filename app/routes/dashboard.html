@@ -1,880 +1,1045 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-    <title>LOTTOAI PRO</title>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #080c10;
-            --card: #0e1318;
-            --card2: #131920;
-            --blue: #00d4ff;
-            --blue-dim: #0099bb;
-            --green: #00ff88;
-            --green-dim: #00994d;
-            --red: #ff4455;
-            --red-dim: #992233;
-            --gold: #ffd700;
-            --border: #1e2830;
-            --text: #c8d8e8;
-            --text-dim: #5a7080;
-            --mono: 'Space Mono', monospace;
-            --sans: 'Inter', sans-serif;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOTTOAI PRO V10</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #07080d;
+  --panel:    #0d0f17;
+  --border:   #1a1d2e;
+  --border2:  #232640;
+  --g:        #00e87a;
+  --g2:       rgba(0,232,122,0.08);
+  --r:        #ff3355;
+  --r2:       rgba(255,51,85,0.08);
+  --y:        #ffc233;
+  --y2:       rgba(255,194,51,0.08);
+  --b:        #38b6ff;
+  --b2:       rgba(56,182,255,0.08);
+  --p:        #a855f7;
+  --text:     #dde1f5;
+  --muted:    #4a4f6e;
+  --mono:     'IBM Plex Mono', monospace;
+  --display:  'Bebas Neue', sans-serif;
+  --body:     'DM Sans', sans-serif;
+}
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
 
-        body {
-            font-family: var(--sans);
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            padding: 12px;
-            max-width: 480px;
-            margin: 0 auto;
-        }
+/* scanline overlay */
+body::after {
+  content:'';
+  position:fixed; inset:0; z-index:999; pointer-events:none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.06) 2px, rgba(0,0,0,.06) 4px);
+}
 
-        /* ── HEADER ── */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0 14px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 16px;
-        }
-        .logo {
-            font-family: var(--mono);
-            font-size: 20px;
-            letter-spacing: 2px;
-            color: white;
-        }
-        .logo span { color: var(--blue); }
+/* ── LAYOUT ── */
+.app { display:flex; flex-direction:column; min-height:100vh; }
 
-        .live-badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: #0a1a12;
-            border: 1px solid var(--green-dim);
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-family: var(--mono);
-            font-size: 10px;
-            color: var(--green);
-        }
-        .live-dot {
-            width: 6px; height: 6px;
-            background: var(--green);
-            border-radius: 50%;
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+/* ── TOPBAR ── */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 28px; height:54px;
+  border-bottom:1px solid var(--border);
+  background: rgba(13,15,23,.95);
+  backdrop-filter:blur(12px);
+  position:sticky; top:0; z-index:100;
+}
+.topbar-logo {
+  font-family:var(--display); font-size:22px; letter-spacing:3px;
+  color:var(--g); display:flex; align-items:center; gap:10px;
+}
+.topbar-logo span { color:var(--text); }
+.topbar-pulse {
+  width:8px; height:8px; border-radius:50%; background:var(--g);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100%{ box-shadow:0 0 0 0 rgba(0,232,122,.5); }
+  50%{ box-shadow:0 0 0 6px rgba(0,232,122,0); }
+}
+.topbar-info {
+  font-family:var(--mono); font-size:11px; color:var(--muted);
+  display:flex; gap:20px; align-items:center;
+}
+.topbar-info b { color:var(--text); }
 
-        /* ── TABS ── */
-        .tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 16px;
-            gap: 0;
-        }
-        .tab-btn {
-            flex: 1;
-            background: none;
-            border: none;
-            border-bottom: 2px solid transparent;
-            color: var(--text-dim);
-            font-family: var(--mono);
-            font-size: 9px;
-            letter-spacing: 1px;
-            padding: 8px 4px;
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: all 0.2s;
-        }
-        .tab-btn.active {
-            color: var(--blue);
-            border-bottom-color: var(--blue);
-        }
-        .tab-btn:hover:not(.active) { color: var(--text); }
+/* ── NAV TABS ── */
+.tabs {
+  display:flex; gap:2px; padding:16px 28px 0;
+  border-bottom:1px solid var(--border);
+  background: var(--panel);
+}
+.tab {
+  font-family:var(--mono); font-size:11px; letter-spacing:1.5px;
+  text-transform:uppercase; padding:10px 20px;
+  border:1px solid transparent; border-bottom:none;
+  cursor:pointer; color:var(--muted);
+  border-radius:4px 4px 0 0;
+  transition: all .15s;
+}
+.tab:hover { color:var(--text); background:rgba(255,255,255,.03); }
+.tab.active {
+  color:var(--g); border-color:var(--border2);
+  background:var(--bg);
+  border-bottom:2px solid var(--bg);
+  margin-bottom:-1px;
+}
 
-        .tab-pane { display: none; }
-        .tab-pane.active { display: block; }
+/* ── MAIN ── */
+.main { flex:1; padding:28px; max-width:1400px; margin:0 auto; width:100%; }
+.page { display:none; }
+.page.active { display:block; }
 
-        /* ── MÉTRICAS ROW ── */
-        .metrics-row {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-        .metric-box {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 8px;
-            text-align: center;
-        }
-        .metric-box .val {
-            font-family: var(--mono);
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--blue);
-        }
-        .metric-box .val.green { color: var(--green); }
-        .metric-box .val.gold { color: var(--gold); }
-        .metric-box .lbl {
-            font-size: 9px;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-top: 3px;
-        }
+/* ── GRID HELPERS ── */
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.g3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.g4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+.g12 { display:grid; grid-template-columns:1fr 2fr; gap:16px; }
+.g21 { display:grid; grid-template-columns:2fr 1fr; gap:16px; }
+@media(max-width:900px){ .g2,.g3,.g4,.g12,.g21{ grid-template-columns:1fr; } }
 
-        /* ── SECCIÓN TÍTULO ── */
-        .section-label {
-            font-size: 10px;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .section-label::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--border);
-        }
+/* ── CARDS ── */
+.card {
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:6px; padding:20px; position:relative; overflow:hidden;
+  transition: border-color .2s, transform .15s;
+}
+.card:hover { border-color:var(--border2); }
+.card-accent { position:absolute; top:0; left:0; right:0; height:2px; }
 
-        /* ── PREDICCIONES TOP 3 ── */
-        .predictions-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 20px;
-        }
-        .pred-card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px 8px;
-            text-align: center;
-            transition: transform 0.2s;
-            position: relative;
-            overflow: hidden;
-        }
-        .pred-card.rank-1 {
-            border-color: var(--blue);
-            background: linear-gradient(135deg, #0a1520 0%, #0d1e2e 100%);
-        }
-        .pred-card.rank-1::before {
-            content: '★';
-            position: absolute;
-            top: 4px; right: 6px;
-            font-size: 8px;
-            color: var(--gold);
-        }
-        .pred-card.rank-2 { border-color: #2a3a4a; }
-        .pred-card.rank-3 { border-color: #1e2830; opacity: 0.85; }
+/* ── KPI ── */
+.kpi-num {
+  font-family:var(--display); font-size:48px; line-height:1;
+  letter-spacing:2px;
+}
+.kpi-label {
+  font-family:var(--mono); font-size:10px; letter-spacing:2px;
+  color:var(--muted); text-transform:uppercase; margin-top:8px;
+}
+.kpi-sub { font-size:12px; color:var(--muted); margin-top:6px; line-height:1.4; }
 
-        .pred-num { font-family: var(--mono); font-size: 9px; color: var(--text-dim); margin-bottom: 4px; }
-        .pred-img {
-            width: 48px; height: 48px; object-fit: contain;
-            filter: drop-shadow(0 2px 4px rgba(0,212,255,0.2));
-        }
-        .rank-1 .pred-img { filter: drop-shadow(0 0 8px rgba(0,212,255,0.5)); }
-        .pred-name { font-family: var(--mono); font-size: 9px; font-weight: 700; color: white; margin-top: 5px; letter-spacing: 1px; }
-        .pred-pct { font-size: 11px; color: var(--blue); font-weight: 600; margin-top: 2px; }
-        .rank-1 .pred-pct { color: var(--green); }
+/* ── SECTION HEADER ── */
+.sh {
+  font-family:var(--mono); font-size:10px; letter-spacing:3px;
+  color:var(--muted); text-transform:uppercase;
+  display:flex; align-items:center; gap:12px; margin-bottom:14px;
+}
+.sh::after { content:''; flex:1; height:1px; background:var(--border); }
 
-        /* ── AUDITORÍA — FIXED ── */
-        .audit-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 6px;
-            margin-bottom: 20px;
-        }
-        .audit-item {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 6px 4px;
-            text-align: center;
-            position: relative;
-        }
-        .audit-item.win {
-            border-color: var(--green-dim);
-            background: #061510;
-        }
-        .audit-item.fail {
-            border-color: var(--red-dim);
-            background: #150608;
-        }
-        .audit-item img {
-            width: 26px; height: 26px; object-fit: contain;
-            display: block; margin: 2px auto;
-        }
-        /* HORA */
-        .audit-item .hora-tag {
-            font-family: var(--mono);
-            font-size: 7px;
-            color: var(--text-dim);
-            display: block;
-        }
-        /* FECHA — NUEVA */
-        .audit-item .fecha-tag {
-            font-family: var(--mono);
-            font-size: 6px;
-            color: var(--blue-dim);
-            display: block;
-            margin-bottom: 1px;
-        }
-        /* NOMBRE ANIMAL — NUEVO */
-        .audit-item .animal-tag {
-            font-family: var(--mono);
-            font-size: 6px;
-            color: var(--text);
-            display: block;
-            margin-top: 1px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            max-width: 100%;
-        }
-        /* ✓ / ✗ badge — MEJORADO */
-        .audit-badge {
-            position: absolute;
-            top: 3px; right: 4px;
-            font-size: 9px;
-            font-weight: 700;
-            line-height: 1;
-        }
-        .audit-item.win .audit-badge { color: var(--green); }
-        .audit-item.fail .audit-badge { color: var(--red); }
-        .audit-item:not(.win):not(.fail) .audit-badge { color: var(--text-dim); }
+/* ── TABLE ── */
+.tbl-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+thead th {
+  font-family:var(--mono); font-size:9px; letter-spacing:2px;
+  text-transform:uppercase; color:var(--muted);
+  padding:10px 14px; text-align:left; border-bottom:1px solid var(--border);
+  background:rgba(0,0,0,.2);
+}
+tbody td { padding:11px 14px; border-bottom:1px solid rgba(26,29,46,.5); }
+tbody tr:hover td { background:rgba(255,255,255,.02); }
+tbody tr:last-child td { border-bottom:none; }
 
-        /* ── ÚLTIMO RESULTADO ── */
-        .ultimo-bar {
-            background: var(--card2);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 12px;
-        }
-        .ultimo-bar .label { color: var(--text-dim); font-size: 10px; }
-        .ultimo-bar .value { font-family: var(--mono); color: var(--gold); font-size: 13px; font-weight: 700; }
+/* ── BADGE ── */
+.badge {
+  display:inline-flex; align-items:center; gap:5px;
+  font-family:var(--mono); font-size:9px; letter-spacing:1px;
+  padding:3px 8px; border-radius:3px; text-transform:uppercase;
+}
+.badge.g { background:rgba(0,232,122,.12); color:var(--g); border:1px solid rgba(0,232,122,.25); }
+.badge.r { background:rgba(255,51,85,.12); color:var(--r); border:1px solid rgba(255,51,85,.25); }
+.badge.y { background:rgba(255,194,51,.12); color:var(--y); border:1px solid rgba(255,194,51,.25); }
+.badge.b { background:rgba(56,182,255,.12); color:var(--b); border:1px solid rgba(56,182,255,.25); }
+.badge.p { background:rgba(168,85,247,.12); color:var(--p); border:1px solid rgba(168,85,247,.25); }
 
-        /* ── BOTONES ── */
-        .btn-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 12px;
-        }
-        .btn {
-            padding: 13px 10px;
-            border-radius: 8px;
-            border: none;
-            font-weight: 600;
-            font-size: 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            color: white;
-            font-family: var(--mono);
-            letter-spacing: 1px;
-            transition: all 0.2s;
-            position: relative;
-            overflow: hidden;
-        }
-        .btn:active { transform: scale(0.97); }
-        .btn-train { background: linear-gradient(135deg, #0044aa, #0066ff); border: 1px solid #0055cc; }
-        .btn-stats  { background: linear-gradient(135deg, #440099, #7700ff); border: 1px solid #5500aa; }
-        .btn-historial { background: linear-gradient(135deg, #005544, #008866); border: 1px solid #006655; }
-        .btn-cargar {
-            grid-column: span 2;
-            background: linear-gradient(135deg, #004422, #00882a);
-            border: 1px solid #006622;
-            padding: 11px; font-size: 11px;
-        }
+/* ── BAR ── */
+.bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.bar-lbl { font-family:var(--mono); font-size:11px; color:var(--muted); width:80px; flex-shrink:0; text-align:right; }
+.bar-track { flex:1; height:5px; background:var(--border); border-radius:3px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:3px; }
+.bar-val { font-family:var(--mono); font-size:11px; width:42px; flex-shrink:0; }
 
-        /* ── LOADER ── */
-        #loader {
-            display: none;
-            text-align: center;
-            padding: 10px;
-            font-family: var(--mono);
-            font-size: 11px;
-            color: var(--blue);
-        }
+/* ── PREDICCION CARD ── */
+.pred-card {
+  display:grid; grid-template-columns:60px 1fr auto;
+  align-items:center; gap:14px;
+  padding:14px 16px; background:var(--panel);
+  border:1px solid var(--border); border-radius:5px; margin-bottom:8px;
+  transition: border-color .2s;
+}
+.pred-card:hover { border-color:var(--border2); }
+.pred-rank {
+  font-family:var(--display); font-size:36px; line-height:1;
+  color:var(--border2);
+}
+.pred-rank.first { color:var(--g); }
+.pred-rank.second { color:var(--y); }
+.pred-rank.third { color:var(--b); }
+.pred-animal { font-size:17px; font-weight:700; text-transform:uppercase; letter-spacing:1px; }
+.pred-signals { display:flex; gap:6px; margin-top:5px; flex-wrap:wrap; }
+.pred-score {
+  font-family:var(--mono); font-size:20px; font-weight:700;
+  text-align:right;
+}
 
-        /* ── ANÁLISIS FOOTER ── */
-        .analisis-bar {
-            background: #090d11;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-family: var(--mono);
-            font-size: 9px;
-            color: var(--text-dim);
-            text-align: center;
-            margin-top: 8px;
-        }
+/* ── HORA CARD ── */
+.hora-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:12px; }
+.hora-card {
+  padding:16px; background:var(--panel); border:1px solid var(--border);
+  border-radius:5px; cursor:pointer; transition: all .15s;
+  position:relative; overflow:hidden;
+}
+.hora-card:hover { border-color:var(--border2); transform:translateY(-1px); }
+.hora-card.rentable { border-color:rgba(0,232,122,.3); background:rgba(0,232,122,.04); }
+.hora-card.rentable::after {
+  content:'RENTABLE'; position:absolute; top:8px; right:8px;
+  font-family:var(--mono); font-size:8px; letter-spacing:1px;
+  color:var(--g); opacity:.7;
+}
+.hora-card h4 { font-family:var(--display); font-size:24px; letter-spacing:2px; }
+.hora-card .ef { font-family:var(--mono); font-size:13px; margin-top:6px; }
+.hora-card .ef span { font-size:19px; font-weight:700; }
+.hora-card .bar { margin-top:10px; }
 
-        /* ── HISTORIAL PAGE ── */
-        .historial-filters {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-bottom: 14px;
-        }
-        .filter-row { display: flex; gap: 8px; }
-        .filter-input {
-            flex: 1;
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 8px 10px;
-            color: var(--text);
-            font-family: var(--mono);
-            font-size: 10px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .filter-input:focus { border-color: var(--blue-dim); }
-        .filter-select {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 8px 10px;
-            color: var(--text);
-            font-family: var(--mono);
-            font-size: 10px;
-            outline: none;
-            min-width: 90px;
-        }
+/* ── SEÑAL ROW ── */
+.signal-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:10px 14px; border-bottom:1px solid rgba(26,29,46,.4);
+  font-size:13px;
+}
+.signal-row:last-child { border-bottom:none; }
+.signal-name { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.signal-val { font-family:var(--mono); font-size:13px; font-weight:700; }
 
-        .hist-summary {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            margin-bottom: 14px;
-        }
-        .hs-box {
-            border-radius: 8px;
-            padding: 10px 8px;
-            text-align: center;
-            border: 1px solid;
-        }
-        .hs-box.green { background: #061510; border-color: var(--green-dim); }
-        .hs-box.red   { background: #150608; border-color: var(--red-dim); }
-        .hs-box.blue  { background: #071018; border-color: var(--blue-dim); }
-        .hs-box .hv   { font-family: var(--mono); font-size: 20px; font-weight: 700; }
-        .hs-box.green .hv { color: var(--green); }
-        .hs-box.red .hv   { color: var(--red); }
-        .hs-box.blue .hv  { color: var(--blue); }
-        .hs-box .hl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; margin-top: 3px; }
+/* ── AUDITORIA CARD ── */
+.audit-card {
+  display:flex; gap:14px; padding:14px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:5px; margin-bottom:8px; align-items:center;
+}
+.audit-date { font-family:var(--mono); font-size:10px; color:var(--muted); text-align:center; min-width:52px; }
+.audit-animal { font-size:15px; font-weight:700; flex:1; }
+.audit-result { font-family:var(--mono); font-size:12px; color:var(--muted); }
+.audit-icon { font-size:18px; min-width:24px; text-align:center; }
 
-        .hist-list { max-height: 460px; overflow-y: auto; }
-        .hist-item {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 12px;
-            margin-bottom: 6px;
-            position: relative;
-        }
-        .hist-item.win  { background: #061510; border-color: var(--green-dim); border-left: 3px solid var(--green); }
-        .hist-item.fail { background: #150608; border-color: var(--red-dim);   border-left: 3px solid var(--red); }
+/* ── MARKOV MATRIX ── */
+.markov-cell {
+  display:inline-block; width:18px; height:18px; border-radius:2px;
+  vertical-align:middle; margin:1px;
+}
 
-        .hist-meta {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        .hist-fecha { font-family: var(--mono); font-size: 9px; color: var(--blue); }
-        .hist-hora  { font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
-        .hist-conf  { font-family: var(--mono); font-size: 8px; color: var(--text-dim); margin-left: auto; }
-        .hist-badge {
-            font-family: var(--mono);
-            font-size: 8px;
-            font-weight: 700;
-            padding: 2px 6px;
-            border-radius: 10px;
-        }
-        .hist-item.win  .hist-badge { background: #0a2a18; color: var(--green); border: 1px solid var(--green-dim); }
-        .hist-item.fail .hist-badge { background: #2a0a10; color: var(--red);   border: 1px solid var(--red-dim); }
+/* ── LOADER ── */
+.loader {
+  display:flex; align-items:center; justify-content:center;
+  padding:60px; color:var(--muted); font-family:var(--mono); font-size:13px;
+  gap:10px; flex-direction:column;
+}
+.spinner {
+  width:24px; height:24px; border:2px solid var(--border);
+  border-top-color:var(--g); border-radius:50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
 
-        .hist-body {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .hist-preds {
-            display: flex;
-            gap: 4px;
-            flex: 1;
-        }
-        .hist-pred-chip {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            padding: 3px 6px;
-            border-radius: 5px;
-            background: var(--card2);
-            border: 1px solid var(--border);
-            font-family: var(--mono);
-            font-size: 8px;
-            color: var(--text);
-        }
-        .hist-pred-chip.match {
-            background: #0a2a18;
-            border-color: var(--green-dim);
-            color: var(--green);
-        }
-        .hist-arrow { color: var(--text-dim); font-size: 10px; padding: 0 2px; }
-        .hist-result {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 8px;
-            border-radius: 6px;
-            background: #1a1200;
-            border: 1px solid #3a2a00;
-            font-family: var(--mono);
-            font-size: 9px;
-            color: var(--gold);
-            font-weight: 700;
-        }
-        .hist-result img {
-            width: 20px; height: 20px; object-fit: contain;
-        }
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
 
-        .hist-empty {
-            text-align: center;
-            padding: 30px 20px;
-            color: var(--text-dim);
-            font-family: var(--mono);
-            font-size: 11px;
-        }
+/* ── ALERT ── */
+.alert {
+  padding:12px 16px; border-radius:4px; font-size:13px;
+  margin-bottom:16px; display:flex; align-items:flex-start; gap:10px;
+}
+.alert.warn { background:var(--y2); border:1px solid rgba(255,194,51,.2); color:var(--y); }
+.alert.info { background:var(--b2); border:1px solid rgba(56,182,255,.2); color:var(--b); }
+.alert.good { background:var(--g2); border:1px solid rgba(0,232,122,.2); color:var(--g); }
 
-        /* ── MODAL STATS ── */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            z-index: 100;
-            padding: 20px 12px;
-            overflow-y: auto;
-        }
-        .modal-overlay.active { display: block; }
-        .modal {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 16px;
-            max-width: 440px;
-            margin: 0 auto;
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 14px;
-        }
-        .modal-title { font-family: var(--mono); font-size: 13px; color: var(--blue); }
-        .btn-close { background: none; border: none; color: var(--text-dim); font-size: 18px; cursor: pointer; }
+/* ── HEAT MAP COLORS ── */
+.heat-0 { background:rgba(255,51,85,.05); }
+.heat-1 { background:rgba(255,194,51,.10); }
+.heat-2 { background:rgba(0,232,122,.15); }
+.heat-3 { background:rgba(0,232,122,.30); }
+.heat-4 { background:rgba(0,232,122,.50); }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .stat-item {
-            background: var(--card2);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px;
-            text-align: center;
-        }
-        .stat-item .sv { font-family: var(--mono); font-size: 20px; color: var(--blue); font-weight: 700; }
-        .stat-item .sl { font-size: 9px; color: var(--text-dim); text-transform: uppercase; margin-top: 2px; }
-
-        .bitacora-list { margin-top: 10px; }
-        .bit-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 7px 10px;
-            border-radius: 6px;
-            margin-bottom: 4px;
-            background: var(--card2);
-            font-size: 11px;
-        }
-        .bit-item.win  { background: #061510; border-left: 3px solid var(--green); }
-        .bit-item.fail { background: #150608; border-left: 3px solid var(--red); }
-        .bit-item.pending { border-left: 3px solid var(--text-dim); }
-
-        .bit-hora    { font-family: var(--mono); font-size: 10px; color: var(--text-dim); width: 60px; }
-        .bit-animals { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; }
-        .bit-animal  { font-family: var(--mono); font-size: 10px; }
-        .bit-arrow   { color: var(--text-dim); font-size: 10px; }
-        .bit-result  { font-size: 12px; }
-    </style>
+/* ── ANIMATE ── */
+@keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+.anim { animation:fadeIn .3s ease both; }
+.anim-d1 { animation-delay:.05s; }
+.anim-d2 { animation-delay:.10s; }
+.anim-d3 { animation-delay:.15s; }
+.anim-d4 { animation-delay:.20s; }
+</style>
 </head>
 <body>
+<div class="app">
 
-    <!-- HEADER -->
-    <div class="header">
-        <div class="logo">LOTTO<span>AI</span> PRO</div>
-        <div class="live-badge">
-            <div class="live-dot"></div>
-            V8 LIVE
-        </div>
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <div class="topbar-pulse"></div>
+    LOTTOAI<span>PRO</span>&nbsp;V10
+  </div>
+  <div class="topbar-info">
+    <span>MODELO: <b>V10 MARKOV+DECAY</b></span>
+    <span>BD: <b id="topTotalDB">—</b> REG</span>
+    <span>EF.TOP3: <b id="topEfTop3" style="color:var(--g)">—</b></span>
+    <span id="topHora" style="color:var(--g)">—</span>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
+  <div class="tab" onclick="showTab('prediccion')">🎯 Predicción V10</div>
+  <div class="tab" onclick="showTab('horas')">⏱ Rentabilidad Horas</div>
+  <div class="tab" onclick="showTab('markov')">🔗 Markov</div>
+  <div class="tab" onclick="showTab('historial')">📋 Historial</div>
+</div>
+
+<div class="main">
+
+<!-- ═══════════════════════════════════ PAGE: DASHBOARD ════ -->
+<div class="page active" id="page-dashboard">
+
+  <!-- KPIs -->
+  <div class="g4 anim" style="margin-bottom:20px">
+    <div class="card">
+      <div class="card-accent" style="background:var(--g)"></div>
+      <div class="kpi-num" style="color:var(--g)" id="kpiTop3">—%</div>
+      <div class="kpi-label">Efectividad TOP3</div>
+      <div class="kpi-sub" id="kpiTop3Sub">—</div>
     </div>
-
-    <!-- MÉTRICAS -->
-    <div class="metrics-row">
-        <div class="metric-box">
-            <div class="val gold">{{ efectividad }}%</div>
-            <div class="lbl">Efectividad</div>
-        </div>
-        <div class="metric-box">
-            <div class="val green">{{ aciertos_hoy }}/{{ sorteos_hoy }}</div>
-            <div class="lbl">Hoy</div>
-        </div>
-        <div class="metric-box">
-            <div class="val">{{ "{:,}".format(total_historico) }}</div>
-            <div class="lbl">Registros</div>
-        </div>
+    <div class="card">
+      <div class="card-accent" style="background:var(--b)"></div>
+      <div class="kpi-num" style="color:var(--b)" id="kpiTop1">—%</div>
+      <div class="kpi-label">Efectividad TOP1</div>
+      <div class="kpi-sub">Azar base: 2.78%</div>
     </div>
+    <div class="card">
+      <div class="card-accent" style="background:var(--y)"></div>
+      <div class="kpi-num" style="color:var(--y)" id="kpiTotal">—</div>
+      <div class="kpi-label">Sorteos Analizados</div>
+      <div class="kpi-sub">2018 → 2026</div>
+    </div>
+    <div class="card">
+      <div class="card-accent" style="background:var(--p)"></div>
+      <div class="kpi-num" style="color:var(--p)" id="kpiHorasR">—</div>
+      <div class="kpi-label">Horas Rentables</div>
+      <div class="kpi-sub">Top3 ≥ 10% requerido</div>
+    </div>
+  </div>
 
-    <!-- TABS -->
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('dashboard', this)">
-            <i class="fas fa-home"></i> Dashboard
+  <div class="g12 anim anim-d1">
+    <!-- Próxima predicción -->
+    <div>
+      <div class="sh">Próxima predicción</div>
+      <div id="dashPred">
+        <div class="loader"><div class="spinner"></div>Cargando...</div>
+      </div>
+      <div style="margin-top:12px">
+        <button onclick="cargarPrediccion()" style="background:var(--g2);border:1px solid rgba(0,232,122,.3);color:var(--g);font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:8px 16px;border-radius:4px;cursor:pointer;">
+          ↺ ACTUALIZAR
         </button>
-        <button class="tab-btn" onclick="switchTab('historial', this)">
-            <i class="fas fa-chart-bar"></i> Historial
+        <button onclick="procesarAhora()" style="background:rgba(56,182,255,.08);border:1px solid rgba(56,182,255,.2);color:var(--b);font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">
+          ▶ PROCESAR
         </button>
+      </div>
     </div>
 
-    <!-- ══════════ TAB: DASHBOARD ══════════ -->
-    <div id="tab-dashboard" class="tab-pane active">
-
-        <!-- ÚLTIMO RESULTADO -->
-        <div class="ultimo-bar">
-            <span class="label">ÚLTIMO RESULTADO</span>
-            <span class="value">{{ ultimo_resultado | upper }}</span>
+    <!-- Señales del motor -->
+    <div>
+      <div class="sh">Señales Motor V10</div>
+      <div class="card" id="dashSeñales">
+        <div class="signal-row">
+          <span class="signal-name">MARKOV (TRANSICIÓN)</span>
+          <span class="signal-val" style="color:var(--b)" id="sig_markov">—</span>
         </div>
-
-        <!-- PREDICCIONES -->
-        <div class="section-label">
-            <i class="fas fa-brain" style="color: var(--blue); font-size: 10px;"></i>
-            PRÓXIMO SORTEO — TOP 3
+        <div class="signal-row">
+          <span class="signal-name">DECAY TEMPORAL</span>
+          <span class="signal-val" style="color:var(--y)" id="sig_decay">—</span>
         </div>
-        <div class="predictions-grid">
-            {% for a in top3 %}
-            <div class="pred-card rank-{{ loop.index }}">
-                <div class="pred-num">#{{ a.numero }}</div>
-                <img class="pred-img" src="/imagenes/{{ a.imagen }}" alt="{{ a.animal }}"
-                     onerror="this.src='/imagenes/pendiente.png'">
-                <div class="pred-name">{{ a.animal }}</div>
-                <div class="pred-pct">{{ a.porcentaje }}</div>
-            </div>
-            {% endfor %}
-            {% if not top3 %}
-            <div class="pred-card" style="grid-column: span 3; padding: 20px; color: var(--text-dim); font-size: 11px;">
-                Sin datos suficientes. Entrena el motor primero.
-            </div>
-            {% endif %}
+        <div class="signal-row">
+          <span class="signal-name">GAP/CICLO</span>
+          <span class="signal-val" style="color:var(--p)" id="sig_gap">—</span>
         </div>
-
-        <!-- AUDITORÍA — FIXED: ahora muestra fecha + nombre + ✓/✗ -->
-        <div class="section-label">
-            <i class="fas fa-history" style="color: var(--text-dim); font-size: 10px;"></i>
-            AUDITORÍA — ÚLTIMOS 12
+        <div class="signal-row">
+          <span class="signal-name">ANTI-REPETICIÓN</span>
+          <span class="signal-val" style="color:var(--r)" id="sig_anti">—</span>
         </div>
-        <div class="audit-grid">
-            {% for item in ultimos_db %}
-            <div class="audit-item {% if item.acierto == True %}win{% elif item.acierto == False %}fail{% endif %}">
-
-                <!-- ✓ / ✗ badge arriba derecha -->
-                <span class="audit-badge">
-                    {% if item.acierto == True %}✓{% elif item.acierto == False %}✗{% else %}·{% endif %}
-                </span>
-
-                <!-- Fecha (nueva) -->
-                <small class="fecha-tag">{{ item.fecha if item.fecha else '—' }}</small>
-
-                <!-- Hora -->
-                <small class="hora-tag">{{ item.hora[:5] if item.hora else '—' }}</small>
-
-                <!-- Imagen animal -->
-                <img src="/imagenes/{{ item.img }}" alt="{{ item.animal }}"
-                     onerror="this.src='/imagenes/pendiente.png'">
-
-                <!-- Nombre animal (nuevo) -->
-                <span class="animal-tag">{{ item.animal | upper if item.animal else '?' }}</span>
-            </div>
-            {% endfor %}
+        <div class="signal-row">
+          <span class="signal-name">CONF. HORA</span>
+          <span class="signal-val" id="sig_hora">—</span>
         </div>
-
-        <!-- BOTONES -->
-        <div class="btn-row">
-            <button class="btn btn-train" onclick="runTask('/procesar', 'Entrenando Motor V8...')">
-                <i class="fas fa-brain"></i> ENTRENAR
-            </button>
-            <button class="btn btn-stats" onclick="loadStats()">
-                <i class="fas fa-chart-line"></i> STATS
-            </button>
-            <button class="btn btn-cargar" onclick="runTask('/cargar-ultimo', 'Capturando resultado...')">
-                <i class="fas fa-download"></i> CAPTURAR ÚLTIMO SORTEO
-            </button>
+        <div class="signal-row">
+          <span class="signal-name">ES HORA RENTABLE</span>
+          <span class="signal-val" id="sig_rentable">—</span>
         </div>
+      </div>
+    </div>
+  </div>
 
-        <div id="loader">
-            <i class="fas fa-circle-notch fa-spin"></i> <span id="loader-msg">Procesando...</span>
-        </div>
+  <!-- Auditoría reciente -->
+  <div style="margin-top:20px" class="anim anim-d2">
+    <div class="sh">Últimas predicciones</div>
+    <div id="dashAudit">
+      <div class="loader"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
 
-        <!-- ANÁLISIS BAR -->
-        <div class="analisis-bar">{{ analisis }}</div>
 
-    </div><!-- /tab-dashboard -->
+<!-- ═══════════════════════════════════ PAGE: PREDICCIÓN V10 ════ -->
+<div class="page" id="page-prediccion">
+  <div class="g12">
+    <div>
+      <div class="sh">Predicción combinada V10</div>
+      <div class="alert info">💡 El motor V10 combina Markov + Decay temporal + Gap zscore + Anti-repetición con pesos optimizados por hora</div>
 
-    <!-- ══════════ TAB: HISTORIAL ══════════ -->
-    <div id="tab-historial" class="tab-pane">
+      <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="selHora" onchange="cargarPredHora()" style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:8px 12px;border-radius:4px;cursor:pointer;">
+          <option value="auto">⏱ Hora automática</option>
+          <option value="08:00 AM">08:00 AM</option>
+          <option value="09:00 AM">09:00 AM</option>
+          <option value="10:00 AM">10:00 AM</option>
+          <option value="11:00 AM">11:00 AM</option>
+          <option value="12:00 PM">12:00 PM</option>
+          <option value="01:00 PM">01:00 PM</option>
+          <option value="02:00 PM">02:00 PM</option>
+          <option value="03:00 PM">03:00 PM</option>
+          <option value="04:00 PM">04:00 PM</option>
+          <option value="05:00 PM">05:00 PM</option>
+          <option value="06:00 PM">06:00 PM</option>
+          <option value="07:00 PM">07:00 PM</option>
+        </select>
+        <button onclick="cargarPredHora()" style="background:var(--g2);border:1px solid rgba(0,232,122,.3);color:var(--g);font-family:var(--mono);font-size:11px;padding:8px 16px;border-radius:4px;cursor:pointer;">
+          CALCULAR V10
+        </button>
+      </div>
 
-        <!-- Resumen stats -->
-        <div class="hist-summary" id="hist-summary">
-            <div class="hs-box green"><div class="hv" id="hs-aciertos">—</div><div class="hl">Aciertos</div></div>
-            <div class="hs-box red">  <div class="hv" id="hs-fallos">—</div>  <div class="hl">Fallos</div></div>
-            <div class="hs-box blue"> <div class="hv" id="hs-efectividad">—</div><div class="hl">Efectiv.</div></div>
-        </div>
-
-        <!-- Filtros -->
-        <div class="historial-filters">
-            <div class="filter-row">
-                <input type="date" id="f-fecha" class="filter-input" placeholder="Fecha" oninput="applyFilters()">
-                <select id="f-resultado" class="filter-select" onchange="applyFilters()">
-                    <option value="all">Todos</option>
-                    <option value="win">✓ Aciertos</option>
-                    <option value="fail">✗ Fallos</option>
-                </select>
-            </div>
-            <input type="text" id="f-animal" class="filter-input"
-                   placeholder="🔍 Buscar animal (predicho o resultado)..."
-                   oninput="applyFilters()">
-        </div>
-
-        <!-- Lista de predicciones -->
-        <div class="hist-list" id="hist-list">
-            <div class="hist-empty">
-                <i class="fas fa-circle-notch fa-spin" style="color: var(--blue); font-size: 20px;"></i>
-                <br><br>Cargando historial...
-            </div>
-        </div>
-
-        <div id="hist-footer" style="text-align:center; font-family: var(--mono); font-size: 9px; color: var(--text-dim); margin-top: 8px;"></div>
-
-    </div><!-- /tab-historial -->
-
-    <!-- ── MODAL STATS ── -->
-    <div class="modal-overlay" id="statsModal">
-        <div class="modal">
-            <div class="modal-header">
-                <span class="modal-title">📊 PANEL DE ESTADÍSTICAS</span>
-                <button class="btn-close" onclick="closeStats()">✕</button>
-            </div>
-            <div id="stats-content">
-                <div style="text-align:center; color: var(--text-dim); padding: 20px; font-size: 12px;">Cargando...</div>
-            </div>
-        </div>
+      <div id="predV10List">
+        <div class="loader"><div class="spinner"></div>Selecciona una hora</div>
+      </div>
     </div>
 
-    <script>
-    // ── TAB SWITCHER ──────────────────────────────────────────
-    function switchTab(name, btn) {
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('tab-' + name).classList.add('active');
-        btn.classList.add('active');
-        if (name === 'historial') loadHistorial();
+    <div>
+      <div class="sh">Desglose de señales</div>
+      <div class="card" id="predDetalle">
+        <div style="color:var(--muted);font-family:var(--mono);font-size:12px;text-align:center;padding:40px">
+          Selecciona hora para ver desglose
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <div class="sh">Pesos actuales (hora seleccionada)</div>
+        <div class="card" id="predPesos">
+          <div class="bar-row">
+            <div class="bar-lbl">DECAY</div>
+            <div class="bar-track"><div class="bar-fill" id="bDecay" style="width:25%;background:var(--y)"></div></div>
+            <div class="bar-val" style="color:var(--y)" id="vDecay">0.25</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-lbl">MARKOV</div>
+            <div class="bar-track"><div class="bar-fill" id="bMarkov" style="width:25%;background:var(--b)"></div></div>
+            <div class="bar-val" style="color:var(--b)" id="vMarkov">0.25</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-lbl">GAP</div>
+            <div class="bar-track"><div class="bar-fill" id="bGap" style="width:25%;background:var(--p)"></div></div>
+            <div class="bar-val" style="color:var(--p)" id="vGap">0.25</div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-lbl">RECIENTE</div>
+            <div class="bar-track"><div class="bar-fill" id="bReciente" style="width:25%;background:var(--r)"></div></div>
+            <div class="bar-val" style="color:var(--r)" id="vReciente">0.25</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════ PAGE: HORAS ════ -->
+<div class="page" id="page-horas">
+  <div class="sh">Rentabilidad por hora — 29,014 sorteos históricos</div>
+  <div class="alert warn" style="margin-bottom:20px">
+    ⚠ Umbral de rentabilidad: TOP3 ≥ 10.0% | Pago 1:30 | 3 animales apostados por sorteo
+  </div>
+  <div class="hora-grid" id="horaGrid">
+    <div class="loader"><div class="spinner"></div></div>
+  </div>
+
+  <div style="margin-top:24px">
+    <div class="sh">Comparativa global por hora</div>
+    <div class="tbl-wrap">
+      <table id="horaTable">
+        <thead><tr>
+          <th>HORA</th><th>SORTEOS</th>
+          <th>ACIERTOS TOP1</th><th>EF.TOP1 %</th>
+          <th>ACIERTOS TOP3</th><th>EF.TOP3 %</th>
+          <th>vs AZAR (8.33%)</th><th>SEÑAL</th>
+        </tr></thead>
+        <tbody id="horaTbody">
+          <tr><td colspan="8" style="text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;padding:30px">Cargando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════ PAGE: MARKOV ════ -->
+<div class="page" id="page-markov">
+  <div class="g2">
+    <div>
+      <div class="sh">Top transiciones Markov — 11:00 AM</div>
+      <div class="alert info" style="margin-bottom:16px">
+        🔗 Dado que salió X ayer a esta hora → ¿Cuál es el más probable hoy?<br>
+        <b>13,342 transiciones</b> calculadas sobre 8 años de datos.
+      </div>
+      <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="selMarkovHora" onchange="cargarMarkov()" style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:4px;">
+          <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
+          <option selected>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
+          <option>02:00 PM</option><option>03:00 PM</option><option>04:00 PM</option>
+          <option>05:00 PM</option><option>06:00 PM</option><option>07:00 PM</option>
+        </select>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">Animal previo:</span>
+        <input id="selMarkovAnimal" type="text" placeholder="ej: delfin" onkeyup="cargarMarkov()"
+          style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:4px;width:120px;">
+      </div>
+
+      <div class="tbl-wrap card" style="padding:0">
+        <table>
+          <thead><tr>
+            <th>#</th><th>ANIMAL PREVIO</th><th>→ SIGUIENTE</th>
+            <th>VECES</th><th>PROB %</th>
+          </tr></thead>
+          <tbody id="markovTbody">
+            <tr><td colspan="5" style="text-align:center;color:var(--muted);font-family:var(--mono);font-size:11px;padding:20px">Ingresa un animal</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="sh">Top pares de transición globales</div>
+      <div class="tbl-wrap card" style="padding:0">
+        <table>
+          <thead><tr>
+            <th>#</th><th>PREVIO → SIGUIENTE</th><th>HORA</th><th>VECES</th><th>PROB %</th>
+          </tr></thead>
+          <tbody id="markovTopTbody">
+            <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Cargando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:16px">
+        <div class="sh">Señal de hoy por Markov</div>
+        <div class="card" id="markovHoy">
+          <div style="color:var(--muted);font-family:var(--mono);font-size:12px">
+            Busca el resultado de hoy en el campo de arriba para ver la predicción Markov de mañana
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════ PAGE: HISTORIAL ════ -->
+<div class="page" id="page-historial">
+  <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <input type="date" id="filtFecha" style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 10px;border-radius:4px;">
+    <select id="filtResultado" style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 10px;border-radius:4px;">
+      <option value="">Todos</option>
+      <option value="true">✅ Acertados</option>
+      <option value="false">❌ Fallados</option>
+    </select>
+    <input type="text" id="filtAnimal" placeholder="Animal..." style="background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 10px;border-radius:4px;width:130px;">
+    <button onclick="cargarHistorial()" style="background:var(--g2);border:1px solid rgba(0,232,122,.3);color:var(--g);font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:4px;cursor:pointer;">FILTRAR</button>
+    <button onclick="limpiarFiltros()" style="background:var(--r2);border:1px solid rgba(255,51,85,.2);color:var(--r);font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:4px;cursor:pointer;">LIMPIAR</button>
+  </div>
+
+  <!-- Stats inline -->
+  <div class="g4" style="margin-bottom:16px">
+    <div class="card" style="padding:14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">TOTAL FILTRADO</div>
+      <div style="font-size:24px;font-family:var(--display);color:var(--b)" id="hStTotal">—</div>
+    </div>
+    <div class="card" style="padding:14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">ACIERTOS TOP1</div>
+      <div style="font-size:24px;font-family:var(--display);color:var(--g)" id="hStTop1">—</div>
+    </div>
+    <div class="card" style="padding:14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">ACIERTOS TOP3</div>
+      <div style="font-size:24px;font-family:var(--display);color:var(--y)" id="hStTop3">—</div>
+    </div>
+    <div class="card" style="padding:14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">EF. TOP3</div>
+      <div style="font-size:24px;font-family:var(--display);color:var(--p)" id="hStEf">—</div>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>FECHA</th><th>HORA</th>
+        <th>PRED 1</th><th>PRED 2</th><th>PRED 3</th>
+        <th>RESULTADO REAL</th><th>TOP1</th><th>TOP3</th>
+        <th>CONFIANZA</th>
+      </tr></thead>
+      <tbody id="historialTbody">
+        <tr><td colspan="9" style="text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;padding:40px">Aplica un filtro para cargar</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="text-align:center;margin-top:16px">
+    <button id="btnMasHist" onclick="cargarHistorial(true)" style="display:none;background:var(--panel);border:1px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:11px;padding:8px 20px;border-radius:4px;cursor:pointer;">
+      CARGAR MÁS
+    </button>
+  </div>
+</div>
+
+</div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// ESTADO GLOBAL
+// ═══════════════════════════════════════════════════════════
+const API = '';  // mismo origen
+let histOffset = 0;
+let histData = [];
+
+// ═══════════════════════════════════════════════════════════
+// NAVEGACIÓN
+// ═══════════════════════════════════════════════════════════
+function showTab(id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('page-' + id).classList.add('active');
+
+  if (id === 'horas')    cargarHoras();
+  if (id === 'markov')   cargarMarkovTop();
+  if (id === 'prediccion') cargarPredHora();
+}
+
+// ═══════════════════════════════════════════════════════════
+// HORA ACTUAL
+// ═══════════════════════════════════════════════════════════
+function getHoraActual() {
+  const now = new Date();
+  const h = now.getHours();
+  const minutos = [8,9,10,11,12,13,14,15,16,17,18,19];
+  const horas   = ['08:00 AM','09:00 AM','10:00 AM','11:00 AM','12:00 PM',
+                   '01:00 PM','02:00 PM','03:00 PM','04:00 PM','05:00 PM','06:00 PM','07:00 PM'];
+  const idx = minutos.indexOf(h);
+  if (idx >= 0) return horas[idx];
+  if (h < 8) return '08:00 AM';
+  return '07:00 PM';
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOPBAR CLOCK
+// ═══════════════════════════════════════════════════════════
+function updateClock() {
+  const now = new Date();
+  document.getElementById('topHora').textContent =
+    now.toLocaleTimeString('es-VE', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ═══════════════════════════════════════════════════════════
+// CARGAR ESTADO GLOBAL
+// ═══════════════════════════════════════════════════════════
+async function cargarEstado() {
+  try {
+    const r = await fetch('/estado');
+    const d = await r.json();
+
+    document.getElementById('topTotalDB').textContent = (d.total_db||'—').toLocaleString();
+    document.getElementById('topEfTop3').textContent  = (d.efectividad_top3||'—') + '%';
+    document.getElementById('kpiTop3').textContent    = (d.efectividad_top3||'—') + '%';
+    document.getElementById('kpiTop1').textContent    = (d.efectividad_top1||'—') + '%';
+    document.getElementById('kpiTotal').textContent   = (d.total_db||'—').toLocaleString();
+    document.getElementById('kpiHorasR').textContent  = (d.horas_rentables||0);
+
+    document.getElementById('kpiTop3Sub').textContent =
+      `${(d.aciertos_top3||0).toLocaleString()} aciertos de ${(d.total_calibrados||0).toLocaleString()}`;
+
+    // Señales
+    const pred = d.prediccion_actual || {};
+    document.getElementById('sig_markov').textContent  = pred.prediccion_1 ? '✅ ACTIVA' : '—';
+    document.getElementById('sig_decay').textContent   = 'λ=0.008';
+    document.getElementById('sig_gap').textContent     = pred.confianza_hora ? (pred.confianza_hora + '%') : '—';
+    document.getElementById('sig_anti').textContent    = '✅ ACTIVA';
+    document.getElementById('sig_hora').textContent    = pred.confianza_hora ? (pred.confianza_hora + '%') : '—';
+    document.getElementById('sig_rentable').textContent = pred.es_hora_rentable
+      ? '<span class="badge g">✅ SÍ</span>' : '<span class="badge r">❌ NO</span>';
+
+    // Renderizar predicción en dashboard
+    if (d.prediccion_actual) renderDashPred(d.prediccion_actual);
+
+  } catch(e) {
+    console.error('Error estado:', e);
+  }
+}
+
+function renderDashPred(pred) {
+  const container = document.getElementById('dashPred');
+  const animales = [
+    {rank:'1', animal:pred.prediccion_1||pred.animal_predicho, cls:'first', badge:'TOP 1'},
+    {rank:'2', animal:pred.prediccion_2, cls:'second', badge:'TOP 2'},
+    {rank:'3', animal:pred.prediccion_3, cls:'third', badge:'TOP 3'},
+  ].filter(a => a.animal);
+
+  if (!animales.length) {
+    container.innerHTML = '<div class="loader">Sin predicción activa</div>';
+    return;
+  }
+
+  container.innerHTML = animales.map(a => `
+    <div class="pred-card">
+      <div class="pred-rank ${a.cls}">${a.rank}</div>
+      <div>
+        <div class="pred-animal">${a.animal.toUpperCase()}</div>
+        <div class="pred-signals">
+          <span class="badge g">${a.badge}</span>
+          ${pred.es_hora_rentable ? '<span class="badge g">HORA RENTABLE</span>' : ''}
+          <span class="badge b">${pred.hora || getHoraActual()}</span>
+        </div>
+      </div>
+      <div class="pred-score" style="color:${a.cls==='first'?'var(--g)':a.cls==='second'?'var(--y)':'var(--b)'}">
+        ${a.cls==='first' ? (pred.confianza_pct||'—')+'%' : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUDITORÍA RECIENTE
+// ═══════════════════════════════════════════════════════════
+async function cargarAudit() {
+  try {
+    const r = await fetch('/ultimos?limit=8');
+    const data = await r.json();
+    const items = Array.isArray(data) ? data : (data.ultimos||data.data||[]);
+    const container = document.getElementById('dashAudit');
+
+    if (!items.length) {
+      container.innerHTML = '<div class="loader">Sin datos recientes</div>';
+      return;
     }
 
-    // ── RUN TASK ──────────────────────────────────────────────
-    async function runTask(url, msg) {
-        const loader = document.getElementById('loader');
-        const loaderMsg = document.getElementById('loader-msg');
-        loader.style.display = 'block';
-        loaderMsg.textContent = msg;
-        try {
-            const res = await fetch(url);
-            const data = await res.json();
-            alert(data.message || '✅ Completado');
-            if (url === '/procesar') location.reload();
-        } catch (e) {
-            alert('⚠️ Error de conexión');
-        } finally {
-            loader.style.display = 'none';
-        }
+    container.innerHTML = `
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th>FECHA</th><th>HORA</th><th>PREDICCIÓN 1</th><th>PRED 2</th><th>PRED 3</th>
+            <th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th>
+          </tr></thead>
+          <tbody>
+            ${items.map(r => {
+              const top3 = r.resultado_real &&
+                [r.prediccion_1||r.animal_predicho, r.prediccion_2, r.prediccion_3]
+                  .some(p => p && p.toLowerCase() === r.resultado_real.toLowerCase());
+              const top1 = r.acierto === true || r.acierto === 'true';
+              return `<tr>
+                <td style="font-family:var(--mono);font-size:11px">${r.fecha||'—'}</td>
+                <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.hora||'—'}</td>
+                <td style="font-weight:700">${(r.prediccion_1||r.animal_predicho||'—').toUpperCase()}</td>
+                <td style="color:var(--muted)">${(r.prediccion_2||'—')}</td>
+                <td style="color:var(--muted)">${(r.prediccion_3||'—')}</td>
+                <td style="color:var(--y)">${(r.resultado_real||'—').toUpperCase()}</td>
+                <td>${r.acierto!=null ? (top1 ? '<span class="badge g">✓</span>' : '<span class="badge r">✗</span>') : '<span class="badge b">?</span>'}</td>
+                <td>${r.resultado_real ? (top3 ? '<span class="badge g">✓</span>' : '<span class="badge r">✗</span>') : '<span class="badge b">?</span>'}</td>
+                <td style="font-family:var(--mono);font-size:11px">${r.confianza_pct||'—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(e) { console.error('Error audit:', e); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PREDICCIÓN V10 POR HORA
+// ═══════════════════════════════════════════════════════════
+async function cargarPredHora() {
+  const horaEl = document.getElementById('selHora');
+  const hora = horaEl.value === 'auto' ? getHoraActual() : horaEl.value;
+  const container = document.getElementById('predV10List');
+  container.innerHTML = '<div class="loader"><div class="spinner"></div>Calculando V10...</div>';
+
+  try {
+    const r = await fetch(`/predecir?hora=${encodeURIComponent(hora)}`);
+    const d = await r.json();
+
+    const preds = [
+      {r:'1', animal:d.prediccion_1||d.animal_predicho, cls:'first'},
+      {r:'2', animal:d.prediccion_2, cls:'second'},
+      {r:'3', animal:d.prediccion_3, cls:'third'},
+    ].filter(p => p.animal);
+
+    container.innerHTML = preds.map(p => `
+      <div class="pred-card">
+        <div class="pred-rank ${p.cls}">${p.r}</div>
+        <div>
+          <div class="pred-animal">${p.animal.toUpperCase()}</div>
+          <div class="pred-signals">
+            <span class="badge ${p.cls==='first'?'g':p.cls==='second'?'y':'b'}">TOP ${p.r}</span>
+            <span class="badge b">${hora}</span>
+            ${d.es_hora_rentable ? '<span class="badge g">✅ HORA RENTABLE</span>' : ''}
+          </div>
+        </div>
+        <div class="pred-score" style="color:${p.cls==='first'?'var(--g)':p.cls==='second'?'var(--y)':'var(--b)'}">
+          ${p.cls==='first' ? (d.confianza_pct||'—')+'%' : ''}
+        </div>
+      </div>
+    `).join('');
+
+    // Actualizar pesos
+    const pw = d.pesos_hora || {};
+    const setPeso = (id, bid, val) => {
+      const p = parseFloat(val||0.25);
+      document.getElementById(id).textContent = p.toFixed(2);
+      document.getElementById(bid).style.width = (p*100) + '%';
+    };
+    setPeso('vDecay','bDecay', pw.peso_decay);
+    setPeso('vMarkov','bMarkov', pw.peso_markov);
+    setPeso('vGap','bGap', pw.peso_gap);
+    setPeso('vReciente','bReciente', pw.peso_reciente);
+
+    // Detalles
+    const det = document.getElementById('predDetalle');
+    det.innerHTML = `
+      <div class="signal-row"><span class="signal-name">HORA</span><span class="signal-val" style="color:var(--b)">${hora}</span></div>
+      <div class="signal-row"><span class="signal-name">EF. TOP3 HISTÓRICA</span><span class="signal-val" style="color:${parseFloat(d.ef_top3||0)>=10?'var(--g)':'var(--r)'}">${d.ef_top3||d.confianza_hora||'—'}%</span></div>
+      <div class="signal-row"><span class="signal-name">HORA RENTABLE</span><span class="signal-val">${d.es_hora_rentable ? '<span class="badge g">✅ SÍ</span>' : '<span class="badge r">❌ NO</span>'}</span></div>
+      <div class="signal-row"><span class="signal-name">MARKOV ACTIVO</span><span class="signal-val" style="color:var(--b)">✅</span></div>
+      <div class="signal-row"><span class="signal-name">DECAY λ</span><span class="signal-val" style="color:var(--y)">0.008</span></div>
+    `;
+  } catch(e) {
+    container.innerHTML = `<div class="alert warn">⚠ Error al conectar con la API: ${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENTABILIDAD POR HORA
+// ═══════════════════════════════════════════════════════════
+async function cargarHoras() {
+  try {
+    const r = await fetch('/rentabilidad');
+    const data = await r.json();
+    const horas = Array.isArray(data) ? data : (data.horas||data.data||[]);
+
+    // Grid cards
+    document.getElementById('horaGrid').innerHTML = horas.map(h => {
+      const ef = parseFloat(h.efectividad_top3||h.ef_top3||0);
+      const pct = Math.min((ef / 15) * 100, 100);
+      const cls = ef >= 10 ? 'rentable' : '';
+      const color = ef >= 10 ? 'var(--g)' : ef >= 9 ? 'var(--y)' : 'var(--r)';
+      return `
+        <div class="hora-card ${cls}">
+          <h4>${h.hora}</h4>
+          <div class="ef">TOP3: <span style="color:${color}">${ef.toFixed(2)}%</span></div>
+          <div class="ef" style="font-size:11px;color:var(--muted)">TOP1: ${parseFloat(h.efectividad_top1||0).toFixed(2)}%</div>
+          <div class="bar" style="height:4px;background:var(--border);border-radius:2px;margin-top:8px">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:2px;transition:width 1s"></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:6px">${h.total_sorteos} sorteos</div>
+        </div>`;
+    }).join('');
+
+    // Table
+    document.getElementById('horaTbody').innerHTML = horas.map(h => {
+      const ef3 = parseFloat(h.efectividad_top3||0);
+      const diff = (ef3 - 8.33).toFixed(2);
+      const rentable = ef3 >= 10;
+      return `<tr>
+        <td style="font-family:var(--mono);font-weight:700">${h.hora}</td>
+        <td style="font-family:var(--mono);color:var(--muted)">${h.total_sorteos}</td>
+        <td style="font-family:var(--mono)">${h.aciertos_top1||0}</td>
+        <td style="font-family:var(--mono)">${parseFloat(h.efectividad_top1||0).toFixed(2)}%</td>
+        <td style="font-family:var(--mono)">${h.aciertos_top3||0}</td>
+        <td style="font-family:var(--mono);font-weight:700;color:${ef3>=10?'var(--g)':ef3>=9?'var(--y)':'var(--r)'}">${ef3.toFixed(2)}%</td>
+        <td style="font-family:var(--mono);color:${parseFloat(diff)>0?'var(--g)':'var(--r)'}">${parseFloat(diff)>0?'+':''}${diff}%</td>
+        <td>${rentable ? '<span class="badge g">✅ RENTABLE</span>' : '<span class="badge r">❌</span>'}</td>
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    document.getElementById('horaGrid').innerHTML = `<div class="alert warn">Error: ${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MARKOV
+// ═══════════════════════════════════════════════════════════
+async function cargarMarkovTop() {
+  try {
+    const r = await fetch('/markov/top?limit=20');
+    const data = await r.json();
+    const rows = Array.isArray(data) ? data : (data.transiciones||data.data||[]);
+
+    document.getElementById('markovTopTbody').innerHTML = rows.length ? rows.map((t,i) => `
+      <tr>
+        <td style="font-family:var(--mono);color:var(--muted)">${i+1}</td>
+        <td style="font-weight:700">${(t.animal_previo||'—').toUpperCase()} → ${(t.animal_sig||'—').toUpperCase()}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${t.hora||'—'}</td>
+        <td style="font-family:var(--mono)">${t.frecuencia||0}</td>
+        <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||t.probabilidad||0).toFixed(2)}%</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin datos</td></tr>';
+  } catch(e) { console.error('Error markov top:', e); }
+}
+
+async function cargarMarkov() {
+  const hora   = document.getElementById('selMarkovHora').value;
+  const animal = document.getElementById('selMarkovAnimal').value.trim().toLowerCase();
+  if (!animal || animal.length < 2) return;
+
+  try {
+    const r = await fetch(`/markov?hora=${encodeURIComponent(hora)}&animal=${encodeURIComponent(animal)}`);
+    const data = await r.json();
+    const rows = Array.isArray(data) ? data : (data.transiciones||data.data||[]);
+
+    document.getElementById('markovTbody').innerHTML = rows.length ? rows.slice(0,15).map((t,i) => `
+      <tr>
+        <td style="font-family:var(--mono);color:var(--muted)">${i+1}</td>
+        <td style="color:var(--y)">${(t.animal_previo||'—').toUpperCase()}</td>
+        <td style="font-weight:700;color:${i===0?'var(--g)':i===1?'var(--y)':'var(--text)'}">${(t.animal_sig||'—').toUpperCase()}</td>
+        <td style="font-family:var(--mono)">${t.frecuencia||0}</td>
+        <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||t.probabilidad||0).toFixed(2)}%</td>
+      </tr>
+    `).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin transiciones para "${animal}"</td></tr>`;
+
+    // Mostrar señal de hoy
+    if (rows.length > 0) {
+      const top = rows[0];
+      document.getElementById('markovHoy').innerHTML = `
+        <div class="sh" style="margin-bottom:12px">Si hoy salió "${animal.toUpperCase()}" → mañana más probable:</div>
+        <div class="pred-card" style="margin:0">
+          <div class="pred-rank first">1</div>
+          <div>
+            <div class="pred-animal">${(top.animal_sig||'—').toUpperCase()}</div>
+            <div class="pred-signals">
+              <span class="badge g">MARKOV TOP 1</span>
+              <span class="badge b">${hora}</span>
+            </div>
+          </div>
+          <div class="pred-score" style="color:var(--g)">${parseFloat(top.probabilidad_pct||top.probabilidad||0).toFixed(1)}%</div>
+        </div>
+      `;
     }
+  } catch(e) { console.error('Error markov:', e); }
+}
 
-    // ── STATS MODAL ───────────────────────────────────────────
-    async function loadStats() {
-        document.getElementById('statsModal').classList.add('active');
-        document.getElementById('stats-content').innerHTML =
-            '<div style="text-align:center; padding:20px; color:#5a7080; font-size:11px; font-family:monospace;">Cargando estadísticas...</div>';
-        try {
-            const res = await fetch('/stats');
-            const data = await res.json();
-            const s = data.stats;
-            const bitacora = data.bitacora_hoy || [];
-            let bitHtml = bitacora.map(b => {
-                const cls  = b.acierto === true ? 'win' : b.acierto === false ? 'fail' : 'pending';
-                const icon = b.acierto === true ? '✓'  : b.acierto === false ? '✗'   : '·';
-                return `
-                    <div class="bit-item ${cls}">
-                        <span class="bit-hora">${b.hora || '--'}</span>
-                        <div class="bit-animals">
-                            <span class="bit-animal">${b.animal_predicho || '?'}</span>
-                            <span class="bit-arrow">→</span>
-                            <span class="bit-animal">${b.resultado_real || '?'}</span>
-                        </div>
-                        <span class="bit-result">${icon}</span>
-                    </div>`;
-            }).join('');
-            document.getElementById('stats-content').innerHTML = `
-                <div class="stats-grid">
-                    <div class="stat-item"><div class="sv" style="color:var(--gold)">${s.efectividad_global || 0}%</div><div class="sl">Efectividad</div></div>
-                    <div class="stat-item"><div class="sv" style="color:var(--green)">${s.aciertos_hoy || 0}/${s.sorteos_hoy || 0}</div><div class="sl">Hoy</div></div>
-                    <div class="stat-item"><div class="sv">${(s.total_historico || 0).toLocaleString()}</div><div class="sl">Históricos</div></div>
-                    <div class="stat-item"><div class="sv">${s.aciertos_total || 0}</div><div class="sl">Aciertos totales</div></div>
-                </div>
-                <div class="section-label" style="margin:12px 0 8px;">BITÁCORA HOY</div>
-                <div class="bitacora-list">${bitHtml || '<div style="color:var(--text-dim);font-size:11px;text-align:center;padding:10px;">Sin sorteos hoy aún</div>'}</div>`;
-        } catch (e) {
-            document.getElementById('stats-content').innerHTML =
-                '<div style="color:var(--red);font-size:11px;padding:10px;">Error al cargar estadísticas</div>';
-        }
-    }
-    function closeStats() {
-        document.getElementById('statsModal').classList.remove('active');
-    }
-    document.getElementById('statsModal').addEventListener('click', function(e) {
-        if (e.target === this) closeStats();
-    });
+// ═══════════════════════════════════════════════════════════
+// HISTORIAL
+// ═══════════════════════════════════════════════════════════
+async function cargarHistorial(mas=false) {
+  if (!mas) { histOffset=0; histData=[]; }
 
-    // ── HISTORIAL ─────────────────────────────────────────────
-    let _histData = [];
-    let _histLoaded = false;
+  const fecha    = document.getElementById('filtFecha').value;
+  const resultado= document.getElementById('filtResultado').value;
+  const animal   = document.getElementById('filtAnimal').value.trim();
 
-    async function loadHistorial() {
-        if (_histLoaded) { applyFilters(); return; }
-        document.getElementById('hist-list').innerHTML =
-            '<div class="hist-empty"><i class="fas fa-circle-notch fa-spin" style="color:var(--blue);font-size:20px;"></i><br><br>Cargando historial...</div>';
-        try {
-            const res = await fetch('/historial');
-            const data = await res.json();
-            _histData = data.predicciones || [];
-            _histLoaded = true;
-            applyFilters();
-        } catch (e) {
-            document.getElementById('hist-list').innerHTML =
-                '<div class="hist-empty" style="color:var(--red);">Error al cargar. Verifica que /historial esté disponible.</div>';
-        }
-    }
+  const params = new URLSearchParams({ limit:50, offset:histOffset });
+  if (fecha)     params.append('fecha', fecha);
+  if (resultado) params.append('acierto', resultado);
+  if (animal)    params.append('animal', animal);
 
-    function applyFilters() {
-        const fFecha    = document.getElementById('f-fecha').value;
-        const fAnimal   = document.getElementById('f-animal').value.trim().toLowerCase();
-        const fRes      = document.getElementById('f-resultado').value;
+  try {
+    const r = await fetch('/historial?' + params);
+    const data = await r.json();
+    const rows = Array.isArray(data) ? data : (data.registros||data.data||[]);
 
-        let filtered = _histData.filter(p => {
-            if (fFecha && !p.fecha.startsWith(fFecha)) return false;
-            if (fAnimal) {
-                const haystack = [p.pred1, p.pred2, p.pred3, p.resultado].join(' ').toLowerCase();
-                if (!haystack.includes(fAnimal)) return false;
-            }
-            if (fRes === 'win'  && !p.acierto) return false;
-            if (fRes === 'fail' &&  p.acierto) return false;
-            return true;
-        });
+    histData = mas ? [...histData, ...rows] : rows;
+    histOffset += rows.length;
 
-        const total    = filtered.length;
-        const aciertos = filtered.filter(p => p.acierto).length;
-        const fallos   = total - aciertos;
-        const efectiv  = total > 0 ? ((aciertos / total) * 100).toFixed(1) + '%' : '—';
+    // Stats
+    const total   = histData.length;
+    const ac1     = histData.filter(r => r.acierto===true||r.acierto==='true').length;
+    const ac3     = histData.filter(r => {
+      const real = (r.resultado_real||'').toLowerCase();
+      return [r.prediccion_1||r.animal_predicho, r.prediccion_2, r.prediccion_3]
+        .some(p => p && p.toLowerCase() === real);
+    }).length;
+    document.getElementById('hStTotal').textContent = total;
+    document.getElementById('hStTop1').textContent  = ac1;
+    document.getElementById('hStTop3').textContent  = ac3;
+    document.getElementById('hStEf').textContent    = total ? (ac3/total*100).toFixed(1)+'%' : '—';
 
-        document.getElementById('hs-aciertos').textContent    = aciertos;
-        document.getElementById('hs-fallos').textContent      = fallos;
-        document.getElementById('hs-efectividad').textContent = efectiv;
+    document.getElementById('historialTbody').innerHTML = histData.map(r => {
+      const real  = (r.resultado_real||'').toLowerCase();
+      const p1    = (r.prediccion_1||r.animal_predicho||'').toLowerCase();
+      const p2    = (r.prediccion_2||'').toLowerCase();
+      const p3    = (r.prediccion_3||'').toLowerCase();
+      const top1  = real && real===p1;
+      const top3  = real && [p1,p2,p3].includes(real);
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:11px">${r.fecha||'—'}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.hora||'—'}</td>
+        <td style="font-weight:700;color:${top1?'var(--g)':'var(--text)'}">${(r.prediccion_1||r.animal_predicho||'—').toUpperCase()}</td>
+        <td style="color:${top3&&real===p2?'var(--g)':'var(--muted)'}">${(r.prediccion_2||'—')}</td>
+        <td style="color:${top3&&real===p3?'var(--g)':'var(--muted)'}">${(r.prediccion_3||'—')}</td>
+        <td style="color:var(--y);font-weight:700">${(r.resultado_real||'PEND.').toUpperCase()}</td>
+        <td>${real ? (top1 ? '<span class="badge g">✓</span>' : '<span class="badge r">✗</span>') : '<span class="badge b">?</span>'}</td>
+        <td>${real ? (top3 ? '<span class="badge g">✓</span>' : '<span class="badge r">✗</span>') : '<span class="badge b">?</span>'}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.confianza_pct||'—'}</td>
+      </tr>`;
+    }).join('');
 
-        if (filtered.length === 0) {
-            document.getElementById('hist-list').innerHTML =
-                '<div class="hist-empty">🔍<br><br>No hay registros para este filtro</div>';
-            document.getElementById('hist-footer').textContent = '';
-            return;
-        }
+    document.getElementById('btnMasHist').style.display = rows.length===50 ? 'inline-block' : 'none';
+  } catch(e) {
+    document.getElementById('historialTbody').innerHTML = `<tr><td colspan="9" style="color:var(--r);text-align:center;padding:20px">${e.message}</td></tr>`;
+  }
+}
 
-        const html = filtered.slice(0, 150).map(p => {
-            const cls = p.acierto ? 'win' : 'fail';
-            const badge = p.acierto
-                ? '<span class="hist-badge">✓ ACIERTO</span>'
-                : '<span class="hist-badge">✗ FALLO</span>';
+function limpiarFiltros() {
+  document.getElementById('filtFecha').value    = '';
+  document.getElementById('filtResultado').value= '';
+  document.getElementById('filtAnimal').value   = '';
+  document.getElementById('historialTbody').innerHTML =
+    '<tr><td colspan="9" style="text-align:center;color:var(--muted);font-family:var(--mono);font-size:12px;padding:40px">Aplica un filtro para cargar</td></tr>';
+  ['hStTotal','hStTop1','hStTop3','hStEf'].forEach(id => document.getElementById(id).textContent = '—');
+}
 
-            // top-3 chips — la que coincide con resultado se marca
-            const chips = [p.pred1, p.pred2, p.pred3].map(a => {
-                const match = a && p.resultado && a.toLowerCase() === p.resultado.toLowerCase();
-                return `<span class="hist-pred-chip ${match ? 'match' : ''}">
-                    <img src="/imagenes/${a}.png" style="width:12px;height:12px;object-fit:contain"
-                         onerror="this.style.display='none'">
-                    ${(a || '?').toUpperCase()}
-                </span>`;
-            }).join('');
+async function cargarPrediccion() { await cargarEstado(); }
+async function procesarAhora() {
+  try {
+    await fetch('/procesar', {method:'POST'});
+    setTimeout(() => cargarEstado(), 2000);
+  } catch(e) { console.error(e); }
+}
 
-            return `
-            <div class="hist-item ${cls}">
-                <div class="hist-meta">
-                    <span class="hist-fecha">${p.fecha || '—'}</span>
-                    <span class="hist-hora">${(p.hora || '—').substring(0,5)}</span>
-                    ${badge}
-                    <span class="hist-conf">Conf: ${p.confianza || '—'}%</span>
-                </div>
-                <div class="hist-body">
-                    <div class="hist-preds">${chips}</div>
-                    <span class="hist-arrow">→</span>
-                    <div class="hist-result">
-                        <img src="/imagenes/${p.resultado}.png"
-                             onerror="this.style.display='none'">
-                        ${(p.resultado || '?').toUpperCase()}
-                    </div>
-                </div>
-            </div>`;
-        }).join('');
-
-        document.getElementById('hist-list').innerHTML = html;
-        document.getElementById('hist-footer').textContent =
-            `Mostrando ${Math.min(filtered.length, 150)} de ${filtered.length} registros · Motor V8 RL`;
-    }
-    </script>
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  cargarEstado();
+  cargarAudit();
+  setInterval(() => {
+    cargarEstado();
+    cargarAudit();
+  }, 60000);
+});
+</script>
 </body>
 </html>
