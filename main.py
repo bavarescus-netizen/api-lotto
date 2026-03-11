@@ -9,11 +9,11 @@ from sqlalchemy import text
 from db import get_db
 from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
 from app.core.scheduler import ciclo_infinito
-from app.services.motor_v5 import (
+from app.services.motor_v10 import (
     generar_prediccion, obtener_estadisticas, obtener_bitacora,
     entrenar_modelo, backtest, calibrar_predicciones,
     llenar_auditoria_retroactiva, aprender_desde_historico,
-    obtener_pesos_actuales, migrar_schema,
+    migrar_schema,
 )
 
 app = FastAPI(title="LOTTOAI PRO V10")
@@ -209,7 +209,7 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
 
         import pytz; from datetime import datetime
         ahora = datetime.now(pytz.timezone('America/Caracas'))
-        pesos = await obtener_pesos_actuales(db)
+        pesos = await _obtener_pesos_globales(db)
         gen   = (await db.execute(text(
             "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"))).scalar() or 1
 
@@ -653,8 +653,6 @@ async def retroactivo(
     if hasta:
         try: fh = date.fromisoformat(hasta)
         except: return {"error": "Formato 'hasta' inválido"}
-    if fd and fh and (fh - fd).days > 366:
-        return {"error": "Rango máximo 1 año"}
     return await llenar_auditoria_retroactiva(db, fd, fh, dias)
 
 
