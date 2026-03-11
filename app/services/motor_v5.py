@@ -861,7 +861,7 @@ async def aprender_desde_historico(db, fecha_inicio=None, dias_por_generacion=30
     try:
         hoy = date.today()
         if fecha_inicio is None:
-            fecha_inicio = hoy - timedelta(days=365)
+            fecha_inicio = date(2018, 1, 1)  # usar todo el histórico disponible
 
         res_gen = await db.execute(text("SELECT COALESCE(MAX(generacion),0) FROM motor_pesos"))
         generacion_actual = (res_gen.scalar() or 0) + 1
@@ -1342,3 +1342,120 @@ async def backtest(db, fecha_desde, fecha_hasta, max_sorteos=100) -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+# ══════════════════════════════════════════════════════
+# LLENAR AUDITORÍA RETROACTIVA — sin límite de rango
+# Procesa desde 2018 en bloques para no agotar memoria
+# ══════════════════════════════════════════════════════
+async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, dias=30) -> dict:
+    try:
+        hoy = date.today()
+        if fecha_desde is None:
+            fecha_desde = date(2018, 1, 1)
+        if fecha_hasta is None:
+            fecha_hasta = hoy - timedelta(days=1)
+
+        # Sin límite de rango — procesamos todo el histórico disponible
+
+        pesos = await _obtener_pesos_globales(db)
+        res = await db.execute(text("""
+            SELECT fecha, hora, animalito, EXTRACT(DOW FROM fecha)::int
+            FROM historico
+            WHERE fecha BETWEEN :desde AND :hasta AND loteria='Lotto Activo'
+            ORDER BY fecha ASC, hora ASC
+        """), {"desde": fecha_desde, "hasta": fecha_hasta})
+        sorteos = res.fetchall()
+
+        if not sorteos:
+            return {"status": "ok", "procesados": 0,
+                    "message": f"Sin sorteos entre {fecha_desde} y {fecha_hasta}"}
+
+        insertados = 0; omitidos = 0; aciertos1 = 0; aciertos3 = 0
+
+        for sorteo in sorteos:
+            fecha_s, hora_s, real, dia_s = sorteo
+            dia_s  = int(dia_s)
+            real_n = _normalizar(real)
+            try:
+                res_e = await db.execute(text(
+                    "SELECT 1 FROM auditoria_ia "
+                    "WHERE fecha=:f AND hora=:h AND acierto IS NOT NULL "
+                    "AND prediccion_1 IS NOT NULL LIMIT 1"
+                ), {"f": fecha_s, "h": hora_s})
+                if res_e.fetchone():
+                    omitidos += 1
+                    continue
+
+                d   = await calcular_deuda(db, hora_s, fecha_s)
+                r   = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
+                p   = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
+                a   = await calcular_anti_racha(db, hora_s, fecha_s)
+                m   = await calcular_markov_hora(db, hora_s, fecha_s)
+                ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
+                pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
+                ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
+
+                sc = combinar_señales_v10(d, r, p, a, m, ce, pr, ps, hora_s, pesos)
+                if not sc:
+                    continue
+
+                confianza_idx, _, _ = calcular_indice_confianza_v10(sc)
+                ranking = sorted(sc.items(), key=lambda x: x[1], reverse=True)
+                pred1 = _normalizar(ranking[0][0]) if len(ranking) > 0 else None
+                pred2 = _normalizar(ranking[1][0]) if len(ranking) > 1 else None
+                pred3 = _normalizar(ranking[2][0]) if len(ranking) > 2 else None
+
+                acerto1 = (pred1 == real_n)
+                acerto3 = real_n in [x for x in [pred1, pred2, pred3] if x]
+
+                await db.execute(text("""
+                    INSERT INTO auditoria_ia
+                        (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
+                         confianza_pct, resultado_real, acierto)
+                    VALUES (:f,:h,:a,:p1,:p2,:p3,:c,:r,:ac)
+                    ON CONFLICT (fecha, hora) DO UPDATE SET
+                        animal_predicho = EXCLUDED.animal_predicho,
+                        prediccion_1    = EXCLUDED.prediccion_1,
+                        prediccion_2    = EXCLUDED.prediccion_2,
+                        prediccion_3    = EXCLUDED.prediccion_3,
+                        confianza_pct   = EXCLUDED.confianza_pct,
+                        resultado_real  = EXCLUDED.resultado_real,
+                        acierto         = EXCLUDED.acierto
+                """), {
+                    "f": fecha_s, "h": hora_s, "a": pred1,
+                    "p1": pred1, "p2": pred2, "p3": pred3,
+                    "c": float(confianza_idx),
+                    "r": real_n, "ac": acerto1,
+                })
+                insertados += 1
+                if acerto1: aciertos1 += 1
+                if acerto3: aciertos3 += 1
+
+                # Commit cada 500 para no saturar memoria
+                if insertados % 500 == 0:
+                    await db.commit()
+
+            except Exception:
+                continue
+
+        await db.commit()
+        ef1 = round(aciertos1 / insertados * 100, 1) if insertados > 0 else 0
+        ef3 = round(aciertos3 / insertados * 100, 1) if insertados > 0 else 0
+
+        return {
+            "status": "success",
+            "procesados": insertados,
+            "omitidos_ya_existian": omitidos,
+            "aciertos_top1": aciertos1,
+            "aciertos_top3": aciertos3,
+            "efectividad_top1": ef1,
+            "efectividad_top3": ef3,
+            "message": (
+                f"✅ V10 retroactivo {fecha_desde}→{fecha_hasta}: "
+                f"{insertados} predicciones. "
+                f"Top1: {ef1}% | Top3: {ef3}%"
+            ),
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": str(e)}
