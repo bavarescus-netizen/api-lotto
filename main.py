@@ -1,587 +1,681 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOTTOAI PRO V10</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
-<style>
-:root{--bg:#07080d;--panel:#0d0f17;--border:#1a1d2e;--border2:#232640;--g:#00e87a;--g2:rgba(0,232,122,.08);--r:#ff3355;--r2:rgba(255,51,85,.08);--y:#ffc233;--y2:rgba(255,194,51,.08);--b:#38b6ff;--b2:rgba(56,182,255,.08);--p:#a855f7;--text:#dde1f5;--muted:#4a4f6e;--mono:'IBM Plex Mono',monospace;--display:'Bebas Neue',sans-serif;--body:'DM Sans',sans-serif}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:var(--body);min-height:100vh;overflow-x:hidden}
-body::after{content:'';position:fixed;inset:0;z-index:999;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px)}
-.app{display:flex;flex-direction:column;min-height:100vh}
-.sleep-banner{display:none;background:rgba(255,194,51,.08);border-bottom:1px solid rgba(255,194,51,.2);padding:8px 24px;font-family:var(--mono);font-size:11px;color:var(--y);text-align:center;letter-spacing:1px}
-.sleep-banner.show{display:block}
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:52px;border-bottom:1px solid var(--border);background:rgba(13,15,23,.97);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
-.topbar-logo{font-family:var(--display);font-size:21px;letter-spacing:3px;color:var(--g);display:flex;align-items:center;gap:8px}
-.topbar-logo span{color:var(--text)}
-.pulse{width:7px;height:7px;border-radius:50%;background:var(--g);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,232,122,.5)}50%{box-shadow:0 0 0 5px rgba(0,232,122,0)}}
-.topbar-info{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;gap:18px;align-items:center}
-.topbar-info b{color:var(--text)}
-.tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--border);background:var(--panel)}
-.tab{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;padding:9px 18px;border:1px solid transparent;border-bottom:none;cursor:pointer;color:var(--muted);border-radius:4px 4px 0 0;transition:all .15s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--g);border-color:var(--border2);background:var(--bg);border-bottom:2px solid var(--bg);margin-bottom:-1px}
-.main{flex:1;padding:24px;max-width:1400px;margin:0 auto;width:100%}
-.page{display:none}.page.active{display:block}
-.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.g12{display:grid;grid-template-columns:1fr 2fr;gap:14px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:900px){.g4,.g12,.g2{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:18px;position:relative;overflow:hidden;transition:border-color .2s}
-.card:hover{border-color:var(--border2)}
-.ca{position:absolute;top:0;left:0;right:0;height:2px}
-.kn{font-family:var(--display);font-size:44px;line-height:1;letter-spacing:2px}
-.kl{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-top:6px}
-.ks{font-size:12px;color:var(--muted);margin-top:5px}
-.sh{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;gap:12px;margin-bottom:12px}
-.sh::after{content:'';flex:1;height:1px;background:var(--border)}
-table{width:100%;border-collapse:collapse;font-size:13px}
-.tbl{overflow-x:auto}
-thead th{font-family:var(--mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);padding:9px 12px;text-align:left;border-bottom:1px solid var(--border);background:rgba(0,0,0,.2)}
-tbody td{padding:10px 12px;border-bottom:1px solid rgba(26,29,46,.5)}
-tbody tr:hover td{background:rgba(255,255,255,.02)}
-tbody tr:last-child td{border-bottom:none}
-.badge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9px;letter-spacing:1px;padding:2px 7px;border-radius:3px;text-transform:uppercase}
-.bg{background:rgba(0,232,122,.12);color:var(--g);border:1px solid rgba(0,232,122,.25)}
-.br{background:rgba(255,51,85,.12);color:var(--r);border:1px solid rgba(255,51,85,.25)}
-.by{background:rgba(255,194,51,.12);color:var(--y);border:1px solid rgba(255,194,51,.25)}
-.bb{background:rgba(56,182,255,.12);color:var(--b);border:1px solid rgba(56,182,255,.25)}
-.bp{background:rgba(168,85,247,.12);color:var(--p);border:1px solid rgba(168,85,247,.25)}
-.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.bar-lbl{font-family:var(--mono);font-size:11px;color:var(--muted);width:80px;flex-shrink:0;text-align:right}
-.bar-track{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden}
-.bar-fill{height:100%;border-radius:3px}
-.bar-val{font-family:var(--mono);font-size:11px;width:42px}
-.pc{display:grid;grid-template-columns:56px 1fr auto;align-items:center;gap:12px;padding:13px 14px;background:var(--panel);border:1px solid var(--border);border-radius:5px;margin-bottom:7px;transition:border-color .2s}
-.pc:hover{border-color:var(--border2)}
-.pr{font-family:var(--display);font-size:34px;line-height:1;color:var(--border2)}
-.pr.first{color:var(--g)}.pr.second{color:var(--y)}.pr.third{color:var(--b)}
-.pa{font-size:17px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
-.ps{display:flex;gap:5px;margin-top:4px;flex-wrap:wrap}
-.psc{font-family:var(--mono);font-size:20px;font-weight:700;text-align:right}
-.hg{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
-.hc{padding:14px;background:var(--panel);border:1px solid var(--border);border-radius:5px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
-.hc:hover{border-color:var(--border2);transform:translateY(-1px)}
-.hc.rent{border-color:rgba(0,232,122,.3);background:rgba(0,232,122,.04)}
-.hc.rent::after{content:'RENTABLE';position:absolute;top:7px;right:7px;font-family:var(--mono);font-size:8px;color:var(--g);opacity:.7}
-.hc h4{font-family:var(--display);font-size:22px;letter-spacing:2px}
-.hc .ef{font-family:var(--mono);font-size:12px;margin-top:5px}
-.hc .ef span{font-size:18px;font-weight:700}
-.sr{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-bottom:1px solid rgba(26,29,46,.4);font-size:13px}
-.sr:last-child{border-bottom:none}
-.sn{font-family:var(--mono);font-size:11px;color:var(--muted)}
-.sv{font-family:var(--mono);font-size:13px;font-weight:700}
-.loader{display:flex;align-items:center;justify-content:center;padding:50px;color:var(--muted);font-family:var(--mono);font-size:12px;gap:8px;flex-direction:column}
-.spin{width:22px;height:22px;border:2px solid var(--border);border-top-color:var(--g);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.alert{padding:10px 14px;border-radius:4px;font-size:13px;margin-bottom:14px;display:flex;align-items:flex-start;gap:8px}
-.aw{background:var(--y2);border:1px solid rgba(255,194,51,.2);color:var(--y)}
-.ai{background:var(--b2);border:1px solid rgba(56,182,255,.2);color:var(--b)}
-.ag{background:var(--g2);border:1px solid rgba(0,232,122,.2);color:var(--g)}
-.ab{background:var(--r2);border:1px solid rgba(255,51,85,.2);color:var(--r)}
-.btn{font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:8px 14px;border-radius:4px;cursor:pointer;border:1px solid}
-.bg2{background:var(--g2);border-color:rgba(0,232,122,.3);color:var(--g)}
-.bb2{background:var(--b2);border-color:rgba(56,182,255,.2);color:var(--b)}
-.br2{background:var(--r2);border-color:rgba(255,51,85,.2);color:var(--r)}
-.by2{background:var(--y2);border-color:rgba(255,194,51,.2);color:var(--y)}
-.inp{background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 10px;border-radius:4px}
-.inp:focus{outline:none;border-color:var(--g)}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
-</style>
-</head>
-<body>
-<div class="app">
-<div class="sleep-banner" id="sleepBanner">⚠ RENDER SLEEP — reconectando... El sistema se reanudará en segundos.</div>
-<div class="topbar">
-  <div class="topbar-logo"><div class="pulse" id="topPulse"></div>LOTTOAI<span>PRO</span>&nbsp;V10</div>
-  <div class="topbar-info">
-    <span>MODELO: <b>V10 MARKOV+DECAY</b></span>
-    <span>BD: <b id="topBD">—</b> REG</span>
-    <span>EF.TOP3: <b id="topEf" style="color:var(--g)">—</b></span>
-    <span id="topClock" style="color:var(--g)">—</span>
-  </div>
-</div>
-<div class="tabs">
-  <div class="tab active" onclick="showTab('dashboard',this)">📊 Dashboard</div>
-  <div class="tab" onclick="showTab('prediccion',this)">🎯 Predicción V10</div>
-  <div class="tab" onclick="showTab('horas',this)">⏱ Rentabilidad Horas</div>
-  <div class="tab" onclick="showTab('markov',this)">🔗 Markov</div>
-  <div class="tab" onclick="showTab('historial',this)">📋 Historial</div>
-</div>
-<div class="main">
+import os, re, asyncio
+from fastapi import FastAPI, Request, Depends, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from db import get_db
+from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
+from app.core.scheduler import ciclo_infinito
+from app.services.motor_v5 import (
+    generar_prediccion, obtener_estadisticas, obtener_bitacora,
+    entrenar_modelo, backtest, calibrar_predicciones,
+    llenar_auditoria_retroactiva, aprender_desde_historico,
+    obtener_pesos_actuales, migrar_schema,
+)
 
-<!-- DASHBOARD -->
-<div class="page active" id="page-dashboard">
-  <div class="g4" style="margin-bottom:18px">
-    <div class="card"><div class="ca" style="background:var(--g)"></div>
-      <div class="kn" style="color:var(--g)" id="kEf3">—%</div>
-      <div class="kl">Efectividad TOP3</div><div class="ks" id="kEf3Sub">—</div></div>
-    <div class="card"><div class="ca" style="background:var(--b)"></div>
-      <div class="kn" style="color:var(--b)" id="kEf1">—%</div>
-      <div class="kl">Efectividad TOP1</div><div class="ks">Azar: 2.78%</div></div>
-    <div class="card"><div class="ca" style="background:var(--y)"></div>
-      <div class="kn" style="color:var(--y)" id="kTotal">—</div>
-      <div class="kl">Sorteos Analizados</div><div class="ks">2018 → 2026</div></div>
-    <div class="card"><div class="ca" style="background:var(--p)"></div>
-      <div class="kn" style="color:var(--p)" id="kHorasR">—</div>
-      <div class="kl">Horas Rentables</div><div class="ks">TOP3 ≥ 10%</div></div>
-  </div>
-  <div class="g12">
-    <div>
-      <div class="sh">Próxima predicción</div>
-      <div id="dashPred"><div class="loader"><div class="spin"></div></div></div>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn bg2" onclick="cargarEstado()">↺ ACTUALIZAR</button>
-        <button class="btn bb2" onclick="procesarAhora()">▶ PROCESAR</button>
-        <button class="btn by2" onclick="cargarUltimo()">⬇ CARGAR ÚLTIMO</button>
-      </div>
-    </div>
-    <div>
-      <div class="sh">Señales Motor V10</div>
-      <div class="card">
-        <div class="sr"><span class="sn">MARKOV (TRANSICIÓN)</span><span class="sv" style="color:var(--b)" id="sig_markov">—</span></div>
-        <div class="sr"><span class="sn">DECAY TEMPORAL</span><span class="sv" style="color:var(--y)">λ=0.008</span></div>
-        <div class="sr"><span class="sn">GAP/CICLO</span><span class="sv" style="color:var(--p)" id="sig_gap">—</span></div>
-        <div class="sr"><span class="sn">ANTI-REPETICIÓN</span><span class="sv" style="color:var(--r)">✅ ACTIVA</span></div>
-        <div class="sr"><span class="sn">CONF. HORA</span><span class="sv" id="sig_hora">—</span></div>
-        <div class="sr"><span class="sn">ES HORA RENTABLE</span><span class="sv" id="sig_rentable">—</span></div>
-      </div>
-    </div>
-  </div>
-  <div style="margin-top:18px">
-    <div class="sh">Últimas predicciones</div>
-    <div id="dashAudit"><div class="loader"><div class="spin"></div></div></div>
-  </div>
-</div>
+app = FastAPI(title="LOTTOAI PRO V10")
+app.add_middleware(CORSMiddleware, allow_origins=["*"],
+    allow_credentials=False, allow_methods=["GET","POST"], allow_headers=["*"])
+app.include_router(entrenar.router)
+app.include_router(stats.router)
+app.include_router(historico.router)
+app.include_router(metricas.router)
+app.include_router(prediccion.router)
+app.include_router(cargarhist.router)
 
-<!-- PREDICCION -->
-<div class="page" id="page-prediccion">
-  <div class="g2">
-    <div>
-      <div class="sh">Predicción combinada V10</div>
-      <div class="alert ai">💡 Markov + Decay + Gap. Pesos por hora.</div>
-      <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
-        <select class="inp" id="selHora" onchange="cargarPredHora()">
-          <option value="auto">⏱ Hora automática</option>
-          <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
-          <option>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
-          <option>02:00 PM</option><option>03:00 PM</option><option>04:00 PM</option>
-          <option>05:00 PM</option><option>06:00 PM</option><option>07:00 PM</option>
-        </select>
-        <button class="btn bg2" onclick="cargarPredHora()">CALCULAR</button>
-      </div>
-      <div id="predV10List"><div class="loader"><div class="spin"></div></div></div>
-    </div>
-    <div>
-      <div class="sh">Desglose</div>
-      <div class="card" id="predDetalle"><div style="color:var(--muted);font-family:var(--mono);font-size:12px;text-align:center;padding:30px">Selecciona hora</div></div>
-      <div style="margin-top:14px">
-        <div class="sh">Pesos (hora seleccionada)</div>
-        <div class="card">
-          <div class="bar-row"><div class="bar-lbl">DECAY</div><div class="bar-track"><div class="bar-fill" id="bD" style="width:25%;background:var(--y)"></div></div><div class="bar-val" style="color:var(--y)" id="vD">0.25</div></div>
-          <div class="bar-row"><div class="bar-lbl">MARKOV</div><div class="bar-track"><div class="bar-fill" id="bM" style="width:25%;background:var(--b)"></div></div><div class="bar-val" style="color:var(--b)" id="vM">0.25</div></div>
-          <div class="bar-row"><div class="bar-lbl">GAP</div><div class="bar-track"><div class="bar-fill" id="bG" style="width:25%;background:var(--p)"></div></div><div class="bar-val" style="color:var(--p)" id="vG">0.25</div></div>
-          <div class="bar-row"><div class="bar-lbl">RECIENTE</div><div class="bar-track"><div class="bar-fill" id="bR" style="width:25%;background:var(--r)"></div></div><div class="bar-val" style="color:var(--r)" id="vR">0.25</div></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR,"imagenes")), name="imagenes")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR,"app","routes"))
 
-<!-- HORAS -->
-<div class="page" id="page-horas">
-  <div class="alert aw">⚠ Umbral: TOP3 ≥ 10% | Pago 1:30 | 3 animales</div>
-  <div class="hg" id="horaGrid"><div class="loader"><div class="spin"></div></div></div>
-  <div style="margin-top:20px">
-    <div class="sh">Comparativa por hora</div>
-    <div class="tbl">
-      <table>
-        <thead><tr><th>HORA</th><th>SORTEOS</th><th>ACT.TOP1</th><th>EF.TOP1%</th><th>ACT.TOP3</th><th>EF.TOP3%</th><th>vs AZAR</th><th>SEÑAL</th></tr></thead>
-        <tbody id="horaTbody"><tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">Cargando...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
-<!-- MARKOV -->
-<div class="page" id="page-markov">
-  <div class="g2">
-    <div>
-      <div class="sh">Buscar transiciones</div>
-      <div class="alert ai" style="margin-bottom:12px">🔗 <b>13,342 transiciones</b> · Si hoy salió X → ¿mañana?</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <select class="inp" id="selMH" onchange="cargarMarkov()">
-          <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
-          <option selected>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
-          <option>02:00 PM</option><option>03:00 PM</option><option>04:00 PM</option>
-          <option>05:00 PM</option><option>06:00 PM</option><option>07:00 PM</option>
-        </select>
-        <input class="inp" id="selMA" type="text" placeholder="animal de hoy..." oninput="cargarMarkov()" style="width:140px">
-      </div>
-      <div class="tbl card" style="padding:0">
-        <table><thead><tr><th>#</th><th>PREVIO</th><th>SIGUIENTE</th><th>VECES</th><th>PROB%</th></tr></thead>
-          <tbody id="markovTbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Ingresa un animal</td></tr></tbody>
-        </table>
-      </div>
-      <div style="margin-top:14px">
-        <div class="sh">Señal para mañana</div>
-        <div class="card" id="markovHoy"><div style="color:var(--muted);font-family:var(--mono);font-size:12px">Busca el animal de hoy</div></div>
-      </div>
-    </div>
-    <div>
-      <div class="sh">Top pares globales</div>
-      <div class="tbl card" style="padding:0">
-        <table><thead><tr><th>#</th><th>PAR</th><th>HORA</th><th>VECES</th><th>PROB%</th></tr></thead>
-          <tbody id="markovTopTbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Cargando...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
+# ═══════════════════════════════════════════════════════════
+# STARTUP
+# ═══════════════════════════════════════════════════════════
+@app.on_event("startup")
+async def iniciar_bot():
+    async for db in get_db():
+        await migrar_schema(db)
+        try:
+            await db.execute(text("""
+                ALTER TABLE auditoria_ia
+                ADD CONSTRAINT IF NOT EXISTS auditoria_fecha_hora_unique UNIQUE (fecha,hora)
+            """))
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
-<!-- HISTORIAL -->
-<div class="page" id="page-historial">
-  <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-    <input type="date" class="inp" id="fFecha">
-    <select class="inp" id="fRes"><option value="">Todos</option><option value="true">✅ Acertados</option><option value="false">❌ Fallados</option></select>
-    <input type="text" class="inp" id="fAnimal" placeholder="Animal..." style="width:120px">
-    <button class="btn bg2" onclick="cargarHistorial()">FILTRAR</button>
-    <button class="btn br2" onclick="limpiarFiltros()">LIMPIAR</button>
-  </div>
-  <div class="g4" style="margin-bottom:14px">
-    <div class="card" style="padding:12px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted)">TOTAL</div><div style="font-size:22px;font-family:var(--display);color:var(--b)" id="hT">—</div></div>
-    <div class="card" style="padding:12px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted)">ACIERTOS TOP1</div><div style="font-size:22px;font-family:var(--display);color:var(--g)" id="hA1">—</div></div>
-    <div class="card" style="padding:12px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted)">ACIERTOS TOP3</div><div style="font-size:22px;font-family:var(--display);color:var(--y)" id="hA3">—</div></div>
-    <div class="card" style="padding:12px"><div style="font-family:var(--mono);font-size:9px;color:var(--muted)">EF. TOP3</div><div style="font-size:22px;font-family:var(--display);color:var(--p)" id="hEf">—</div></div>
-  </div>
-  <div class="tbl">
-    <table>
-      <thead><tr><th>FECHA</th><th>HORA</th><th>PRED 1</th><th>PRED 2</th><th>PRED 3</th><th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th></tr></thead>
-      <tbody id="histTbody"><tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Cargando historial...</td></tr></tbody>
-    </table>
-  </div>
-  <div style="text-align:center;margin-top:12px">
-    <button id="btnMas" class="btn bb2" onclick="cargarHistorial(true)" style="display:none">CARGAR MÁS</button>
-  </div>
-</div>
+        # motor_pesos original
+        try:
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS motor_pesos (
+                    id SERIAL PRIMARY KEY, fecha TIMESTAMP DEFAULT NOW(),
+                    peso_reciente FLOAT DEFAULT 0.30, peso_deuda FLOAT DEFAULT 0.25,
+                    peso_anti FLOAT DEFAULT 0.25, peso_patron FLOAT DEFAULT 0.10,
+                    peso_secuencia FLOAT DEFAULT 0.10, efectividad FLOAT DEFAULT 0.0,
+                    total_evaluados INT DEFAULT 0, aciertos INT DEFAULT 0, generacion INT DEFAULT 1
+                )
+            """))
+            res = await db.execute(text("SELECT COUNT(*) FROM motor_pesos"))
+            if (res.scalar() or 0) == 0:
+                await db.execute(text("""
+                    INSERT INTO motor_pesos
+                        (peso_reciente,peso_deuda,peso_anti,peso_patron,peso_secuencia,efectividad,generacion)
+                    VALUES (0.30,0.25,0.25,0.10,0.10,4.2,1)
+                """))
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning motor_pesos: {e}")
 
-</div></div>
-<script>
-const API='';
-let histOffset=0,histRows=[],failCount=0;
+        # V10: tablas nuevas
+        try:
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS motor_pesos_hora (
+                    hora           VARCHAR(20) NOT NULL,
+                    generacion     INT         NOT NULL DEFAULT 1,
+                    peso_decay     FLOAT       DEFAULT 0.25,
+                    peso_markov    FLOAT       DEFAULT 0.25,
+                    peso_gap       FLOAT       DEFAULT 0.25,
+                    peso_reciente  FLOAT       DEFAULT 0.25,
+                    efectividad    FLOAT       DEFAULT 0,
+                    total_evaluados INT        DEFAULT 0,
+                    aciertos_top3  INT         DEFAULT 0,
+                    fecha          TIMESTAMP   DEFAULT NOW(),
+                    PRIMARY KEY (hora, generacion)
+                )
+            """))
+            await db.execute(text("""
+                INSERT INTO motor_pesos_hora (hora, generacion) VALUES
+                    ('08:00 AM',1),('09:00 AM',1),('10:00 AM',1),
+                    ('11:00 AM',1),('12:00 PM',1),('01:00 PM',1),
+                    ('02:00 PM',1),('03:00 PM',1),('04:00 PM',1),
+                    ('05:00 PM',1),('06:00 PM',1),('07:00 PM',1)
+                ON CONFLICT DO NOTHING
+            """))
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS markov_transiciones (
+                    id             SERIAL PRIMARY KEY,
+                    hora           VARCHAR(20) NOT NULL,
+                    animal_previo  VARCHAR(50) NOT NULL,
+                    animal_sig     VARCHAR(50) NOT NULL,
+                    frecuencia     INT DEFAULT 0,
+                    probabilidad   FLOAT DEFAULT 0,
+                    UNIQUE(hora, animal_previo, animal_sig)
+                )
+            """))
+            await db.commit()
+            print("✅ V10: markov_transiciones y motor_pesos_hora listos")
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning V10 tables: {e}")
 
-// CLOCK
-setInterval(()=>{document.getElementById('topClock').textContent=new Date().toLocaleTimeString('es-VE',{hour:'2-digit',minute:'2-digit',second:'2-digit'});},1000);
+        break
+    asyncio.create_task(ciclo_infinito())
+    print("🚀 LOTTOAI PRO V10 — Markov + Decay + Gap + Pesos por hora")
 
-// KEEP-ALIVE — ping cada 9 min para que Render no duerma el scheduler
-async function keepAlive(){
-  try{
-    const r=await fetch('/health',{cache:'no-cache'});
-    if(r.ok){failCount=0;document.getElementById('sleepBanner').classList.remove('show');document.getElementById('topPulse').style.background='var(--g)';}
-  }catch(e){
-    failCount++;
-    if(failCount>=2){document.getElementById('sleepBanner').classList.add('show');document.getElementById('topPulse').style.background='var(--r)';}
-    setTimeout(keepAlive,15000);
-  }
-}
-setInterval(keepAlive,9*60*1000);keepAlive();
 
-// NAV
-function showTab(id,el){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('page-'+id).classList.add('active');
-  if(id==='horas')cargarHoras();
-  if(id==='markov')cargarMarkovTop();
-  if(id==='prediccion')cargarPredHora();
-  if(id==='historial'&&!histRows.length)cargarHistorial();
-}
+# ═══════════════════════════════════════════════════════════
+# HOME — Dashboard Jinja2
+# ═══════════════════════════════════════════════════════════
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request, db: AsyncSession = Depends(get_db)):
+    try:
+        res_ia     = await generar_prediccion(db)
+        stats_data = await obtener_estadisticas(db)
+        res_db = await db.execute(text("""
+            SELECT h.fecha, h.hora, h.animalito, a.acierto, a.animal_predicho,
+                   a.prediccion_1, a.prediccion_2, a.prediccion_3
+            FROM historico h
+            LEFT JOIN auditoria_ia a ON h.fecha=a.fecha AND h.hora=a.hora
+            WHERE h.loteria='Lotto Activo'
+            ORDER BY h.fecha DESC, h.hora DESC LIMIT 12
+        """))
+        ultimos_db = []
+        for r in res_db.fetchall():
+            nombre_animal = re.sub(r'[^a-z]','',r[2].lower())
+            predicho_raw  = re.sub(r'[^a-z]','',(r[4] or '').lower())
+            fecha_str     = r[0].strftime("%m-%d") if r[0] else "—"
+            ultimos_db.append({
+                "fecha": fecha_str, "hora": r[1], "animal": r[2],
+                "img": f"{nombre_animal}.png", "acierto": r[3],
+                "predicho": predicho_raw,
+                "prediccion_1": r[5], "prediccion_2": r[6], "prediccion_3": r[7],
+            })
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request, "top3": res_ia.get("top3",[]),
+            "ultimos_db": ultimos_db,
+            "efectividad": stats_data.get("efectividad_global",0),
+            "efectividad_top3": stats_data.get("efectividad_top3",0),
+            "aciertos_hoy": stats_data.get("aciertos_hoy",0),
+            "sorteos_hoy": stats_data.get("sorteos_hoy",0),
+            "total_historico": stats_data.get("total_historico",0),
+            "horas_rentables": stats_data.get("horas_rentables",[]),
+            "ultimo_resultado": res_ia.get("ultimo_resultado","N/A"),
+            "analisis": res_ia.get("analisis",""),
+            "confianza_idx": res_ia.get("confianza_idx",0),
+            "señal_texto": res_ia.get("señal_texto",""),
+            "hora_premium": res_ia.get("hora_premium",False),
+            "ef_hora_top3": res_ia.get("efectividad_hora_top3",0),
+        })
+    except Exception as e:
+        return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
-// ESTADO
-async function cargarEstado(){
-  try{
-    const d=await fetch('/estado').then(r=>r.json());
-    document.getElementById('topBD').textContent=(d.total_db||0).toLocaleString();
-    document.getElementById('topEf').textContent=(d.efectividad_top3||0)+'%';
-    document.getElementById('kEf3').textContent=(d.efectividad_top3||0)+'%';
-    document.getElementById('kEf1').textContent=(d.efectividad_top1||0)+'%';
-    document.getElementById('kTotal').textContent=(d.total_db||0).toLocaleString();
-    const hr=Array.isArray(d.horas_rentables)?d.horas_rentables.length:(d.horas_rentables||0);
-    document.getElementById('kHorasR').textContent=hr;
-    document.getElementById('kEf3Sub').textContent=`${(d.aciertos_top3||0).toLocaleString()} aciertos de ${(d.total_calibrados||0).toLocaleString()}`;
-    const pred=d.prediccion_actual||{};
-    document.getElementById('sig_markov').textContent=pred.prediccion_1?'✅ ACTIVA':'—';
-    document.getElementById('sig_gap').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
-    document.getElementById('sig_hora').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
-    // FIX: DOM badge, no innerHTML con HTML crudo
-    const sr=document.getElementById('sig_rentable');
-    sr.innerHTML='';
-    const b=document.createElement('span');
-    b.className='badge '+(pred.es_hora_rentable?'bg':'br');
-    b.textContent=pred.es_hora_rentable?'✅ SÍ':'❌ NO';
-    sr.appendChild(b);
-    if(pred.prediccion_1)renderPredDash(pred);
-  }catch(e){failCount++;console.error(e);}
-}
 
-function renderPredDash(pred){
-  const items=[
-    {r:'1',a:pred.prediccion_1||pred.animal_predicho,cls:'first',c:pred.confianza_pct},
-    {r:'2',a:pred.prediccion_2,cls:'second'},
-    {r:'3',a:pred.prediccion_3,cls:'third'},
-  ].filter(x=>x.a);
-  document.getElementById('dashPred').innerHTML=items.map(x=>`
-    <div class="pc">
-      <div class="pr ${x.cls}">${x.r}</div>
-      <div>
-        <div class="pa">${x.a.toUpperCase()}</div>
-        <div class="ps">
-          <span class="badge ${x.cls==='first'?'bg':x.cls==='second'?'by':'bb'}">TOP ${x.r}</span>
-          ${pred.hora?`<span class="badge bb">${pred.hora}</span>`:''}
-          ${pred.es_hora_rentable?'<span class="badge bg">HORA RENTABLE</span>':''}
-        </div>
-      </div>
-      <div class="psc" style="color:${x.cls==='first'?'var(--g)':x.cls==='second'?'var(--y)':'var(--b)'}">
-        ${x.cls==='first'&&x.c?x.c+'%':''}
-      </div>
-    </div>`).join('');
-}
+# ═══════════════════════════════════════════════════════════
+# ESTADO — V10 completo
+# ═══════════════════════════════════════════════════════════
+@app.get("/estado")
+async def estado_sistema(db: AsyncSession = Depends(get_db)):
+    try:
+        u = (await db.execute(text(
+            "SELECT fecha,hora,animalito FROM historico WHERE loteria='Lotto Activo' "
+            "ORDER BY fecha DESC,hora DESC LIMIT 1"))).fetchone()
 
-// AUDIT
-async function cargarAudit(){
-  try{
-    const rows=await fetch('/ultimos?limit=10').then(r=>r.json());
-    const list=Array.isArray(rows)?rows:(rows.ultimos||rows.data||[]);
-    document.getElementById('dashAudit').innerHTML=`<div class="tbl"><table>
-      <thead><tr><th>FECHA</th><th>HORA</th><th>PRED 1</th><th>PRED 2</th><th>PRED 3</th><th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th></tr></thead>
-      <tbody>${list.map(r=>{
-        const real=(r.resultado_real||'').toLowerCase().trim();
-        const p1=(r.prediccion_1||r.animal_predicho||'').toLowerCase().trim();
-        const p2=(r.prediccion_2||'').toLowerCase().trim();
-        const p3=(r.prediccion_3||'').toLowerCase().trim();
-        const top1=real&&real===p1;
-        const top3=real&&[p1,p2,p3].includes(real);
-        const pend=!real||real==='pendiente'||real==='—';
-        // FIX: sorteos sin resultado = badge azul "?"
-        const b1=pend?'<span class="badge bb">?</span>':top1?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>';
-        const b3=pend?'<span class="badge bb">?</span>':top3?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>';
-        return `<tr>
-          <td style="font-family:var(--mono);font-size:11px">${r.fecha||'—'}</td>
-          <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.hora||'—'}</td>
-          <td style="font-weight:700">${(p1||'—').toUpperCase()}</td>
-          <td style="color:var(--muted)">${p2||'—'}</td>
-          <td style="color:var(--muted)">${p3||'—'}</td>
-          <td style="color:${pend?'var(--muted)':'var(--y)'}">${pend?'PEND.':(real||'—').toUpperCase()}</td>
-          <td>${b1}</td><td>${b3}</td>
-          <td style="font-family:var(--mono);font-size:11px">${r.confianza_pct||'—'}</td>
-        </tr>`;
-      }).join('')}</tbody></table></div>`;
-  }catch(e){console.error(e);}
-}
+        p = (await db.execute(text(
+            "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
+            "prediccion_1,prediccion_2,prediccion_3,confianza_hora,es_hora_rentable "
+            "FROM auditoria_ia ORDER BY fecha DESC,hora DESC LIMIT 1"))).fetchone()
 
-// PRED V10
-async function cargarPredHora(){
-  const sel=document.getElementById('selHora');
-  const hora=sel.value==='auto'?horaActual():sel.value;
-  document.getElementById('predV10List').innerHTML='<div class="loader"><div class="spin"></div>Calculando...</div>';
-  try{
-    const d=await fetch(`/predecir?hora=${encodeURIComponent(hora)}`).then(r=>r.json());
-    const preds=[{r:'1',a:d.prediccion_1||d.animal_predicho,cls:'first'},{r:'2',a:d.prediccion_2,cls:'second'},{r:'3',a:d.prediccion_3,cls:'third'}].filter(x=>x.a);
-    document.getElementById('predV10List').innerHTML=preds.map(x=>`
-      <div class="pc">
-        <div class="pr ${x.cls}">${x.r}</div>
-        <div>
-          <div class="pa">${x.a.toUpperCase()}</div>
-          <div class="ps">
-            <span class="badge ${x.cls==='first'?'bg':x.cls==='second'?'by':'bb'}">TOP ${x.r}</span>
-            <span class="badge bb">${hora}</span>
-            ${d.es_hora_rentable?'<span class="badge bg">✅ RENTABLE</span>':''}
-          </div>
-        </div>
-        <div class="psc" style="color:${x.cls==='first'?'var(--g)':x.cls==='second'?'var(--y)':'var(--b)'}">
-          ${x.cls==='first'&&d.confianza_pct?d.confianza_pct+'%':''}
-        </div>
-      </div>`).join('');
-    const pw=d.pesos_hora||{};
-    const sp=(id,bid,v)=>{const p=parseFloat(v||0.25);document.getElementById(id).textContent=p.toFixed(2);document.getElementById(bid).style.width=(p*100)+'%';};
-    sp('vD','bD',pw.peso_decay);sp('vM','bM',pw.peso_markov);sp('vG','bG',pw.peso_gap);sp('vR','bR',pw.peso_reciente);
-    document.getElementById('predDetalle').innerHTML=`
-      <div class="sr"><span class="sn">HORA</span><span class="sv" style="color:var(--b)">${hora}</span></div>
-      <div class="sr"><span class="sn">EF.TOP3 HISTÓRICA</span><span class="sv" style="color:${(d.ef_top3||0)>=10?'var(--g)':'var(--r)'}">${d.ef_top3||0}%</span></div>
-      <div class="sr"><span class="sn">HORA RENTABLE</span><span class="sv"><span class="badge ${d.es_hora_rentable?'bg':'br'}">${d.es_hora_rentable?'✅ SÍ':'❌ NO'}</span></span></div>
-      <div class="sr"><span class="sn">MARKOV PREVIO</span><span class="sv" style="color:var(--y)">${d.markov_signal&&d.markov_signal.animal_previo||'—'}</span></div>
-      <div class="sr"><span class="sn">MARKOV PRED</span><span class="sv" style="color:var(--g)">${(d.markov_signal&&d.markov_signal.top3&&d.markov_signal.top3[0]&&d.markov_signal.top3[0].animal)||'—'}</span></div>`;
-  }catch(e){document.getElementById('predV10List').innerHTML=`<div class="alert ab">Error: ${e.message}</div>`;}
-}
+        met = (await db.execute(text("""
+            SELECT COUNT(*),
+                   COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),
+                   COUNT(CASE WHEN acierto=TRUE THEN 1 END),
+                   ROUND(COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric/
+                       NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,1)
+            FROM auditoria_ia"""))).fetchone()
 
-// HORAS
-async function cargarHoras(){
-  try{
-    const d=await fetch('/rentabilidad').then(r=>r.json());
-    const horas=Array.isArray(d)?d:(d.detalle||d.horas||d.data||[]);
-    document.getElementById('horaGrid').innerHTML=horas.map(h=>{
-      const ef=parseFloat(h.efectividad_top3||0);
-      const color=ef>=10?'var(--g)':ef>=8.5?'var(--y)':'var(--r)';
-      return `<div class="hc ${ef>=10?'rent':''}">
-        <h4>${h.hora}</h4>
-        <div class="ef">TOP3: <span style="color:${color}">${ef.toFixed(2)}%</span></div>
-        <div class="ef" style="font-size:11px;color:var(--muted)">TOP1: ${parseFloat(h.efectividad_top1||0).toFixed(2)}%</div>
-        <div style="height:3px;background:var(--border);border-radius:2px;margin-top:8px">
-          <div style="width:${Math.min(ef/15*100,100)}%;height:100%;background:${color};border-radius:2px"></div>
-        </div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:5px">${h.total_sorteos||0} sorteos</div>
-      </div>`;
-    }).join('');
-    document.getElementById('horaTbody').innerHTML=horas.map(h=>{
-      const ef3=parseFloat(h.efectividad_top3||0);
-      const diff=(ef3-8.33).toFixed(2);
-      return `<tr>
-        <td style="font-family:var(--mono);font-weight:700">${h.hora}</td>
-        <td style="font-family:var(--mono);color:var(--muted)">${h.total_sorteos||0}</td>
-        <td style="font-family:var(--mono)">${h.aciertos_top1||0}</td>
-        <td style="font-family:var(--mono)">${parseFloat(h.efectividad_top1||0).toFixed(2)}%</td>
-        <td style="font-family:var(--mono)">${h.aciertos_top3||0}</td>
-        <td style="font-family:var(--mono);font-weight:700;color:${ef3>=10?'var(--g)':ef3>=8.5?'var(--y)':'var(--r)'}">${ef3.toFixed(2)}%</td>
-        <td style="font-family:var(--mono);color:${parseFloat(diff)>=0?'var(--g)':'var(--r)'}">${parseFloat(diff)>=0?'+':''}${diff}%</td>
-        <td>${ef3>=10?'<span class="badge bg">✅ OPERAR</span>':ef3>=8?'<span class="badge by">⚠️ MARGINAL</span>':'<span class="badge br">❌ NO</span>'}</td>
-      </tr>`;
-    }).join('');
-  }catch(e){document.getElementById('horaGrid').innerHTML=`<div class="alert ab">${e.message}</div>`;}
-}
+        hist = (await db.execute(text(
+            "SELECT COUNT(*),MIN(fecha),MAX(fecha) FROM historico WHERE loteria='Lotto Activo'"))).fetchone()
 
-// MARKOV
-async function cargarMarkovTop(){
-  try{
-    const rows=await fetch('/markov/top?limit=20').then(r=>r.json());
-    const list=Array.isArray(rows)?rows:(rows.data||rows.transiciones||[]);
-    document.getElementById('markovTopTbody').innerHTML=list.map((t,i)=>`
-      <tr><td style="font-family:var(--mono);color:var(--muted)">${i+1}</td>
-        <td style="font-weight:700">${(t.animal_previo||'').toUpperCase()} → ${(t.animal_sig||'').toUpperCase()}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${t.hora||'—'}</td>
-        <td style="font-family:var(--mono)">${t.frecuencia||0}</td>
-        <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||0).toFixed(2)}%</td>
-      </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin datos</td></tr>';
-  }catch(e){}
-}
+        rent = (await db.execute(text(
+            "SELECT hora,efectividad_top3 FROM rentabilidad_hora "
+            "WHERE es_rentable=TRUE ORDER BY efectividad_top3 DESC"))).fetchall()
 
-async function cargarMarkov(){
-  const hora=document.getElementById('selMH').value;
-  const animal=document.getElementById('selMA').value.trim().toLowerCase();
-  if(animal.length<2)return;
-  try{
-    const rows=await fetch(`/markov?hora=${encodeURIComponent(hora)}&animal=${encodeURIComponent(animal)}`).then(r=>r.json());
-    const list=Array.isArray(rows)?rows:(rows.data||[]);
-    document.getElementById('markovTbody').innerHTML=list.length?list.slice(0,15).map((t,i)=>`
-      <tr><td style="font-family:var(--mono);color:var(--muted)">${i+1}</td>
-        <td style="color:var(--y)">${(t.animal_previo||'').toUpperCase()}</td>
-        <td style="font-weight:700;color:${i===0?'var(--g)':i===1?'var(--y)':'var(--text)'}">${(t.animal_sig||'').toUpperCase()}</td>
-        <td style="font-family:var(--mono)">${t.frecuencia||0}</td>
-        <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||0).toFixed(2)}%</td>
-      </tr>`).join(''):
-      `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin transiciones para "${animal}"</td></tr>`;
-    if(list.length>0){
-      const top=list[0];
-      document.getElementById('markovHoy').innerHTML=`
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:10px">
-          Si hoy salió <b style="color:var(--y)">${animal.toUpperCase()}</b> → mañana en ${hora}:
-        </div>
-        <div class="pc" style="margin:0">
-          <div class="pr first">1</div>
-          <div><div class="pa">${(top.animal_sig||'').toUpperCase()}</div>
-            <div class="ps"><span class="badge bg">MARKOV #1</span><span class="badge bb">${hora}</span></div></div>
-          <div class="psc" style="color:var(--g)">${parseFloat(top.probabilidad_pct||0).toFixed(1)}%</div>
-        </div>`;
-    }
-  }catch(e){}
-}
+        ac3_row = (await db.execute(text("""
+            SELECT COUNT(*) FROM auditoria_ia a
+            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
+            WHERE LOWER(TRIM(h.animalito)) IN (
+                LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+            ) AND a.prediccion_1 IS NOT NULL
+        """))).scalar() or 0
 
-// HISTORIAL — carga automática
-async function cargarHistorial(mas=false){
-  if(!mas){histOffset=0;histRows=[];}
-  const fecha=document.getElementById('fFecha').value;
-  const res=document.getElementById('fRes').value;
-  const animal=document.getElementById('fAnimal').value.trim();
-  const params=new URLSearchParams({limit:50,offset:histOffset});
-  if(fecha)params.append('fecha',fecha);
-  if(res)params.append('resultado',res);
-  if(animal)params.append('animal',animal);
-  try{
-    const d=await fetch('/historial?'+params).then(r=>r.json());
-    const rows=d.registros||d.predicciones||d.data||(Array.isArray(d)?d:[]);
-    histRows=mas?[...histRows,...rows]:rows;
-    histOffset+=rows.length;
-    const total=histRows.length;
-    const ac3=histRows.filter(r=>{
-      const rl=(r.resultado_real||r.resultado||'').toLowerCase().trim();
-      const p1=(r.prediccion_1||r.pred1||'').toLowerCase().trim();
-      const p2=(r.prediccion_2||r.pred2||'').toLowerCase().trim();
-      const p3=(r.prediccion_3||r.pred3||'').toLowerCase().trim();
-      return rl&&[p1,p2,p3].includes(rl);
-    }).length;
-    const ac1=histRows.filter(r=>{
-      const rl=(r.resultado_real||r.resultado||'').toLowerCase().trim();
-      const p1=(r.prediccion_1||r.pred1||r.animal_predicho||'').toLowerCase().trim();
-      return rl&&rl===p1;
-    }).length;
-    document.getElementById('hT').textContent=total;
-    document.getElementById('hA1').textContent=ac1;
-    document.getElementById('hA3').textContent=ac3;
-    document.getElementById('hEf').textContent=total?(ac3/total*100).toFixed(1)+'%':'—';
-    document.getElementById('histTbody').innerHTML=histRows.map(r=>{
-      const real=(r.resultado_real||r.resultado||'').toLowerCase().trim();
-      const p1=(r.prediccion_1||r.pred1||'').toLowerCase().trim();
-      const p2=(r.prediccion_2||r.pred2||'').toLowerCase().trim();
-      const p3=(r.prediccion_3||r.pred3||'').toLowerCase().trim();
-      const top1=real&&real===p1;
-      const top3=real&&[p1,p2,p3].includes(real);
-      const pend=!real||real==='—'||real==='pend.'||real==='pendiente';
-      return `<tr>
-        <td style="font-family:var(--mono);font-size:11px">${r.fecha||'—'}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.hora||'—'}</td>
-        <td style="font-weight:700;color:${top1?'var(--g)':'var(--text)'}">${(p1||'—').toUpperCase()}</td>
-        <td style="color:${top3&&real===p2?'var(--g)':'var(--muted)'}">${p2||'—'}</td>
-        <td style="color:${top3&&real===p3?'var(--g)':'var(--muted)'}">${p3||'—'}</td>
-        <td style="color:${pend?'var(--muted)':'var(--y)'}">${pend?'PENDIENTE':(real||'—').toUpperCase()}</td>
-        <td>${pend?'<span class="badge bb">?</span>':top1?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>'}</td>
-        <td>${pend?'<span class="badge bb">?</span>':top3?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>'}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.confianza_pct||r.confianza||'—'}</td>
-      </tr>`;
-    }).join('')||'<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:30px">Sin resultados</td></tr>';
-    document.getElementById('btnMas').style.display=rows.length===50?'inline-block':'none';
-  }catch(e){
-    document.getElementById('histTbody').innerHTML=`<tr><td colspan="9" style="color:var(--r);text-align:center;padding:20px">${e.message}</td></tr>`;
-  }
-}
+        markov_total = (await db.execute(text(
+            "SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
-function limpiarFiltros(){
-  document.getElementById('fFecha').value='';
-  document.getElementById('fRes').value='';
-  document.getElementById('fAnimal').value='';
-  cargarHistorial();
-}
+        import pytz; from datetime import datetime
+        ahora = datetime.now(pytz.timezone('America/Caracas'))
+        pesos = await obtener_pesos_actuales(db)
+        gen   = (await db.execute(text(
+            "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"))).scalar() or 1
 
-async function procesarAhora(){try{await fetch('/procesar');setTimeout(()=>{cargarEstado();cargarAudit();},3000);}catch(e){}}
-async function cargarUltimo(){try{const d=await fetch('/cargar-ultimo').then(r=>r.json());if(d.ok)setTimeout(()=>{cargarEstado();cargarAudit();},2000);}catch(e){}}
+        total_cal = int(met[1] or 0)
+        ac1       = int(met[2] or 0)
+        ef_top3   = round(int(ac3_row) / max(total_cal, 1) * 100, 2)
 
-function horaActual(){
-  const h=new Date().getHours();
-  const m={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
-  return m[h]||'11:00 AM';
-}
+        return {
+            "estado": "✅ SISTEMA ACTIVO — Motor V10",
+            "hora_venezolana": ahora.strftime("%Y-%m-%d %H:%M:%S"),
+            "motor": {
+                "version": "V10", "generacion": gen, "pesos": pesos,
+                "markov_transiciones": int(markov_total),
+                "decay_lambda": 0.008,
+            },
+            "ultimo_capturado": {
+                "fecha": str(u[0]), "hora": u[1], "animal": u[2]
+            } if u else {},
+            "ultima_prediccion": {
+                "fecha": str(p[0]), "hora": p[1],
+                "pred1": p[6], "pred2": p[7], "pred3": p[8],
+                "confianza": round(float(p[3] or 0)),
+                "confianza_hora": round(float(p[9] or 0), 1),
+                "es_hora_rentable": bool(p[10]) if p[10] is not None else False,
+                "real": p[4], "acierto": p[5],
+            } if p else {},
+            "metricas": {
+                "total": int(met[0] or 0), "calibradas": total_cal,
+                "aciertos_top1": ac1, "aciertos_top3": int(ac3_row),
+                "efectividad_top1": float(met[3] or 0),
+                "efectividad_top3": ef_top3,
+            },
+            "historico": {
+                "total": int(hist[0] or 0),
+                "desde": str(hist[1]), "hasta": str(hist[2]),
+            },
+            "horas_rentables": [{"hora": r[0], "ef_top3": float(r[1])} for r in rent],
+            # Aliases planos para el dashboard JS
+            "total_db": int(met[0] or 0),
+            "total_calibrados": total_cal,
+            "aciertos_top1": ac1,
+            "aciertos_top3": int(ac3_row),
+            "efectividad_top1": float(met[3] or 0),
+            "efectividad_top3": ef_top3,
+            "prediccion_actual": {
+                "animal_predicho":  p[2] if p else None,
+                "prediccion_1":     p[6] if p else None,
+                "prediccion_2":     p[7] if p else None,
+                "prediccion_3":     p[8] if p else None,
+                "hora":             p[1] if p else None,
+                "confianza_pct":    round(float(p[3] or 0)) if p else 0,
+                "confianza_hora":   round(float(p[9] or 0), 1) if p else 0,
+                "es_hora_rentable": bool(p[10]) if p and p[10] is not None else False,
+                "acierto":          p[5] if p else None,
+            } if p else None,
+        }
+    except Exception as e:
+        return {"estado": f"❌ ERROR: {str(e)}"}
 
-// INIT
-document.addEventListener('DOMContentLoaded',async()=>{
-  await cargarEstado();
-  await cargarAudit();
-  cargarHistorial(); // carga automática sin filtros
-  setInterval(async()=>{await cargarEstado();await cargarAudit();},5*60*1000);
-});
-</script>
-</body>
-</html>
+
+# ═══════════════════════════════════════════════════════════
+# ULTIMOS — con pred1/pred2/pred3
+# ═══════════════════════════════════════════════════════════
+@app.get("/ultimos")
+async def ultimos(limit: int = Query(default=10), db: AsyncSession = Depends(get_db)):
+    try:
+        rows = (await db.execute(text("""
+            SELECT fecha, hora, animal_predicho,
+                   prediccion_1, prediccion_2, prediccion_3,
+                   confianza_pct, confianza_hora, es_hora_rentable,
+                   acierto, resultado_real
+            FROM auditoria_ia
+            ORDER BY fecha DESC, hora DESC
+            LIMIT :limit
+        """), {"limit": limit})).fetchall()
+        return [
+            {
+                "fecha":            str(r[0]),
+                "hora":             r[1],
+                "animal_predicho":  r[2],
+                "prediccion_1":     r[3],
+                "prediccion_2":     r[4],
+                "prediccion_3":     r[5],
+                "confianza_pct":    float(r[6]) if r[6] else None,
+                "confianza_hora":   float(r[7]) if r[7] else None,
+                "es_hora_rentable": bool(r[8]) if r[8] is not None else False,
+                "acierto":          bool(r[9]) if r[9] is not None else None,
+                "resultado_real":   r[10],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════
+# PREDECIR — V10 por hora con señal Markov
+# ═══════════════════════════════════════════════════════════
+@app.get("/predecir")
+async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depends(get_db)):
+    try:
+        if not hora:
+            r = (await db.execute(text(
+                "SELECT hora FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
+            ))).fetchone()
+            hora = r[0] if r else "11:00 AM"
+
+        p = (await db.execute(text("""
+            SELECT fecha, hora, animal_predicho,
+                   prediccion_1, prediccion_2, prediccion_3,
+                   confianza_pct, confianza_hora, es_hora_rentable,
+                   acierto, resultado_real
+            FROM auditoria_ia
+            WHERE hora = :hora
+            ORDER BY fecha DESC LIMIT 1
+        """), {"hora": hora})).fetchone()
+
+        pw = (await db.execute(text("""
+            SELECT peso_decay, peso_markov, peso_gap, peso_reciente, efectividad
+            FROM motor_pesos_hora
+            WHERE hora = :hora
+            ORDER BY generacion DESC LIMIT 1
+        """), {"hora": hora})).fetchone()
+
+        rent = (await db.execute(text("""
+            SELECT efectividad_top1, efectividad_top3, es_rentable, total_sorteos
+            FROM rentabilidad_hora WHERE hora = :hora
+        """), {"hora": hora})).fetchone()
+
+        # Animal previo para señal Markov
+        prev = (await db.execute(text("""
+            SELECT animalito FROM historico
+            WHERE loteria='Lotto Activo' AND hora=:hora
+            ORDER BY fecha DESC OFFSET 1 LIMIT 1
+        """), {"hora": hora})).fetchone()
+        animal_previo = prev[0] if prev else None
+
+        markov_top = []
+        if animal_previo:
+            mk = (await db.execute(text("""
+                SELECT animal_sig, ROUND(probabilidad::numeric*100,2)
+                FROM markov_transiciones
+                WHERE hora=:hora AND LOWER(TRIM(animal_previo))=LOWER(TRIM(:animal))
+                ORDER BY probabilidad DESC LIMIT 3
+            """), {"hora": hora, "animal": animal_previo})).fetchall()
+            markov_top = [{"animal": r[0], "prob_pct": float(r[1])} for r in mk]
+
+        return {
+            "status": "success",
+            "hora": hora,
+            "prediccion_1":     p[3] if p else None,
+            "prediccion_2":     p[4] if p else None,
+            "prediccion_3":     p[5] if p else None,
+            "animal_predicho":  p[2] if p else None,
+            "confianza_pct":    float(p[6]) if p and p[6] else 0,
+            "confianza_hora":   float(p[7]) if p and p[7] else 0,
+            "es_hora_rentable": bool(p[8]) if p and p[8] is not None else False,
+            "ef_top1":   float(rent[0]) if rent else 0,
+            "ef_top3":   float(rent[1]) if rent else 0,
+            "total_sorteos": int(rent[3]) if rent else 0,
+            "markov_signal": {"animal_previo": animal_previo, "top3": markov_top},
+            "pesos_hora": {
+                "peso_decay":    float(pw[0]) if pw else 0.25,
+                "peso_markov":   float(pw[1]) if pw else 0.25,
+                "peso_gap":      float(pw[2]) if pw else 0.25,
+                "peso_reciente": float(pw[3]) if pw else 0.25,
+                "efectividad":   float(pw[4]) if pw else 0,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# MARKOV — Top transiciones globales
+# ═══════════════════════════════════════════════════════════
+@app.get("/markov/top")
+async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(get_db)):
+    try:
+        rows = (await db.execute(text("""
+            SELECT hora, animal_previo, animal_sig,
+                   frecuencia,
+                   ROUND(probabilidad::numeric * 100, 2) AS probabilidad_pct
+            FROM markov_transiciones
+            ORDER BY probabilidad DESC
+            LIMIT :limit
+        """), {"limit": limit})).fetchall()
+        return [
+            {
+                "hora": r[0], "animal_previo": r[1], "animal_sig": r[2],
+                "frecuencia": int(r[3]),
+                "probabilidad_pct": float(r[4]) if r[4] else 0,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════
+# MARKOV — Por animal+hora
+# ═══════════════════════════════════════════════════════════
+@app.get("/markov")
+async def markov_animal(
+    hora:   str = Query(...),
+    animal: str = Query(...),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        rows = (await db.execute(text("""
+            SELECT hora, animal_previo, animal_sig,
+                   frecuencia,
+                   ROUND(probabilidad::numeric * 100, 2) AS probabilidad_pct
+            FROM markov_transiciones
+            WHERE hora = :hora
+              AND LOWER(TRIM(animal_previo)) = LOWER(TRIM(:animal))
+            ORDER BY probabilidad DESC
+            LIMIT 20
+        """), {"hora": hora, "animal": animal})).fetchall()
+        return [
+            {
+                "hora": r[0], "animal_previo": r[1], "animal_sig": r[2],
+                "frecuencia": int(r[3]),
+                "probabilidad_pct": float(r[4]) if r[4] else 0,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════
+# HISTORIAL — con pred1/2/3, offset y doble alias de filtros
+# ═══════════════════════════════════════════════════════════
+@app.get("/historial")
+async def get_historial(
+    fecha:     str = None,
+    resultado: str = None,
+    animal:    str = None,
+    limit:     int = 200,
+    offset:    int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        conditions = [
+            "h.animalito IS NOT NULL",
+            "h.loteria='Lotto Activo'",
+            "a.prediccion_1 IS NOT NULL",
+        ]
+        params = {"limit": limit, "offset": offset}
+
+        if fecha:
+            conditions.append("a.fecha=:fecha")
+            params["fecha"] = fecha
+        if animal:
+            conditions.append("""(a.prediccion_1 ILIKE :animal OR a.prediccion_2 ILIKE :animal
+                OR a.prediccion_3 ILIKE :animal OR h.animalito ILIKE :animal)""")
+            params["animal"] = f"%{animal}%"
+        if resultado in ("win", "true"):
+            conditions.append("""h.animalito IN (
+                COALESCE(a.prediccion_1,'__'),COALESCE(a.prediccion_2,'__'),
+                COALESCE(a.prediccion_3,'__'))""")
+        elif resultado in ("fail", "false"):
+            conditions.append("""h.animalito NOT IN (
+                COALESCE(a.prediccion_1,'__'),COALESCE(a.prediccion_2,'__'),
+                COALESCE(a.prediccion_3,'__'))""")
+
+        where = " AND ".join(conditions)
+        rows = (await db.execute(text(f"""
+            SELECT a.fecha, a.hora,
+                   a.prediccion_1, a.prediccion_2, a.prediccion_3,
+                   a.confianza_pct, h.animalito AS resultado,
+                   a.es_hora_rentable, a.acierto,
+                   CASE WHEN h.animalito IN (
+                       COALESCE(a.prediccion_1,'__'),
+                       COALESCE(a.prediccion_2,'__'),
+                       COALESCE(a.prediccion_3,'__')
+                   ) THEN true ELSE false END AS acierto_top3
+            FROM auditoria_ia a
+            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
+            WHERE {where}
+            ORDER BY a.fecha DESC, a.hora DESC
+            LIMIT :limit OFFSET :offset
+        """), params)).fetchall()
+
+        predicciones = [
+            {
+                "fecha":          r[0].strftime("%Y-%m-%d") if r[0] else "—",
+                "hora":           str(r[1]) if r[1] else "—",
+                "prediccion_1":   r[2] or "—",
+                "prediccion_2":   r[3] or "—",
+                "prediccion_3":   r[4] or "—",
+                "pred1": r[2] or "—", "pred2": r[3] or "—", "pred3": r[4] or "—",
+                "confianza_pct":  round(float(r[5]),1) if r[5] else None,
+                "resultado_real": r[6] or "—",
+                "resultado":      r[6] or "—",
+                "hora_rentable":  bool(r[7]) if r[7] is not None else False,
+                "acierto":        bool(r[8]) if r[8] is not None else bool(r[9]),
+                "acierto_top3":   bool(r[9]),
+            }
+            for r in rows
+        ]
+        total = len(predicciones)
+        ac1   = sum(1 for p in predicciones if p["acierto"] is True)
+        ac3   = sum(1 for p in predicciones if p["acierto_top3"])
+        return {
+            "predicciones": predicciones, "registros": predicciones, "data": predicciones,
+            "stats": {
+                "total": total, "aciertos": ac3,
+                "aciertos_top1": ac1, "aciertos_top3": ac3,
+                "fallos": total - ac3,
+                "efectividad": round(ac3/total*100,2) if total>0 else 0,
+            },
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={
+            "error": str(e), "predicciones": [], "registros": [], "stats": {}
+        })
+
+
+# ═══════════════════════════════════════════════════════════
+# RENTABILIDAD — V10 con ganancia estimada y aliases
+# ═══════════════════════════════════════════════════════════
+@app.get("/rentabilidad")
+async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
+    try:
+        res = (await db.execute(text("""
+            SELECT hora, total_sorteos, aciertos_top1, aciertos_top3,
+                   efectividad_top1, efectividad_top3,
+                   es_rentable, ultima_actualizacion
+            FROM rentabilidad_hora ORDER BY efectividad_top3 DESC
+        """))).fetchall()
+        horas = []
+        for r in res:
+            ef3 = float(r[5] or 0)
+            horas.append({
+                "hora":             r[0],
+                "total_sorteos":    int(r[1] or 0),
+                "aciertos_top1":    int(r[2] or 0),
+                "aciertos_top3":    int(r[3] or 0),
+                "efectividad_top1": float(r[4] or 0),
+                "efectividad_top3": ef3,
+                "es_rentable":      bool(r[6]),
+                "ultima_actualizacion": str(r[7]) if r[7] else None,
+                "vs_azar":    round(ef3 - 8.33, 2),
+                "ventaja_pct": round(ef3 - 3.33, 2),
+                "ganancia_x1": round(ef3/100*30 - (1 - ef3/100), 2),
+                "señal": (
+                    "✅ OPERAR" if bool(r[6])
+                    else "⚠️ MARGINAL" if ef3 >= 8.0
+                    else "❌ NO OPERAR"
+                ),
+            })
+        rentables = [h for h in horas if h["es_rentable"]]
+        return {
+            "umbral_minimo": 3.33, "umbral_top3": 10.0,
+            "pago_loteria": 30, "n_animales": 3, "azar_top3": 8.33,
+            "horas_rentables": len(rentables),
+            "mejor_hora": horas[0] if horas else None,
+            "detalle": horas, "horas": horas, "data": horas,
+            "resumen": (
+                f"{len(rentables)}/{len(horas)} horas rentables. "
+                f"Mejor: {horas[0]['hora']} ({horas[0]['efectividad_top3']}%)"
+                if horas else "Sin datos"
+            ),
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ═══════════════════════════════════════════════════════════
+# ENDPOINTS SIN CAMBIOS
+# ═══════════════════════════════════════════════════════════
+@app.get("/cargar-ultimo")
+async def cargar_ultimo(db: AsyncSession = Depends(get_db)):
+    try:
+        from app.routes.cargarhist import capturar_ultimo_resultado
+        resultado = await capturar_ultimo_resultado(db)
+        return {"message": f"✅ Capturado: {resultado}", "ok": True}
+    except ImportError:
+        return {"message": "⚠️ capturar_ultimo_resultado no expuesta en cargarhist", "ok": False}
+    except Exception as e:
+        return {"message": f"❌ Error: {str(e)}", "ok": False}
+
+
+@app.get("/procesar")
+async def procesar(db: AsyncSession = Depends(get_db)):
+    return await entrenar_modelo(db)
+
+
+@app.get("/aprender")
+async def aprender(desde: str = None, db: AsyncSession = Depends(get_db)):
+    from datetime import date
+    fecha_inicio = None
+    if desde:
+        try: fecha_inicio = date.fromisoformat(desde)
+        except: return {"error": "Formato inválido. Use YYYY-MM-DD"}
+    return await aprender_desde_historico(db, fecha_inicio)
+
+
+@app.get("/pesos")
+async def ver_pesos(db: AsyncSession = Depends(get_db)):
+    try:
+        rows = (await db.execute(text("""
+            SELECT id,fecha,peso_reciente,peso_deuda,peso_anti,peso_patron,
+                   peso_secuencia,efectividad,total_evaluados,aciertos,generacion
+            FROM motor_pesos ORDER BY id DESC LIMIT 10
+        """))).fetchall()
+        rows_hora = (await db.execute(text("""
+            SELECT hora,generacion,peso_decay,peso_markov,peso_gap,peso_reciente,efectividad
+            FROM motor_pesos_hora ORDER BY hora, generacion DESC
+        """))).fetchall()
+        return {
+            "historial_pesos": [
+                {"generacion":r[10],"fecha":str(r[1]),
+                 "pesos":{"reciente":r[2],"deuda":r[3],"anti":r[4],"patron":r[5],"secuencia":r[6]},
+                 "efectividad":r[7],"total":r[8],"aciertos":r[9]}
+                for r in rows
+            ],
+            "pesos_por_hora_v10": [
+                {"hora":r[0],"generacion":r[1],
+                 "pesos":{"decay":r[2],"markov":r[3],"gap":r[4],"reciente":r[5]},
+                 "efectividad":r[6]}
+                for r in rows_hora
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/retroactivo")
+async def retroactivo(
+    desde: str = None, hasta: str = None, dias: int = 30,
+    db: AsyncSession = Depends(get_db)
+):
+    from datetime import date
+    fd = fh = None
+    if desde:
+        try: fd = date.fromisoformat(desde)
+        except: return {"error": "Formato 'desde' inválido"}
+    if hasta:
+        try: fh = date.fromisoformat(hasta)
+        except: return {"error": "Formato 'hasta' inválido"}
+    if fd and fh and (fh - fd).days > 366:
+        return {"error": "Rango máximo 1 año"}
+    return await llenar_auditoria_retroactiva(db, fd, fh, dias)
+
+
+@app.get("/stats")
+async def get_stats(db: AsyncSession = Depends(get_db)):
+    return {"stats": await obtener_estadisticas(db), "bitacora_hoy": await obtener_bitacora(db)}
+
+
+@app.get("/backtest")
+async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
+    from datetime import date
+    try:
+        fd = date.fromisoformat(desde)
+        fh = date.fromisoformat(hasta)
+        if (fh - fd).days > 180:
+            return {"error": "Rango máximo: 6 meses"}
+        return await backtest(db, fd, fh, max_sorteos=100)
+    except ValueError:
+        return {"error": "Formato inválido. Use YYYY-MM-DD"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "LOTTOAI PRO V10", "markov": True, "decay": True}
