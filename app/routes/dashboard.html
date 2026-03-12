@@ -137,7 +137,7 @@ tbody tr:last-child td{border-bottom:none}
       <div class="sh">Próxima predicción</div>
       <div id="dashPred"><div class="loader"><div class="spin"></div></div></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn bg2" onclick="cargarEstado()">↺ ACTUALIZAR</button>
+        <button class="btn bg2" onclick="actualizarTodo()">↺ ACTUALIZAR</button>
         <button class="btn bb2" onclick="procesarAhora()">▶ PROCESAR</button>
         <button class="btn by2" onclick="cargarUltimo()">⬇ CARGAR ÚLTIMO</button>
         <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
@@ -215,7 +215,7 @@ tbody tr:last-child td{border-bottom:none}
   <div class="g2">
     <div>
       <div class="sh">Buscar transiciones</div>
-      <div class="alert ai" style="margin-bottom:12px">🔗 <b>13,342 transiciones</b> · Si hoy salió X → ¿mañana?</div>
+      <div class="alert ai" style="margin-bottom:12px">🔗 <b id="markovCount">13,342</b> transiciones · Si hoy salió X → ¿mañana?</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <select class="inp" id="selMH" onchange="cargarMarkov()">
           <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
@@ -283,15 +283,26 @@ setInterval(()=>{document.getElementById('topClock').textContent=new Date().toLo
 // KEEP-ALIVE — ping cada 9 min para que Render no duerma el scheduler
 async function keepAlive(){
   try{
-    const r=await fetch('/health',{cache:'no-cache'});
-    if(r.ok){failCount=0;document.getElementById('sleepBanner').classList.remove('show');document.getElementById('topPulse').style.background='var(--g)';}
+    const ctrl=new AbortController();
+    const tid=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch('/health',{cache:'no-cache',signal:ctrl.signal});
+    clearTimeout(tid);
+    if(r.ok){
+      failCount=0;
+      document.getElementById('sleepBanner').classList.remove('show');
+      document.getElementById('topPulse').style.background='var(--g)';
+      // Si venía de error, refrescar estado
+      if(failCount>0){ cargarEstado(); cargarAudit(); }
+    }
   }catch(e){
     failCount++;
-    if(failCount>=2){document.getElementById('sleepBanner').classList.add('show');document.getElementById('topPulse').style.background='var(--r)';}
-    setTimeout(keepAlive,15000);
+    document.getElementById('sleepBanner').classList.add('show');
+    document.getElementById('topPulse').style.background='var(--r)';
+    // Reintentar rápido mientras despierta
+    setTimeout(keepAlive, failCount<5 ? 10000 : 30000);
   }
 }
-setInterval(keepAlive,9*60*1000);keepAlive();
+setInterval(keepAlive,4*60*1000);keepAlive();
 
 // NAV
 function showTab(id,el){
@@ -306,6 +317,17 @@ function showTab(id,el){
 }
 
 // ESTADO
+async function actualizarTodo(){
+  const btn=document.querySelector('button[onclick*="actualizarTodo"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳...';}
+  try{
+    await cargarEstado();
+    await cargarAudit();
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='↺ ACTUALIZAR';}
+  }
+}
+
 async function cargarEstado(){
   try{
     const d=await fetch('/estado').then(r=>r.json());
@@ -319,6 +341,10 @@ async function cargarEstado(){
     document.getElementById('kEf3Sub').textContent=`${(d.aciertos_top3||0).toLocaleString()} aciertos de ${(d.total_calibrados||0).toLocaleString()}`;
     const pred=d.prediccion_actual||{};
     document.getElementById('sig_markov').textContent=pred.prediccion_1?'✅ ACTIVA':'—';
+    // Actualizar contador de transiciones Markov
+    if(d.motor&&d.motor.markov_transiciones){
+      document.getElementById('markovCount').textContent=(d.motor.markov_transiciones).toLocaleString();
+    }
     document.getElementById('sig_gap').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
     document.getElementById('sig_hora').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
     // FIX: DOM badge, no innerHTML con HTML crudo
@@ -328,7 +354,24 @@ async function cargarEstado(){
     b.className='badge '+(pred.es_hora_rentable?'bg':'br');
     b.textContent=pred.es_hora_rentable?'✅ SÍ':'❌ NO';
     sr.appendChild(b);
-    if(pred.prediccion_1)renderPredDash(pred);
+    if(pred.prediccion_1){
+      // Si la predicción es de una hora anterior, auto-calcular la hora actual
+      const horaAhora=horaActual();
+      if(!pred.hora || pred.hora!==horaAhora){
+        // Obtener predicción para la hora actual/próxima
+        try{
+          const dp=await fetch(`/predecir?hora=${encodeURIComponent(horaAhora)}`).then(r=>r.json());
+          if(dp.prediccion_1){
+            dp.hora=horaAhora;
+            renderPredDash(dp);
+          } else {
+            renderPredDash(pred);
+          }
+        } catch(ep){ renderPredDash(pred); }
+      } else {
+        renderPredDash(pred);
+      }
+    }
   }catch(e){failCount++;console.error(e);}
 }
 
@@ -411,7 +454,12 @@ async function cargarPredHora(){
         </div>
       </div>`).join('');
     const pw=d.pesos_hora||{};
-    const sp=(id,bid,v)=>{const p=parseFloat(v||0.25);document.getElementById(id).textContent=p.toFixed(2);document.getElementById(bid).style.width=(p*100)+'%';};
+    const sp=(id,bid,v,color)=>{
+      const p=parseFloat(v||0.25);
+      document.getElementById(id).textContent=p.toFixed(2);
+      const pct=Math.min(Math.max(p*100,5),100);
+      document.getElementById(bid).style.width=pct+'%';
+    };
     sp('vD','bD',pw.peso_decay);sp('vM','bM',pw.peso_markov);sp('vG','bG',pw.peso_gap);sp('vR','bR',pw.peso_reciente);
     document.getElementById('predDetalle').innerHTML=`
       <div class="sr"><span class="sn">HORA</span><span class="sv" style="color:var(--b)">${hora}</span></div>
@@ -573,12 +621,18 @@ async function procesarAhora(){
   if(btn){btn.disabled=true;btn.textContent='⏳ PROCESANDO...';}
   try{
     const ctrl=new AbortController();
-    setTimeout(()=>ctrl.abort(),30000);
-    await fetch('/procesar',{signal:ctrl.signal});
-    setTimeout(()=>{cargarEstado();cargarAudit();},2000);
+    const tid=setTimeout(()=>ctrl.abort(),35000);
+    const r=await fetch('/procesar',{signal:ctrl.signal});
+    clearTimeout(tid);
+    const d=await r.json().catch(()=>({}));
+    if(d.status==='error'){alert('❌ Error: '+d.message);}
+    // Actualizar todo después de procesar
+    await cargarEstado();
+    await cargarAudit();
+    // Si estamos en pestaña predicción, recalcular hora actual
+    await cargarPredHora();
   }catch(e){
-    const msg=e.name==='AbortError'?'⏱ Timeout — intenta de nuevo':('❌ '+e.message);
-    alert(msg);
+    alert(e.name==='AbortError'?'⏱ Timeout — el servidor puede estar despertando, espera 30s y reintenta':('❌ '+e.message));
   }finally{
     if(btn){btn.disabled=false;btn.textContent='▶ PROCESAR';}
   }
@@ -641,9 +695,20 @@ async function cargarUltimo(){
 }
 
 function horaActual(){
-  const h=new Date().getHours();
-  const m={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
-  return m[h]||'11:00 AM';
+  // Hora venezolana (UTC-4) del próximo sorteo o sorteo actual
+  const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
+  const h=now.getHours(), mn=now.getMinutes();
+  const slots=[8,9,10,11,12,13,14,15,16,17,18,19];
+  const lbls={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+              12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+              16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
+  // Si estamos en la ventana 00-30 min de una hora de sorteo → esa hora
+  // Si ya pasaron 30 min → la siguiente hora de sorteo
+  for(const s of slots){
+    if(s===h && mn<=30) return lbls[s];       // dentro de ventana
+    if(s > h) return lbls[s];                  // próximo sorteo
+  }
+  return lbls[8]; // default mañana
 }
 
 // INIT
