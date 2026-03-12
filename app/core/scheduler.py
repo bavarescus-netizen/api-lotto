@@ -268,13 +268,13 @@ async def guardar_resultados(db, resultados: list) -> int:
             upd = await db.execute(text("""
                 UPDATE auditoria_ia
                 SET
-                    resultado_real = :animal,
+                    resultado_real = CAST(:animal AS VARCHAR),
                     acierto = (
-                        LOWER(TRIM(COALESCE(animal_predicho, ''))) = LOWER(TRIM(:animal))
-                        OR LOWER(TRIM(COALESCE(prediccion_1,  ''))) = LOWER(TRIM(:animal))
+                        LOWER(TRIM(COALESCE(animal_predicho, ''))) = LOWER(TRIM(CAST(:animal AS VARCHAR)))
+                        OR LOWER(TRIM(COALESCE(prediccion_1,  ''))) = LOWER(TRIM(CAST(:animal AS VARCHAR)))
                     )
                 WHERE fecha = :fecha
-                  AND LOWER(TRIM(hora)) = LOWER(TRIM(:hora))
+                  AND LOWER(TRIM(hora)) = LOWER(TRIM(CAST(:hora AS VARCHAR)))
                   AND resultado_real IS NULL
             """), {
                 "animal": r["animalito"],
@@ -284,6 +284,7 @@ async def guardar_resultados(db, resultados: list) -> int:
             actualizados += upd.rowcount
         except Exception as ex:
             logger.warning(f"[BD] auditoria_ia update error {r}: {ex}")
+            await db.rollback()  # FIX: limpiar tx rota
 
     if actualizados > 0:
         await db.commit()
