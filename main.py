@@ -335,7 +335,15 @@ async def ultimos(limit: int = Query(default=10), db: AsyncSession = Depends(get
                    confianza_pct, confianza_hora, es_hora_rentable,
                    acierto, resultado_real
             FROM auditoria_ia
-            ORDER BY fecha DESC, hora DESC
+            ORDER BY fecha DESC,
+                CASE hora
+                    WHEN '08:00 AM' THEN 8  WHEN '09:00 AM' THEN 9
+                    WHEN '10:00 AM' THEN 10 WHEN '11:00 AM' THEN 11
+                    WHEN '12:00 PM' THEN 12 WHEN '01:00 PM' THEN 13
+                    WHEN '02:00 PM' THEN 14 WHEN '03:00 PM' THEN 15
+                    WHEN '04:00 PM' THEN 16 WHEN '05:00 PM' THEN 17
+                    WHEN '06:00 PM' THEN 18 WHEN '07:00 PM' THEN 19
+                    ELSE 0 END DESC
             LIMIT :limit
         """), {"limit": limit})).fetchall()
         return [
@@ -386,6 +394,26 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             WHERE hora = :hora
             ORDER BY generacion DESC LIMIT 1
         """), {"hora": hora})).fetchone()
+
+        # Si no hay pesos diferenciados, calcular adaptativos desde datos reales
+        if not pw or (pw[0]==pw[1]==pw[2]==pw[3]):
+            # Obtener top3 de probabilidades para esa hora
+            top3_prob = (await db.execute(text("""
+                SELECT animalito, probabilidad, tendencia
+                FROM probabilidades_hora WHERE hora=:hora
+                ORDER BY probabilidad DESC LIMIT 3
+            """), {"hora": hora})).fetchall()
+            # Markov signal para esa hora
+            mk_count = (await db.execute(text("""
+                SELECT COUNT(*), AVG(probabilidad)
+                FROM markov_transiciones WHERE hora=:hora
+            """), {"hora": hora})).fetchone()
+            # Calcular pesos proporcionales a la señal disponible
+            p_decay  = 0.30 if top3_prob and float(top3_prob[0][1] or 0) > 3.5 else 0.25
+            p_markov = 0.30 if mk_count and int(mk_count[0] or 0) > 50 else 0.20
+            p_gap    = 0.25
+            p_rec    = 1.0 - p_decay - p_markov - p_gap
+            pw = (round(p_decay,2), round(p_markov,2), round(p_gap,2), round(p_rec,2), rent[1] if rent else 0)
 
         rent = (await db.execute(text("""
             SELECT efectividad_top1, efectividad_top3, es_rentable, total_sorteos
@@ -732,12 +760,58 @@ async def procesar(db: AsyncSession = Depends(get_db)):
             pred_insertada = 1
             await db.commit()
 
+        # PASO 3: insertar predicciones retroactivas para horas de HOY sin predicción
+        hoy = ahora.date()
+        horas_hoy = (await db.execute(text("""
+            SELECT DISTINCT h.hora FROM historico h
+            WHERE h.fecha = :hoy AND h.loteria = 'Lotto Activo'
+              AND NOT EXISTS (
+                  SELECT 1 FROM auditoria_ia a
+                  WHERE a.fecha = h.fecha AND a.hora = h.hora
+              )
+        """), {"hoy": hoy})).fetchall()
+
+        retro = 0
+        for (hora_r,) in horas_hoy:
+            t3 = (await db.execute(text("""
+                SELECT animalito, probabilidad FROM probabilidades_hora
+                WHERE hora=:hora ORDER BY probabilidad DESC LIMIT 3
+            """), {"hora": hora_r})).fetchall()
+            if not t3: continue
+            r2 = (await db.execute(text("""
+                SELECT efectividad_top3, es_rentable FROM rentabilidad_hora WHERE hora=:hora
+            """), {"hora": hora_r})).fetchone()
+            rr = (await db.execute(text("""
+                SELECT animalito FROM historico
+                WHERE fecha=:hoy AND hora=:hora AND loteria='Lotto Activo' LIMIT 1
+            """), {"hoy": hoy, "hora": hora_r})).fetchone()
+            await db.execute(text("""
+                INSERT INTO auditoria_ia
+                    (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
+                     confianza_pct, resultado_real, acierto, confianza_hora, es_hora_rentable)
+                VALUES (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :res, :ac, :ef3, :rent)
+                ON CONFLICT (fecha, hora) DO NOTHING
+            """), {
+                "fecha": hoy, "hora": hora_r,
+                "p1": t3[0][0], "p2": t3[1][0] if len(t3)>1 else t3[0][0],
+                "p3": t3[2][0] if len(t3)>2 else t3[0][0],
+                "conf": round(float(t3[0][1])*100, 1),
+                "res": rr[0] if rr else "PENDIENTE",
+                "ac": (t3[0][0].lower()==rr[0].lower()) if rr else None,
+                "ef3": float(r2[0]) if r2 else 0,
+                "rent": bool(r2[1]) if r2 else False,
+            })
+            retro += 1
+        if retro: await db.commit()
+
         return {
             "status": "success",
             "calibradas": calibradas,
+            "retro_insertadas": retro,
             "prediccion_hora": siguiente,
             "pred_insertada": pred_insertada,
-            "message": f"✅ {calibradas} filas calibradas | Pred → {siguiente}: {top3[0][0].upper() if top3 else '?'}"
+            "message": (f"✅ {calibradas} calibradas | {retro} retro | "
+                       f"Pred → {siguiente}: {top3[0][0].upper() if top3 else '?'}")
         }
     except Exception as e:
         await db.rollback()
@@ -989,7 +1063,9 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         await db.commit()
 
         # PASO 4: Reconstruir markov_transiciones completo (pares consecutivos por hora)
+        # Borrar y reinsertar (sin ON CONFLICT — evita error si no hay UNIQUE constraint)
         await db.execute(text("DELETE FROM markov_transiciones"))
+        await db.commit()
         await db.execute(text("""
             INSERT INTO markov_transiciones (hora, animal_previo, animal_sig, frecuencia, probabilidad)
             WITH pares AS (
@@ -999,15 +1075,15 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
                     h2.animalito AS animal_sig
                 FROM historico h1
                 JOIN historico h2
-                    ON  h2.fecha    = h1.fecha + INTERVAL '1 day'
-                    AND h1.hora     = h2.hora
-                    AND h1.loteria  = 'Lotto Activo'
-                    AND h2.loteria  = 'Lotto Activo'
+                    ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
+                    AND h1.hora    = h2.hora
+                    AND h1.loteria = 'Lotto Activo'
+                    AND h2.loteria = 'Lotto Activo'
             ),
             conteos AS (
                 SELECT hora, animal_previo, animal_sig,
-                       COUNT(*) AS frec,
-                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+                       COUNT(*)                                                    AS frec,
+                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo)       AS total_prev
                 FROM pares
                 GROUP BY hora, animal_previo, animal_sig
             )
@@ -1015,9 +1091,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
                    frec,
                    ROUND((frec::FLOAT / NULLIF(total_prev,0) * 100)::numeric, 2)
             FROM conteos
-            ON CONFLICT (hora, animal_previo, animal_sig) DO UPDATE SET
-                frecuencia   = EXCLUDED.frecuencia,
-                probabilidad = EXCLUDED.probabilidad
         """))
         await db.commit()
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
