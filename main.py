@@ -225,15 +225,17 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "SELECT hora,efectividad_top3 FROM rentabilidad_hora "
             "WHERE es_rentable=TRUE ORDER BY efectividad_top3 DESC"))).fetchall()
 
-        ac3_row = (await db.execute(text("""
-            SELECT COUNT(*) FROM auditoria_ia a
-            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
-            WHERE LOWER(TRIM(h.animalito)) IN (
-                LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
-                LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
-                LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
-            ) AND a.prediccion_1 IS NOT NULL
-        """))).scalar() or 0
+        # Leer top3 directo de rentabilidad_hora (más rápido, sin JOIN pesado)
+        rh_tot = (await db.execute(text("""
+            SELECT COALESCE(SUM(total_sorteos),0),
+                   COALESCE(SUM(aciertos_top1),0),
+                   COALESCE(SUM(aciertos_top3),0),
+                   ROUND(COALESCE(SUM(aciertos_top3),0)::numeric /
+                       NULLIF(COALESCE(SUM(total_sorteos),0),0)*100, 2)
+            FROM rentabilidad_hora
+        """))).fetchone()
+        ac3_row = int(rh_tot[2] or 0)
+        ef_top3_rh = float(rh_tot[3] or 0)
 
         markov_total = (await db.execute(text(
             "SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
@@ -244,9 +246,9 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         gen   = (await db.execute(text(
             "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"))).scalar() or 1
 
-        total_cal = int(met[1] or 0)
-        ac1       = int(met[2] or 0)
-        ef_top3   = round(int(ac3_row) / max(total_cal, 1) * 100, 2)
+        total_cal = int(rh_tot[0] or 0)   # total_sorteos de rentabilidad_hora
+        ac1       = int(rh_tot[1] or 0)   # aciertos_top1 de rentabilidad_hora
+        ef_top3   = ef_top3_rh
 
         return {
             "estado": "✅ SISTEMA ACTIVO — Motor V10",
@@ -270,7 +272,7 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "metricas": {
                 "total": int(met[0] or 0), "calibradas": total_cal,
                 "aciertos_top1": ac1, "aciertos_top3": int(ac3_row),
-                "efectividad_top1": float(met[3] or 0),
+                "efectividad_top1": round(ac1/max(total_cal,1)*100, 2),
                 "efectividad_top3": ef_top3,
             },
             "historico": {
@@ -283,7 +285,7 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "total_calibrados": total_cal,
             "aciertos_top1": ac1,
             "aciertos_top3": int(ac3_row),
-            "efectividad_top1": float(met[3] or 0),
+            "efectividad_top1": round(ac1/max(total_cal,1)*100, 2),
             "efectividad_top3": ef_top3,
             "prediccion_actual": {
                 "animal_predicho":  p[2] if p else None,
@@ -298,7 +300,14 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             } if p else None,
         }
     except Exception as e:
-        return {"estado": f"❌ ERROR: {str(e)}"}
+        import traceback; traceback.print_exc()
+        return {
+            "estado": f"❌ ERROR: {str(e)}",
+            "total_db": 0, "total_calibrados": 0,
+            "aciertos_top1": 0, "aciertos_top3": 0,
+            "efectividad_top1": 0.0, "efectividad_top3": 0.0,
+            "horas_rentables": [], "prediccion_actual": None,
+        }
 
 
 # ═══════════════════════════════════════════════════════════
