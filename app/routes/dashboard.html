@@ -87,6 +87,7 @@ tbody tr:last-child td{border-bottom:none}
 .bb2{background:var(--b2);border-color:rgba(56,182,255,.2);color:var(--b)}
 .br2{background:var(--r2);border-color:rgba(255,51,85,.2);color:var(--r)}
 .by2{background:var(--y2);border-color:rgba(255,194,51,.2);color:var(--y)}
+        .bsql{border-color:#a855f7;color:#a855f7}
 .inp{background:var(--panel);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px 10px;border-radius:4px}
 .inp:focus{outline:none;border-color:var(--g)}
 ::-webkit-scrollbar{width:5px;height:5px}
@@ -139,6 +140,7 @@ tbody tr:last-child td{border-bottom:none}
         <button class="btn bg2" onclick="cargarEstado()">↺ ACTUALIZAR</button>
         <button class="btn bb2" onclick="procesarAhora()">▶ PROCESAR</button>
         <button class="btn by2" onclick="cargarUltimo()">⬇ CARGAR ÚLTIMO</button>
+        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
       </div>
     </div>
     <div>
@@ -567,6 +569,42 @@ function limpiarFiltros(){
 }
 
 async function procesarAhora(){try{await fetch('/procesar');setTimeout(()=>{cargarEstado();cargarAudit();},3000);}catch(e){}}
+async function entrenarSQL(){
+    const btn = document.getElementById('btnSQL');
+    if(!btn) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ ENTRENANDO...';
+    btn.style.borderColor = '#a855f7';
+    btn.style.opacity = '0.7';
+    try {
+        const r = await fetch('/aprender-sql');
+        const d = await r.json();
+        if(d.status === 'success'){
+            btn.textContent = '✅ LISTO — ' + d.tiempo_seg + 's';
+            btn.style.borderColor = '#10b981';
+            btn.style.color = '#10b981';
+            // Mostrar resultado en consola y actualizar dashboard
+            console.log('Entrenamiento:', d.message);
+            setTimeout(()=>{
+                cargarEstado();
+                cargarAudit();
+                btn.textContent = '⚡ ENTRENAR COMPLETO';
+                btn.style.borderColor = '#a855f7';
+                btn.style.color = '#a855f7';
+                btn.disabled = false;
+            }, 4000);
+        } else {
+            btn.textContent = '❌ ERROR';
+            btn.style.borderColor = '#ef4444';
+            btn.style.color = '#ef4444';
+            console.error('Error:', d.message);
+            setTimeout(()=>{ btn.textContent='⚡ ENTRENAR COMPLETO'; btn.disabled=false; }, 5000);
+        }
+    } catch(e) {
+        btn.textContent = '❌ TIMEOUT — ver /tarea';
+        setTimeout(()=>{ btn.textContent='⚡ ENTRENAR COMPLETO'; btn.disabled=false; }, 5000);
+    }
+}
 async function cargarUltimo(){try{const d=await fetch('/cargar-ultimo').then(r=>r.json());if(d.ok)setTimeout(()=>{cargarEstado();cargarAudit();},2000);}catch(e){}}
 
 function horaActual(){
