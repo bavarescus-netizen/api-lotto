@@ -1030,31 +1030,37 @@ async def entrenar_modelo(db) -> dict:
         """))
 
         # Reconstruir probabilidades_hora
-        await db.execute(text("DELETE FROM probabilidades_hora"))
-        await db.execute(text("""
-            INSERT INTO probabilidades_hora
-                (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
-            WITH base AS (
-                SELECT hora, animalito, COUNT(*) AS total_hist
-                FROM historico WHERE loteria='Lotto Activo' GROUP BY hora, animalito
-            ),
-            reciente AS (
-                SELECT hora, animalito, COUNT(*) AS total_rec
-                FROM historico
-                WHERE fecha >= CURRENT_DATE-INTERVAL '60 days' AND loteria='Lotto Activo'
-                GROUP BY hora, animalito
-            ),
-            totales AS (
-                SELECT hora, SUM(total_hist) AS gran_total FROM base GROUP BY hora
-            )
-            SELECT b.hora, b.animalito, b.total_hist,
-                ROUND((b.total_hist::FLOAT/NULLIF(t.gran_total,0)*100)::numeric,2),
-                CASE WHEN COALESCE(r.total_rec,0)>=2 THEN 'CALIENTE' ELSE 'FRIO' END,
-                NOW()
-            FROM base b
-            JOIN totales t ON b.hora=t.hora
-            LEFT JOIN reciente r ON b.hora=r.hora AND b.animalito=r.animalito
-        """))
+        # Reconstruir probabilidades_hora (con fallback si schema difiere)
+        try:
+            await db.execute(text("DELETE FROM probabilidades_hora"))
+            await db.execute(text("""
+                INSERT INTO probabilidades_hora
+                    (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
+                WITH base AS (
+                    SELECT hora, animalito, COUNT(*) AS total_hist
+                    FROM historico WHERE loteria='Lotto Activo' GROUP BY hora, animalito
+                ),
+                reciente AS (
+                    SELECT hora, animalito, COUNT(*) AS total_rec
+                    FROM historico
+                    WHERE fecha >= CURRENT_DATE-INTERVAL '60 days' AND loteria='Lotto Activo'
+                    GROUP BY hora, animalito
+                ),
+                totales AS (
+                    SELECT hora, SUM(total_hist) AS gran_total FROM base GROUP BY hora
+                )
+                SELECT b.hora::VARCHAR, b.animalito, b.total_hist,
+                    ROUND((b.total_hist::FLOAT/NULLIF(t.gran_total,0)*100)::numeric,2),
+                    CASE WHEN COALESCE(r.total_rec,0)>=2 THEN 'CALIENTE' ELSE 'FRIO' END,
+                    NOW()
+                FROM base b
+                JOIN totales t ON b.hora=t.hora
+                LEFT JOIN reciente r ON b.hora=r.hora AND b.animalito=r.animalito
+            """))
+            await db.commit()
+        except Exception as e_prob:
+            await db.rollback()
+            import logging; logging.getLogger(__name__).warning(f"probabilidades_hora skip: {e_prob}")
 
         # Rentabilidad por hora
         rentabilidad = await calcular_rentabilidad_horas(db)
