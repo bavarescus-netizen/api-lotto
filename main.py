@@ -742,6 +742,201 @@ async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db
         return {"error": "Formato inválido. Use YYYY-MM-DD"}
 
 
+
+
+@app.get("/aprender-sql")
+async def aprender_sql(db: AsyncSession = Depends(get_db)):
+    """
+    Entrena el modelo completo usando SQL puro en Neon.
+    Procesa todos los sorteos desde 2018 en ~10-30 segundos.
+    SIN loops Python, todo corre en la base de datos.
+    """
+    import time
+    t0 = time.time()
+    try:
+        # PASO 1: Frecuencias históricas por hora
+        await db.execute(text("DROP TABLE IF EXISTS _freq_hora"))
+        await db.execute(text("""
+            CREATE TEMP TABLE _freq_hora AS
+            WITH base AS (
+                SELECT hora, animalito, COUNT(*) AS veces,
+                    SUM(COUNT(*)) OVER (PARTITION BY hora) AS total_hora
+                FROM historico WHERE loteria = 'Lotto Activo'
+                GROUP BY hora, animalito
+            )
+            SELECT hora, animalito, veces,
+                ROUND((veces::FLOAT / NULLIF(total_hora,0) * 100)::numeric, 2) AS pct,
+                RANK() OVER (PARTITION BY hora ORDER BY veces DESC) AS rank_hora
+            FROM base
+        """))
+
+        # PASO 2: Scores y top3 para cada sorteo histórico (1 query masivo)
+        await db.execute(text("DROP TABLE IF EXISTS _pred_masivo"))
+        await db.execute(text("""
+            CREATE TEMP TABLE _pred_masivo AS
+            WITH
+            sorteos AS (
+                SELECT fecha, hora, animalito AS real
+                FROM historico WHERE loteria = 'Lotto Activo'
+            ),
+            freq_hasta AS (
+                SELECT s.fecha AS fs, s.hora, h.animalito,
+                    COUNT(*) AS veces,
+                    SUM(COUNT(*)) OVER (PARTITION BY s.fecha, s.hora) AS total
+                FROM sorteos s
+                JOIN historico h ON h.hora = s.hora
+                    AND h.fecha < s.fecha AND h.loteria = 'Lotto Activo'
+                GROUP BY s.fecha, s.hora, h.animalito
+            ),
+            dias_aus AS (
+                SELECT s.fecha AS fs, s.hora, h.animalito,
+                    (s.fecha - MAX(h.fecha)) AS dias
+                FROM sorteos s
+                JOIN historico h ON h.hora = s.hora
+                    AND h.fecha < s.fecha AND h.loteria = 'Lotto Activo'
+                GROUP BY s.fecha, s.hora, h.animalito
+            ),
+            scores AS (
+                SELECT f.fs, f.hora, f.animalito,
+                    (f.veces::FLOAT / NULLIF(f.total,0)) * 0.4 +
+                    LEAST(COALESCE(d.dias,0)::FLOAT / 60.0, 1.0) * 0.6 AS sc
+                FROM freq_hasta f
+                LEFT JOIN dias_aus d ON d.fs=f.fs AND d.hora=f.hora AND d.animalito=f.animalito
+            ),
+            ranked AS (
+                SELECT fs, hora, animalito, sc,
+                    RANK() OVER (PARTITION BY fs, hora ORDER BY sc DESC) AS rk
+                FROM scores
+            ),
+            top3 AS (
+                SELECT fs AS fecha, hora,
+                    MAX(CASE WHEN rk=1 THEN animalito END) AS pred1,
+                    MAX(CASE WHEN rk=2 THEN animalito END) AS pred2,
+                    MAX(CASE WHEN rk=3 THEN animalito END) AS pred3,
+                    LEAST(GREATEST(ROUND(
+                        (MAX(CASE WHEN rk=1 THEN sc END) -
+                         MAX(CASE WHEN rk=2 THEN sc END)) * 100
+                    ), 0), 100) AS conf
+                FROM ranked WHERE rk <= 3
+                GROUP BY fs, hora
+            )
+            SELECT t.fecha, t.hora, t.pred1, t.pred2, t.pred3, t.conf,
+                s.real,
+                (LOWER(TRIM(t.pred1)) = LOWER(TRIM(s.real))) AS ac1,
+                (LOWER(TRIM(s.real)) IN (
+                    LOWER(TRIM(COALESCE(t.pred1,'__'))),
+                    LOWER(TRIM(COALESCE(t.pred2,'__'))),
+                    LOWER(TRIM(COALESCE(t.pred3,'__')))
+                )) AS ac3
+            FROM top3 t JOIN sorteos s ON s.fecha=t.fecha AND s.hora=t.hora
+            WHERE t.pred1 IS NOT NULL
+        """))
+
+        # PASO 3: Upsert masivo en auditoria_ia
+        r = await db.execute(text("""
+            INSERT INTO auditoria_ia
+                (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
+                 confianza_pct, resultado_real, acierto)
+            SELECT fecha, hora, pred1, pred1, pred2, pred3,
+                   conf::FLOAT, real, ac1
+            FROM _pred_masivo
+            ON CONFLICT (fecha, hora) DO UPDATE SET
+                animal_predicho = EXCLUDED.animal_predicho,
+                prediccion_1    = EXCLUDED.prediccion_1,
+                prediccion_2    = EXCLUDED.prediccion_2,
+                prediccion_3    = EXCLUDED.prediccion_3,
+                confianza_pct   = EXCLUDED.confianza_pct,
+                resultado_real  = EXCLUDED.resultado_real,
+                acierto         = EXCLUDED.acierto
+            WHERE auditoria_ia.prediccion_1 IS NULL
+               OR auditoria_ia.resultado_real IS NULL
+               OR auditoria_ia.resultado_real = 'PENDIENTE'
+        """))
+        insertados = r.rowcount
+
+        # PASO 4: Actualizar rentabilidad_hora
+        await db.execute(text("""
+            INSERT INTO rentabilidad_hora
+                (hora, total_sorteos, aciertos_top1, aciertos_top3,
+                 efectividad_top1, efectividad_top3, es_rentable, ultima_actualizacion)
+            SELECT hora,
+                COUNT(*) AS total,
+                COUNT(CASE WHEN acierto=TRUE THEN 1 END) AS ac1,
+                COUNT(CASE WHEN
+                    LOWER(TRIM(resultado_real)) IN (
+                        LOWER(TRIM(COALESCE(prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_3,'__')))
+                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END) AS ac3,
+                ROUND(COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric /
+                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2),
+                ROUND(COUNT(CASE WHEN
+                    LOWER(TRIM(resultado_real)) IN (
+                        LOWER(TRIM(COALESCE(prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_3,'__')))
+                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
+                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2),
+                (ROUND(COUNT(CASE WHEN
+                    LOWER(TRIM(resultado_real)) IN (
+                        LOWER(TRIM(COALESCE(prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_3,'__')))
+                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
+                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2) >= 10.0),
+                NOW()
+            FROM auditoria_ia
+            WHERE acierto IS NOT NULL
+            GROUP BY hora
+            ON CONFLICT (hora) DO UPDATE SET
+                total_sorteos    = EXCLUDED.total_sorteos,
+                aciertos_top1    = EXCLUDED.aciertos_top1,
+                aciertos_top3    = EXCLUDED.aciertos_top3,
+                efectividad_top1 = EXCLUDED.efectividad_top1,
+                efectividad_top3 = EXCLUDED.efectividad_top3,
+                es_rentable      = EXCLUDED.es_rentable,
+                ultima_actualizacion = NOW()
+        """))
+
+        await db.commit()
+
+        # Métricas finales
+        res = (await db.execute(text("""
+            SELECT COUNT(*),
+                COUNT(CASE WHEN acierto=TRUE THEN 1 END),
+                COUNT(CASE WHEN LOWER(TRIM(resultado_real)) IN (
+                    LOWER(TRIM(COALESCE(prediccion_1,'__'))),
+                    LOWER(TRIM(COALESCE(prediccion_2,'__'))),
+                    LOWER(TRIM(COALESCE(prediccion_3,'__')))
+                ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)
+            FROM auditoria_ia WHERE acierto IS NOT NULL
+        """))).fetchone()
+
+        total = int(res[0] or 0)
+        ac1   = int(res[1] or 0)
+        ac3   = int(res[2] or 0)
+        ef1   = round(ac1/total*100,2) if total>0 else 0
+        ef3   = round(ac3/total*100,2) if total>0 else 0
+        elapsed = round(time.time() - t0, 1)
+
+        return {
+            "status":     "success",
+            "tiempo_seg": elapsed,
+            "insertados": insertados,
+            "total_calibrados": total,
+            "efectividad_top1": ef1,
+            "efectividad_top3": ef3,
+            "message": (
+                f"✅ Entrenamiento SQL completo en {elapsed}s | "
+                f"{insertados:,} registros procesados | "
+                f"Top1: {ef1}% | Top3: {ef3}%"
+            )
+        }
+    except Exception as e:
+        await db.rollback()
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "LOTTOAI PRO V10", "markov": True, "decay": True}
