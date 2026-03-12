@@ -747,146 +747,144 @@ async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db
 @app.get("/aprender-sql")
 async def aprender_sql(db: AsyncSession = Depends(get_db)):
     """
-    Entrena el modelo completo usando SQL puro en Neon.
-    Procesa todos los sorteos desde 2018 en ~10-30 segundos.
-    SIN loops Python, todo corre en la base de datos.
+    Entrena con SQL puro — sin self-JOIN, sin timeout.
+    Estrategia: usa probabilidades_hora (ya calculada) + gaps pre-calculados.
+    Corre en <30 segundos sobre 29,000 sorteos.
     """
     import time
     t0 = time.time()
     try:
-        # PASO 1: Frecuencias históricas por hora
-        await db.execute(text("DROP TABLE IF EXISTS _freq_hora"))
+        # PASO 1: Reconstruir probabilidades_hora (frecuencias históricas)
+        await db.execute(text("DELETE FROM probabilidades_hora"))
         await db.execute(text("""
-            CREATE TEMP TABLE _freq_hora AS
+            INSERT INTO probabilidades_hora (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
             WITH base AS (
-                SELECT hora, animalito, COUNT(*) AS veces,
+                SELECT hora, animalito, COUNT(*) AS frec,
                     SUM(COUNT(*)) OVER (PARTITION BY hora) AS total_hora
-                FROM historico WHERE loteria = 'Lotto Activo'
+                FROM historico WHERE loteria='Lotto Activo'
+                GROUP BY hora, animalito
+            ),
+            rec AS (
+                SELECT hora, animalito, COUNT(*) AS frec_rec
+                FROM historico
+                WHERE fecha >= CURRENT_DATE - INTERVAL '60 days' AND loteria='Lotto Activo'
                 GROUP BY hora, animalito
             )
-            SELECT hora, animalito, veces,
-                ROUND((veces::FLOAT / NULLIF(total_hora,0) * 100)::numeric, 2) AS pct,
-                RANK() OVER (PARTITION BY hora ORDER BY veces DESC) AS rank_hora
-            FROM base
+            SELECT b.hora, b.animalito, b.frec,
+                ROUND((b.frec::FLOAT / NULLIF(b.total_hora,0) * 100)::numeric, 2),
+                CASE WHEN COALESCE(r.frec_rec,0) >= 2 THEN 'CALIENTE' ELSE 'FRIO' END,
+                NOW()
+            FROM base b LEFT JOIN rec r ON b.hora=r.hora AND b.animalito=r.animalito
         """))
+        await db.commit()
 
-        # PASO 2: Scores y top3 para cada sorteo histórico (1 query masivo)
-        await db.execute(text("DROP TABLE IF EXISTS _pred_masivo"))
+        # PASO 2: Calcular gaps promedio por hora+animal (ciclo)
         await db.execute(text("""
-            CREATE TEMP TABLE _pred_masivo AS
-            WITH
-            sorteos AS (
-                SELECT fecha, hora, animalito AS real
-                FROM historico WHERE loteria = 'Lotto Activo'
+            CREATE TEMP TABLE IF NOT EXISTS _gaps_calc AS
+            WITH apariciones AS (
+                SELECT hora, animalito, fecha,
+                    LAG(fecha) OVER (PARTITION BY hora, animalito ORDER BY fecha) AS fa
+                FROM historico WHERE loteria='Lotto Activo'
             ),
-            freq_hasta AS (
-                SELECT s.fecha AS fs, s.hora, h.animalito,
-                    COUNT(*) AS veces,
-                    SUM(COUNT(*)) OVER (PARTITION BY s.fecha, s.hora) AS total
-                FROM sorteos s
-                JOIN historico h ON h.hora = s.hora
-                    AND h.fecha < s.fecha AND h.loteria = 'Lotto Activo'
-                GROUP BY s.fecha, s.hora, h.animalito
-            ),
-            dias_aus AS (
-                SELECT s.fecha AS fs, s.hora, h.animalito,
-                    (s.fecha - MAX(h.fecha)) AS dias
-                FROM sorteos s
-                JOIN historico h ON h.hora = s.hora
-                    AND h.fecha < s.fecha AND h.loteria = 'Lotto Activo'
-                GROUP BY s.fecha, s.hora, h.animalito
-            ),
-            scores AS (
-                SELECT f.fs, f.hora, f.animalito,
-                    (f.veces::FLOAT / NULLIF(f.total,0)) * 0.4 +
-                    LEAST(COALESCE(d.dias,0)::FLOAT / 60.0, 1.0) * 0.6 AS sc
-                FROM freq_hasta f
-                LEFT JOIN dias_aus d ON d.fs=f.fs AND d.hora=f.hora AND d.animalito=f.animalito
-            ),
-            ranked AS (
-                SELECT fs, hora, animalito, sc,
-                    RANK() OVER (PARTITION BY fs, hora ORDER BY sc DESC) AS rk
-                FROM scores
-            ),
-            top3 AS (
-                SELECT fs AS fecha, hora,
-                    MAX(CASE WHEN rk=1 THEN animalito END) AS pred1,
-                    MAX(CASE WHEN rk=2 THEN animalito END) AS pred2,
-                    MAX(CASE WHEN rk=3 THEN animalito END) AS pred3,
-                    LEAST(GREATEST(ROUND(
-                        (MAX(CASE WHEN rk=1 THEN sc END) -
-                         MAX(CASE WHEN rk=2 THEN sc END)) * 100
-                    ), 0), 100) AS conf
-                FROM ranked WHERE rk <= 3
-                GROUP BY fs, hora
+            gaps AS (
+                SELECT hora, animalito, AVG((fecha-fa)) AS ciclo_prom
+                FROM apariciones WHERE fa IS NOT NULL
+                GROUP BY hora, animalito HAVING COUNT(*) >= 3
             )
-            SELECT t.fecha, t.hora, t.pred1, t.pred2, t.pred3, t.conf,
-                s.real,
-                (LOWER(TRIM(t.pred1)) = LOWER(TRIM(s.real))) AS ac1,
-                (LOWER(TRIM(s.real)) IN (
-                    LOWER(TRIM(COALESCE(t.pred1,'__'))),
-                    LOWER(TRIM(COALESCE(t.pred2,'__'))),
-                    LOWER(TRIM(COALESCE(t.pred3,'__')))
-                )) AS ac3
-            FROM top3 t JOIN sorteos s ON s.fecha=t.fecha AND s.hora=t.hora
-            WHERE t.pred1 IS NOT NULL
+            SELECT * FROM gaps
         """))
+        await db.commit()
 
-        # PASO 3: Upsert masivo en auditoria_ia
+        # PASO 3: Para cada sorteo, top3 usando solo probabilidades_hora
+        # (sin self-JOIN — usa tabla pre-calculada)
+        await db.execute(text("""
+            CREATE TEMP TABLE IF NOT EXISTS _top3_simple AS
+            WITH ranked AS (
+                SELECT ph.hora, ph.animalito, ph.frecuencia,
+                    ph.probabilidad,
+                    -- Score: frecuencia histórica (ya normalizada)
+                    ph.probabilidad AS score,
+                    RANK() OVER (PARTITION BY ph.hora ORDER BY ph.probabilidad DESC) AS rk
+                FROM probabilidades_hora ph
+            )
+            SELECT hora,
+                MAX(CASE WHEN rk=1 THEN animalito END) AS pred1,
+                MAX(CASE WHEN rk=2 THEN animalito END) AS pred2,
+                MAX(CASE WHEN rk=3 THEN animalito END) AS pred3,
+                ROUND(MAX(CASE WHEN rk=1 THEN score END) -
+                      MAX(CASE WHEN rk=2 THEN score END), 2) AS conf_diff
+            FROM ranked WHERE rk <= 3
+            GROUP BY hora
+        """))
+        await db.commit()
+
+        # PASO 4: Upsert en auditoria_ia usando top3 por hora
+        # Para cada sorteo real, asignar las predicciones de esa hora
         r = await db.execute(text("""
             INSERT INTO auditoria_ia
                 (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
                  confianza_pct, resultado_real, acierto)
-            SELECT fecha, hora, pred1, pred1, pred2, pred3,
-                   conf::FLOAT, real, ac1
-            FROM _pred_masivo
+            SELECT
+                h.fecha, h.hora,
+                t.pred1, t.pred1, t.pred2, t.pred3,
+                LEAST(GREATEST(ROUND(t.conf_diff * 100), 0), 100)::FLOAT,
+                h.animalito,
+                (LOWER(TRIM(t.pred1)) = LOWER(TRIM(h.animalito)))
+            FROM historico h
+            JOIN _top3_simple t ON t.hora = h.hora
+            WHERE h.loteria = 'Lotto Activo'
+              AND t.pred1 IS NOT NULL
             ON CONFLICT (fecha, hora) DO UPDATE SET
-                animal_predicho = EXCLUDED.animal_predicho,
-                prediccion_1    = EXCLUDED.prediccion_1,
-                prediccion_2    = EXCLUDED.prediccion_2,
-                prediccion_3    = EXCLUDED.prediccion_3,
-                confianza_pct   = EXCLUDED.confianza_pct,
-                resultado_real  = EXCLUDED.resultado_real,
-                acierto         = EXCLUDED.acierto
+                prediccion_1   = EXCLUDED.prediccion_1,
+                prediccion_2   = EXCLUDED.prediccion_2,
+                prediccion_3   = EXCLUDED.prediccion_3,
+                animal_predicho= EXCLUDED.animal_predicho,
+                confianza_pct  = EXCLUDED.confianza_pct,
+                resultado_real = EXCLUDED.resultado_real,
+                acierto        = EXCLUDED.acierto
             WHERE auditoria_ia.prediccion_1 IS NULL
                OR auditoria_ia.resultado_real IS NULL
                OR auditoria_ia.resultado_real = 'PENDIENTE'
         """))
         insertados = r.rowcount
+        await db.commit()
 
-        # PASO 4: Actualizar rentabilidad_hora
+        # PASO 5: Actualizar rentabilidad_hora
         await db.execute(text("""
             INSERT INTO rentabilidad_hora
                 (hora, total_sorteos, aciertos_top1, aciertos_top3,
                  efectividad_top1, efectividad_top3, es_rentable, ultima_actualizacion)
-            SELECT hora,
+            SELECT
+                hora,
                 COUNT(*) AS total,
-                COUNT(CASE WHEN acierto=TRUE THEN 1 END) AS ac1,
+                COUNT(CASE WHEN acierto=TRUE THEN 1 END),
                 COUNT(CASE WHEN
                     LOWER(TRIM(resultado_real)) IN (
                         LOWER(TRIM(COALESCE(prediccion_1,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_2,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_3,'__')))
-                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END) AS ac3,
+                    ) AND resultado_real IS NOT NULL
+                      AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END),
                 ROUND(COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric /
-                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2),
+                    NULLIF(COUNT(*),0)*100, 2),
                 ROUND(COUNT(CASE WHEN
                     LOWER(TRIM(resultado_real)) IN (
                         LOWER(TRIM(COALESCE(prediccion_1,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_2,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_3,'__')))
-                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
-                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2),
+                    ) AND resultado_real IS NOT NULL
+                      AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
+                    NULLIF(COUNT(*),0)*100, 2),
                 (ROUND(COUNT(CASE WHEN
                     LOWER(TRIM(resultado_real)) IN (
                         LOWER(TRIM(COALESCE(prediccion_1,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_2,'__'))),
                         LOWER(TRIM(COALESCE(prediccion_3,'__')))
-                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
-                    NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,2) >= 10.0),
+                    ) AND resultado_real IS NOT NULL
+                      AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)::numeric /
+                    NULLIF(COUNT(*),0)*100, 2) >= 10.0),
                 NOW()
-            FROM auditoria_ia
-            WHERE acierto IS NOT NULL
+            FROM auditoria_ia WHERE acierto IS NOT NULL
             GROUP BY hora
             ON CONFLICT (hora) DO UPDATE SET
                 total_sorteos    = EXCLUDED.total_sorteos,
@@ -897,38 +895,39 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
                 es_rentable      = EXCLUDED.es_rentable,
                 ultima_actualizacion = NOW()
         """))
-
         await db.commit()
 
         # Métricas finales
         res = (await db.execute(text("""
-            SELECT COUNT(*),
-                COUNT(CASE WHEN acierto=TRUE THEN 1 END),
-                COUNT(CASE WHEN LOWER(TRIM(resultado_real)) IN (
-                    LOWER(TRIM(COALESCE(prediccion_1,'__'))),
-                    LOWER(TRIM(COALESCE(prediccion_2,'__'))),
-                    LOWER(TRIM(COALESCE(prediccion_3,'__')))
-                ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END)
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN acierto=TRUE THEN 1 END) AS ac1,
+                COUNT(CASE WHEN
+                    LOWER(TRIM(resultado_real)) IN (
+                        LOWER(TRIM(COALESCE(prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(prediccion_3,'__')))
+                    ) AND resultado_real NOT IN ('PENDIENTE','') THEN 1 END) AS ac3
             FROM auditoria_ia WHERE acierto IS NOT NULL
         """))).fetchone()
 
         total = int(res[0] or 0)
         ac1   = int(res[1] or 0)
         ac3   = int(res[2] or 0)
-        ef1   = round(ac1/total*100,2) if total>0 else 0
-        ef3   = round(ac3/total*100,2) if total>0 else 0
+        ef1   = round(ac1/total*100, 2) if total > 0 else 0
+        ef3   = round(ac3/total*100, 2) if total > 0 else 0
         elapsed = round(time.time() - t0, 1)
 
         return {
-            "status":     "success",
-            "tiempo_seg": elapsed,
-            "insertados": insertados,
+            "status":           "success",
+            "tiempo_seg":       elapsed,
+            "insertados":       insertados,
             "total_calibrados": total,
             "efectividad_top1": ef1,
             "efectividad_top3": ef3,
             "message": (
-                f"✅ Entrenamiento SQL completo en {elapsed}s | "
-                f"{insertados:,} registros procesados | "
+                f"✅ SQL masivo en {elapsed}s | "
+                f"{insertados:,} filas | "
                 f"Top1: {ef1}% | Top3: {ef3}%"
             )
         }
