@@ -650,7 +650,99 @@ async def cargar_ultimo(db: AsyncSession = Depends(get_db)):
 
 @app.get("/procesar")
 async def procesar(db: AsyncSession = Depends(get_db)):
-    return await entrenar_modelo(db)
+    """
+    Procesa rápido: calibra filas pendientes + genera predicción para hora actual.
+    Para entrenamiento completo usa /aprender-sql.
+    """
+    try:
+        import pytz
+        from datetime import datetime
+        ahora = datetime.now(pytz.timezone('America/Caracas'))
+
+        # PASO 1: Calibrar solo las filas pendientes (rápido)
+        r = await db.execute(text("""
+            UPDATE auditoria_ia a
+            SET acierto        = (LOWER(TRIM(a.animal_predicho)) = LOWER(TRIM(h.animalito))),
+                resultado_real = h.animalito
+            FROM historico h
+            WHERE a.fecha = h.fecha AND a.hora = h.hora
+              AND h.loteria = 'Lotto Activo'
+              AND (a.acierto IS NULL
+                   OR a.resultado_real IS NULL
+                   OR a.resultado_real IN ('PENDIENTE',''))
+        """))
+        calibradas = r.rowcount
+        await db.commit()
+
+        # PASO 2: Insertar predicción para la hora actual/próxima si no existe
+        horas_map = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+                     12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+                     16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
+        h_actual = ahora.hour
+        # Siguiente hora de sorteo
+        siguiente = None
+        for h in sorted(horas_map.keys()):
+            if h > h_actual:
+                siguiente = horas_map[h]; break
+        if not siguiente:
+            siguiente = '08:00 AM'
+
+        # Obtener top3 de probabilidades_hora para esa hora
+        top3 = (await db.execute(text("""
+            SELECT animalito, probabilidad
+            FROM probabilidades_hora
+            WHERE hora = :hora
+            ORDER BY probabilidad DESC LIMIT 3
+        """), {"hora": siguiente})).fetchall()
+
+        pred_insertada = 0
+        if top3 and len(top3) >= 1:
+            p1 = top3[0][0]; p2 = top3[1][0] if len(top3)>1 else p1
+            p3 = top3[2][0] if len(top3)>2 else p2
+            conf = round(float(top3[0][1] - (top3[1][1] if len(top3)>1 else top3[0][1]))*100, 1) if len(top3)>1 else 5.0
+
+            # Calcular ef_top3 de esa hora
+            rent = (await db.execute(text("""
+                SELECT efectividad_top3, es_rentable
+                FROM rentabilidad_hora WHERE hora=:hora
+            """), {"hora": siguiente})).fetchone()
+            ef3 = float(rent[0]) if rent else 0
+            es_rent = bool(rent[1]) if rent else False
+
+            await db.execute(text("""
+                INSERT INTO auditoria_ia
+                    (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
+                     confianza_pct, resultado_real, acierto, confianza_hora, es_hora_rentable)
+                VALUES (:fecha, :hora, :p1, :p1, :p2, :p3,
+                        :conf, 'PENDIENTE', NULL, :ef3, :rent)
+                ON CONFLICT (fecha, hora) DO UPDATE SET
+                    prediccion_1    = EXCLUDED.prediccion_1,
+                    prediccion_2    = EXCLUDED.prediccion_2,
+                    prediccion_3    = EXCLUDED.prediccion_3,
+                    animal_predicho = EXCLUDED.animal_predicho,
+                    confianza_hora  = EXCLUDED.confianza_hora,
+                    es_hora_rentable= EXCLUDED.es_hora_rentable
+                WHERE auditoria_ia.resultado_real IN ('PENDIENTE','')
+                   OR auditoria_ia.resultado_real IS NULL
+            """), {
+                "fecha": ahora.date(), "hora": siguiente,
+                "p1": p1, "p2": p2, "p3": p3, "conf": conf,
+                "ef3": ef3, "rent": es_rent,
+            })
+            pred_insertada = 1
+            await db.commit()
+
+        return {
+            "status": "success",
+            "calibradas": calibradas,
+            "prediccion_hora": siguiente,
+            "pred_insertada": pred_insertada,
+            "message": f"✅ {calibradas} filas calibradas | Pred → {siguiente}: {top3[0][0].upper() if top3 else '?'}"
+        }
+    except Exception as e:
+        await db.rollback()
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/aprender")
