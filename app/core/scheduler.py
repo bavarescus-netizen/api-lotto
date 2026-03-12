@@ -1,3 +1,4 @@
+import os
 """
 SCHEDULER V6 — LOTTOAI PRO
 ===========================
@@ -469,12 +470,28 @@ async def ciclo_infinito():
     ultimo_aprendizaje  = hora_venezuela().date()
     ultima_rep_pendiente = hora_venezuela()
 
+    ultimo_ping = hora_venezuela()
+
     while True:
         try:
             ahora         = hora_venezuela()
             hora_actual   = ahora.hour
             minuto_actual = ahora.minute
             dia_semana    = ahora.weekday()   # 6 = domingo
+
+            # ── Self-ping cada 8 min para evitar que Render duerma ──
+            if (ahora - ultimo_ping).total_seconds() > 480:
+                try:
+                    import httpx
+                    # RENDER_EXTERNAL_URL debe estar en env vars de Render
+                    # Valor: https://api-lotto-goj5.onrender.com
+                    render_url = os.getenv("RENDER_EXTERNAL_URL", "https://api-lotto-goj5.onrender.com")
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        await client.get(f"{render_url}/health")
+                    logger.info(f"💓 Self-ping OK → {render_url}")
+                except Exception as pe:
+                    logger.debug(f"Self-ping skip: {pe}")
+                ultimo_ping = ahora
 
             # ── Reparar PEND. cada 30 min (aunque no sea hora de sorteo) ──
             if (ahora - ultima_rep_pendiente).total_seconds() > 1800:
