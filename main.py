@@ -200,63 +200,75 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════
 @app.get("/estado")
 async def estado_sistema(db: AsyncSession = Depends(get_db)):
+    import pytz
+    from datetime import datetime
     try:
-        u = (await db.execute(text(
-            "SELECT fecha,hora,animalito FROM historico WHERE loteria='Lotto Activo' "
-            "ORDER BY fecha DESC,hora DESC LIMIT 1"))).fetchone()
+        ahora = datetime.now(pytz.timezone('America/Caracas'))
 
+        # ── Último resultado capturado ──
+        u = (await db.execute(text(
+            "SELECT fecha,hora,animalito FROM historico "
+            "WHERE loteria='Lotto Activo' ORDER BY fecha DESC LIMIT 1"
+        ))).fetchone()
+
+        # ── Última predicción ──
         p = (await db.execute(text(
             "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
-            "prediccion_1,prediccion_2,prediccion_3,confianza_hora,es_hora_rentable "
-            "FROM auditoria_ia ORDER BY fecha DESC,hora DESC LIMIT 1"))).fetchone()
+            "prediccion_1,prediccion_2,prediccion_3,"
+            "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
+            "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
+        ))).fetchone()
 
-        met = (await db.execute(text("""
-            SELECT COUNT(*),
-                   COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),
-                   COUNT(CASE WHEN acierto=TRUE THEN 1 END),
-                   ROUND(COUNT(CASE WHEN acierto=TRUE THEN 1 END)::numeric/
-                       NULLIF(COUNT(CASE WHEN acierto IS NOT NULL THEN 1 END),0)*100,1)
-            FROM auditoria_ia"""))).fetchone()
-
-        hist = (await db.execute(text(
-            "SELECT COUNT(*),MIN(fecha),MAX(fecha) FROM historico WHERE loteria='Lotto Activo'"))).fetchone()
-
-        rent = (await db.execute(text(
-            "SELECT hora,efectividad_top3 FROM rentabilidad_hora "
-            "WHERE es_rentable=TRUE ORDER BY efectividad_top3 DESC"))).fetchall()
-
-        # Leer top3 directo de rentabilidad_hora (más rápido, sin JOIN pesado)
-        rh_tot = (await db.execute(text("""
-            SELECT COALESCE(SUM(total_sorteos),0),
-                   COALESCE(SUM(aciertos_top1),0),
-                   COALESCE(SUM(aciertos_top3),0),
-                   ROUND(COALESCE(SUM(aciertos_top3),0)::numeric /
-                       NULLIF(COALESCE(SUM(total_sorteos),0),0)*100, 2)
+        # ── Métricas desde rentabilidad_hora (sin JOINs pesados) ──
+        rh = (await db.execute(text("""
+            SELECT
+                COALESCE(SUM(total_sorteos),0)  AS total,
+                COALESCE(SUM(aciertos_top1),0)  AS ac1,
+                COALESCE(SUM(aciertos_top3),0)  AS ac3
             FROM rentabilidad_hora
         """))).fetchone()
-        ac3_row = int(rh_tot[2] or 0)
-        ef_top3_rh = float(rh_tot[3] or 0)
+        total_s = int(rh[0] or 0)
+        ac1     = int(rh[1] or 0)
+        ac3     = int(rh[2] or 0)
+        ef1     = round(ac1 / max(total_s, 1) * 100, 2)
+        ef3     = round(ac3 / max(total_s, 1) * 100, 2)
 
+        # ── Horas rentables ──
+        rent = (await db.execute(text(
+            "SELECT hora,efectividad_top3 FROM rentabilidad_hora "
+            "WHERE es_rentable=TRUE ORDER BY efectividad_top3 DESC"
+        ))).fetchall()
+
+        # ── Total historico ──
+        hist = (await db.execute(text(
+            "SELECT COUNT(*),MIN(fecha),MAX(fecha) FROM historico WHERE loteria='Lotto Activo'"
+        ))).fetchone()
+
+        # ── Markov ──
         markov_total = (await db.execute(text(
-            "SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+            "SELECT COUNT(*) FROM markov_transiciones"
+        ))).scalar() or 0
 
-        import pytz; from datetime import datetime
-        ahora = datetime.now(pytz.timezone('America/Caracas'))
-        pesos = await _obtener_pesos_globales(db)
-        gen   = (await db.execute(text(
-            "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"))).scalar() or 1
+        # ── Total auditoria ──
+        total_audit = (await db.execute(text(
+            "SELECT COUNT(*) FROM auditoria_ia"
+        ))).scalar() or 0
 
-        total_cal = int(rh_tot[0] or 0)   # total_sorteos de rentabilidad_hora
-        ac1       = int(rh_tot[1] or 0)   # aciertos_top1 de rentabilidad_hora
-        ef_top3   = ef_top3_rh
+        # ── Generación motor ──
+        gen = (await db.execute(text(
+            "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"
+        ))).scalar() or 1
+
+        hr = len(rent)
 
         return {
             "estado": "✅ SISTEMA ACTIVO — Motor V10",
             "hora_venezolana": ahora.strftime("%Y-%m-%d %H:%M:%S"),
             "motor": {
-                "version": "V10", "generacion": gen, "pesos": pesos,
+                "version": "V10", "generacion": gen,
                 "markov_transiciones": int(markov_total),
                 "decay_lambda": 0.008,
+                "pesos": {"reciente":0.25,"deuda":0.25,"anti":0.25,"patron":0.25},
             },
             "ultimo_capturado": {
                 "fecha": str(u[0]), "hora": u[1], "animal": u[2]
@@ -266,27 +278,27 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                 "pred1": p[6], "pred2": p[7], "pred3": p[8],
                 "confianza": round(float(p[3] or 0)),
                 "confianza_hora": round(float(p[9] or 0), 1),
-                "es_hora_rentable": bool(p[10]) if p[10] is not None else False,
+                "es_hora_rentable": bool(p[10]),
                 "real": p[4], "acierto": p[5],
             } if p else {},
             "metricas": {
-                "total": int(met[0] or 0), "calibradas": total_cal,
-                "aciertos_top1": ac1, "aciertos_top3": int(ac3_row),
-                "efectividad_top1": round(ac1/max(total_cal,1)*100, 2),
-                "efectividad_top3": ef_top3,
+                "total": int(total_audit), "calibradas": total_s,
+                "aciertos_top1": ac1, "aciertos_top3": ac3,
+                "efectividad_top1": ef1, "efectividad_top3": ef3,
             },
             "historico": {
                 "total": int(hist[0] or 0),
                 "desde": str(hist[1]), "hasta": str(hist[2]),
             },
             "horas_rentables": [{"hora": r[0], "ef_top3": float(r[1])} for r in rent],
-            # Aliases planos para el dashboard JS
-            "total_db": int(met[0] or 0),
-            "total_calibrados": total_cal,
-            "aciertos_top1": ac1,
-            "aciertos_top3": int(ac3_row),
-            "efectividad_top1": round(ac1/max(total_cal,1)*100, 2),
-            "efectividad_top3": ef_top3,
+            # ── Aliases planos para el dashboard JS ──
+            "total_db":          int(total_audit),
+            "total_calibrados":  total_s,
+            "aciertos_top1":     ac1,
+            "aciertos_top3":     ac3,
+            "efectividad_top1":  ef1,
+            "efectividad_top3":  ef3,
+            "horas_rentables_n": hr,
             "prediccion_actual": {
                 "animal_predicho":  p[2] if p else None,
                 "prediccion_1":     p[6] if p else None,
@@ -295,18 +307,19 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                 "hora":             p[1] if p else None,
                 "confianza_pct":    round(float(p[3] or 0)) if p else 0,
                 "confianza_hora":   round(float(p[9] or 0), 1) if p else 0,
-                "es_hora_rentable": bool(p[10]) if p and p[10] is not None else False,
+                "es_hora_rentable": bool(p[10]) if p else False,
                 "acierto":          p[5] if p else None,
             } if p else None,
         }
     except Exception as e:
         import traceback; traceback.print_exc()
         return {
-            "estado": f"❌ ERROR: {str(e)}",
-            "total_db": 0, "total_calibrados": 0,
-            "aciertos_top1": 0, "aciertos_top3": 0,
-            "efectividad_top1": 0.0, "efectividad_top3": 0.0,
-            "horas_rentables": [], "prediccion_actual": None,
+            "estado":           f"❌ ERROR /estado: {str(e)}",
+            "total_db":          0, "total_calibrados": 0,
+            "aciertos_top1":     0, "aciertos_top3":    0,
+            "efectividad_top1":  0.0, "efectividad_top3": 0.0,
+            "horas_rentables":   [], "prediccion_actual": None,
+            "horas_rentables_n": 0,
         }
 
 
@@ -883,6 +896,40 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
+        # PASO 4: Reconstruir markov_transiciones completo (pares consecutivos por hora)
+        await db.execute(text("DELETE FROM markov_transiciones"))
+        await db.execute(text("""
+            INSERT INTO markov_transiciones (hora, animal_previo, animal_sig, frecuencia, probabilidad)
+            WITH pares AS (
+                SELECT
+                    h1.hora,
+                    h1.animalito AS animal_previo,
+                    h2.animalito AS animal_sig
+                FROM historico h1
+                JOIN historico h2
+                    ON  h2.fecha    = h1.fecha + INTERVAL '1 day'
+                    AND h1.hora     = h2.hora
+                    AND h1.loteria  = 'Lotto Activo'
+                    AND h2.loteria  = 'Lotto Activo'
+            ),
+            conteos AS (
+                SELECT hora, animal_previo, animal_sig,
+                       COUNT(*) AS frec,
+                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+                FROM pares
+                GROUP BY hora, animal_previo, animal_sig
+            )
+            SELECT hora, animal_previo, animal_sig,
+                   frec,
+                   ROUND((frec::FLOAT / NULLIF(total_prev,0) * 100)::numeric, 2)
+            FROM conteos
+            ON CONFLICT (hora, animal_previo, animal_sig) DO UPDATE SET
+                frecuencia   = EXCLUDED.frecuencia,
+                probabilidad = EXCLUDED.probabilidad
+        """))
+        await db.commit()
+        markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+
         # Métricas finales
         res = (await db.execute(text("""
             SELECT
@@ -913,10 +960,12 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             "total_calibrados": total,
             "efectividad_top1": ef1,
             "efectividad_top3": ef3,
+            "markov_transiciones": int(markov_n),
             "message": (
                 f"✅ Entrenado en {elapsed}s | "
                 f"{insertados:,} filas | "
-                f"Top1: {ef1}% | Top3: {ef3}%"
+                f"Top1: {ef1}% | Top3: {ef3}% | "
+                f"Markov: {int(markov_n):,} transiciones"
             )
         }
     except Exception as e:
