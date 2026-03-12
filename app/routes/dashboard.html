@@ -219,7 +219,7 @@ tbody tr:last-child td{border-bottom:none}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <select class="inp" id="selMH" onchange="cargarMarkov()">
           <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
-          <option selected>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
+          <option>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
           <option>02:00 PM</option><option>03:00 PM</option><option>04:00 PM</option>
           <option>05:00 PM</option><option>06:00 PM</option><option>07:00 PM</option>
         </select>
@@ -568,7 +568,21 @@ function limpiarFiltros(){
   cargarHistorial();
 }
 
-async function procesarAhora(){try{await fetch('/procesar');setTimeout(()=>{cargarEstado();cargarAudit();},3000);}catch(e){}}
+async function procesarAhora(){
+  const btn=document.querySelector('.btn[onclick*="procesarAhora"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ PROCESANDO...';}
+  try{
+    const ctrl=new AbortController();
+    setTimeout(()=>ctrl.abort(),30000);
+    await fetch('/procesar',{signal:ctrl.signal});
+    setTimeout(()=>{cargarEstado();cargarAudit();},2000);
+  }catch(e){
+    const msg=e.name==='AbortError'?'⏱ Timeout — intenta de nuevo':('❌ '+e.message);
+    alert(msg);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='▶ PROCESAR';}
+  }
+}
 async function entrenarSQL(){
     const btn = document.getElementById('btnSQL');
     if(!btn) return;
@@ -605,7 +619,26 @@ async function entrenarSQL(){
         setTimeout(()=>{ btn.textContent='⚡ ENTRENAR COMPLETO'; btn.disabled=false; }, 5000);
     }
 }
-async function cargarUltimo(){try{const d=await fetch('/cargar-ultimo').then(r=>r.json());if(d.ok)setTimeout(()=>{cargarEstado();cargarAudit();},2000);}catch(e){}}
+async function cargarUltimo(){
+  const btn=document.querySelector('button[onclick*="cargarUltimo"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ CARGANDO...';}
+  try{
+    const ctrl=new AbortController();
+    const tid=setTimeout(()=>ctrl.abort(),30000);
+    const r=await fetch('/cargar-ultimo',{signal:ctrl.signal});
+    clearTimeout(tid);
+    const d=await r.json();
+    if(d.ok||d.animal||d.status==='ok'){
+      setTimeout(()=>{cargarEstado();cargarAudit();},1500);
+    } else {
+      alert('⚠️ '+(d.message||JSON.stringify(d)));
+    }
+  }catch(e){
+    alert(e.name==='AbortError'?'⏱ Servidor despertando — espera 30s y reintenta':('❌ '+e.message));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='⬇ CARGAR ÚLTIMO';}
+  }
+}
 
 function horaActual(){
   const h=new Date().getHours();
@@ -617,8 +650,21 @@ function horaActual(){
 document.addEventListener('DOMContentLoaded',async()=>{
   await cargarEstado();
   await cargarAudit();
-  cargarHistorial(); // carga automática sin filtros
+  cargarHistorial();
   setInterval(async()=>{await cargarEstado();await cargarAudit();},5*60*1000);
+  // Setear selector Markov a hora venezolana actual
+  (function(){
+    const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
+    const h=now.getHours();
+    const slots={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+                 12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+                 16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
+    let best=8;
+    for(const s of Object.keys(slots).map(Number)){if(s<=h)best=s;}
+    const label=slots[best]||'08:00 AM';
+    const sel=document.getElementById('selMH');
+    if(sel){for(const o of sel.options){if(o.textContent.trim()===label){o.selected=true;break;}}}
+  })();
 });
 </script>
 </body>
