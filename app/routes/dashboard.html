@@ -725,10 +725,10 @@ function horaActual(){
   // Si estamos en la ventana 00-30 min de una hora de sorteo → esa hora
   // Si ya pasaron 30 min → la siguiente hora de sorteo
   for(const s of slots){
-    if(s===h && mn<=30) return lbls[s];       // dentro de ventana
+    if(s===h && mn<=2) return lbls[s];         // ventana: 0-2 min → este sorteo
     if(s > h) return lbls[s];                  // próximo sorteo
   }
-  return lbls[8]; // default mañana
+  return lbls[8]; // default mañana (después de 07:00 PM)
 }
 
 // INIT
