@@ -242,56 +242,107 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
 # ratio < 1.0 = más frío que el azar
 # ══════════════════════════════════════════════════════
 async def calcular_frecuencia_reciente(db, hora_str, fecha_limite=None):
+    """Ventana deslizante ponderada: 7d×50% + 30d×30% + 90d×20%"""
     if fecha_limite is None:
         fecha_limite = date.today()
-    fecha_60 = fecha_limite - timedelta(days=60)
+    f7  = fecha_limite - timedelta(days=7)
+    f30 = fecha_limite - timedelta(days=30)
+    f90 = fecha_limite - timedelta(days=90)
     res = await db.execute(text("""
-        SELECT animalito, COUNT(*) AS veces FROM historico
-        WHERE hora=:hora AND fecha>=:desde AND fecha<:hasta AND loteria='Lotto Activo'
-        GROUP BY animalito ORDER BY veces DESC
-    """), {"hora": hora_str, "desde": fecha_60, "hasta": fecha_limite})
+        WITH v7 AS (
+            SELECT animalito, COUNT(*) AS c FROM historico
+            WHERE hora=:hora AND fecha>=:f7 AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        v30 AS (
+            SELECT animalito, COUNT(*) AS c FROM historico
+            WHERE hora=:hora AND fecha>=:f30 AND fecha<:f7 AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        v90 AS (
+            SELECT animalito, COUNT(*) AS c FROM historico
+            WHERE hora=:hora AND fecha>=:f90 AND fecha<:f30 AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        todos AS (
+            SELECT animalito FROM historico
+            WHERE hora=:hora AND fecha>=:f90 AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        )
+        SELECT t.animalito,
+               COALESCE(v7.c,0)*0.50 + COALESCE(v30.c,0)*0.30 + COALESCE(v90.c,0)*0.20 AS score_pond,
+               COALESCE(v7.c,0) AS c7,
+               COALESCE(v30.c,0) AS c30,
+               COALESCE(v90.c,0) AS c90
+        FROM todos t
+        LEFT JOIN v7  ON t.animalito=v7.animalito
+        LEFT JOIN v30 ON t.animalito=v30.animalito
+        LEFT JOIN v90 ON t.animalito=v90.animalito
+        ORDER BY score_pond DESC
+    """), {"hora": hora_str, "f7": f7, "f30": f30, "f90": f90, "hoy": fecha_limite})
     rows = res.fetchall()
     resultado = {}
     if rows:
-        total = sum(r[1] for r in rows)
+        max_sc = max(float(r[1]) for r in rows) or 1.0
         n_animales = len(rows)
         azar_local = 1.0 / max(n_animales, 1)
+        total_bruto = sum(int(r[2])+int(r[3])+int(r[4]) for r in rows) or 1
         for r in rows:
             animal = _normalizar(r[0])
-            freq_real = r[1] / total
-            # ratio vs azar: 1.0 = exactamente azar, >1.0 = más frecuente
-            ratio = freq_real / azar_local
-            # score en [0,1]: ratio 2.0 → score 1.0, ratio 0.5 → score 0.25
-            score = min(ratio / 2.0, 1.0)
+            score_norm = float(r[1]) / max_sc
+            c7, c30, c90 = int(r[2]), int(r[3]), int(r[4])
+            total_c = c7 + c30 + c90
+            freq_real = total_c / total_bruto
+            ratio = freq_real / azar_local if azar_local > 0 else 1.0
+            # Tendencia: caliente si aparece más en los últimos 7 días que su promedio histórico
+            promedio_esperado_7d = (total_c / 90 * 7) if total_c > 0 else 0
+            tendencia = "🔥" if c7 > promedio_esperado_7d * 1.3 else ("❄" if c7 == 0 and c90 > 2 else "→")
             resultado[animal] = {
-                "score": round(score, 4),
-                "veces": int(r[1]),
-                "pct": round(freq_real * 100, 1),
+                "score": score_norm,
                 "ratio_vs_azar": round(ratio, 2),
+                "veces_7d": c7, "veces_30d": c30, "veces_90d": c90,
+                "tendencia": tendencia,
             }
     return resultado
 
 
-# ══════════════════════════════════════════════════════
-# SEÑAL 3: PATRÓN DÍA DE SEMANA × HORA
-# ══════════════════════════════════════════════════════
 async def calcular_patron_dia(db, hora_str, dia_semana, fecha_limite=None):
+    """Patrón por día de semana: histórico completo + bono últimos 2 años"""
     if fecha_limite is None:
         fecha_limite = date.today()
+    f2y = fecha_limite - timedelta(days=730)   # últimos 2 años
     res = await db.execute(text("""
-        SELECT animalito, COUNT(*) AS veces FROM historico
-        WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
-          AND fecha<:hoy AND loteria='Lotto Activo'
-        GROUP BY animalito ORDER BY veces DESC
-    """), {"hora": hora_str, "dia": dia_semana, "hoy": fecha_limite})
+        WITH historico_completo AS (
+            SELECT animalito, COUNT(*) AS total
+            FROM historico
+            WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
+              AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        reciente_2y AS (
+            SELECT animalito, COUNT(*) AS rec
+            FROM historico
+            WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
+              AND fecha>=:f2y AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        )
+        SELECT h.animalito,
+               h.total * 0.60 + COALESCE(r.rec,0) * 0.40 AS score_pond,
+               h.total,
+               COALESCE(r.rec,0) AS rec
+        FROM historico_completo h
+        LEFT JOIN reciente_2y r ON h.animalito=r.animalito
+        ORDER BY score_pond DESC
+    """), {"hora": hora_str, "dia": dia_semana, "hoy": fecha_limite, "f2y": f2y})
     rows = res.fetchall()
     resultado = {}
     if rows:
-        max_v = max(r[1] for r in rows)
+        max_v = max(float(r[1]) for r in rows) or 1.0
         for r in rows:
             resultado[_normalizar(r[0])] = {
-                "score": r[1] / max_v,
-                "veces": int(r[1]),
+                "score": float(r[1]) / max_v,
+                "veces": int(r[2]),
+                "veces_2y": int(r[3]),
             }
     return resultado
 
@@ -335,22 +386,46 @@ async def calcular_markov_hora(db, hora_str, fecha_limite=None):
         fecha_limite = date.today()
 
     # Intentar desde tabla markov_transiciones (pre-calculada)
+    # MEJORA 4: filtra por animal_previo (último sorteo de esa hora) + mín 3 ocurrencias
     try:
-        res = await db.execute(text("""
-            SELECT animal_sig, probabilidad FROM markov_transiciones
-            WHERE hora = :hora
-            ORDER BY probabilidad DESC LIMIT 10
-        """), {"hora": hora_str})
+        res_u = await db.execute(text("""
+            SELECT animalito FROM historico
+            WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
+            ORDER BY fecha DESC LIMIT 1
+        """), {"hora": hora_str, "hoy": fecha_limite})
+        ultimo_mk = res_u.scalar()
+
+        if ultimo_mk:
+            res = await db.execute(text("""
+                SELECT animal_sig, probabilidad, frecuencia
+                FROM markov_transiciones
+                WHERE hora=:hora AND animal_previo=:prev AND frecuencia >= 3
+                ORDER BY probabilidad DESC LIMIT 10
+            """), {"hora": hora_str, "prev": ultimo_mk})
+        else:
+            # Sin animal previo: usar distribución general de la hora con mínimo
+            res = await db.execute(text("""
+                SELECT animal_sig, AVG(probabilidad) AS prob, SUM(frecuencia) AS frec
+                FROM markov_transiciones
+                WHERE hora=:hora AND frecuencia >= 3
+                GROUP BY animal_sig ORDER BY prob DESC LIMIT 10
+            """), {"hora": hora_str})
+
         rows = res.fetchall()
         if rows:
             max_p = max(float(r[1]) for r in rows)
-            return {
-                _normalizar(r[0]): {
-                    "score": float(r[1]) / max_p if max_p > 0 else 0,
-                    "prob": float(r[1]),
+            if max_p <= 0:
+                pass
+            else:
+                return {
+                    _normalizar(r[0]): {
+                        # score siempre normalizado 0-1 sin importar escala de prob
+                        "score": min(1.0, float(r[1]) / max_p),
+                        "prob":  round(float(r[1]), 2),
+                    }
+                    for r in rows
+                    if float(r[1]) > 0
                 }
-                for r in rows
-            }
     except Exception:
         pass
 
@@ -505,22 +580,89 @@ async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventan
 # ══════════════════════════════════════════════════════
 # COMBINAR SEÑALES V10 — con todos los fixes
 # ══════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════
+# SEÑAL 8: PATRÓN FECHA EXACTA — mismo DÍA+MES+HORA en 8 años
+# "¿Qué sale los viernes de marzo a las 3PM históricamente?"
+# Combina: día de semana + mes del año + hora
+# ══════════════════════════════════════════════════════
+async def calcular_patron_fecha_exacta(db, hora_str, dia_semana, mes, fecha_limite=None):
+    """
+    Señal contextual máxima: mismo día de semana + mismo mes + misma hora.
+    Con 8 años de datos → ~30-40 muestras por slot. Estadísticamente fiable.
+    """
+    if fecha_limite is None:
+        fecha_limite = date.today()
+    res = await db.execute(text("""
+        WITH contexto AS (
+            SELECT animalito, COUNT(*) AS total,
+                   MAX(fecha) AS ultima
+            FROM historico
+            WHERE hora      = :hora
+              AND EXTRACT(DOW  FROM fecha) = :dia
+              AND EXTRACT(MONTH FROM fecha) = :mes
+              AND fecha < :hoy
+              AND loteria = 'Lotto Activo'
+            GROUP BY animalito
+        ),
+        reciente_2y AS (
+            SELECT animalito, COUNT(*) AS rec
+            FROM historico
+            WHERE hora      = :hora
+              AND EXTRACT(DOW  FROM fecha) = :dia
+              AND EXTRACT(MONTH FROM fecha) = :mes
+              AND fecha >= :hoy - INTERVAL '2 years'
+              AND fecha < :hoy
+              AND loteria = 'Lotto Activo'
+            GROUP BY animalito
+        )
+        SELECT c.animalito,
+               c.total * 0.55 + COALESCE(r.rec, 0) * 0.45 AS score_pond,
+               c.total,
+               COALESCE(r.rec, 0) AS rec_2y,
+               c.ultima
+        FROM contexto c
+        LEFT JOIN reciente_2y r ON c.animalito = r.animalito
+        ORDER BY score_pond DESC
+    """), {"hora": hora_str, "dia": dia_semana, "mes": mes,
+           "hoy": fecha_limite})
+    rows = res.fetchall()
+    resultado = {}
+    if rows:
+        max_v = max(float(r[1]) for r in rows) or 1.0
+        total_muestras = sum(int(r[2]) for r in rows)
+        for r in rows:
+            animal = _normalizar(r[0])
+            resultado[animal] = {
+                "score":        float(r[1]) / max_v,
+                "veces_total":  int(r[2]),
+                "veces_2y":     int(r[3]),
+                "ultima":       str(r[4]),
+                "pct_slot":     round(int(r[2]) / max(total_muestras, 1) * 100, 1),
+                "muestras":     total_muestras,
+            }
+    return resultado
+
 def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           ciclo_exacto, pen_reciente, pen_sobreprediccion,
-                          hora_str, pesos):
+                          hora_str, pesos, patron_fecha=None):
     """
-    7 señales + 2 penalizaciones + multiplicador por hora.
+    8 señales + 2 penalizaciones + multiplicador por hora.
     FIX #2: si anti_racha.bloquear → anular reciente para ese animal.
     FIX #6: multiplicador por hora al final.
     FIX #8: penalización por sobre-predicción.
+    MEJORA: patron_fecha = mismo día+mes+hora en 8 años (señal contextual máxima).
     """
+    patron_fecha = patron_fecha or {}
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
-        list(anti) + list(markov) + list(ciclo_exacto)
+        list(anti) + list(markov) + list(ciclo_exacto) + list(patron_fecha)
     )
 
-    mult_hora = _MULTIPLICADOR_HORA.get(hora_str, 0.85)
-    suma_pesos = sum(pesos.values()) + 0.15  # 0.15 extra para ciclo
+    mult_hora  = _MULTIPLICADOR_HORA.get(hora_str, 0.85)
+    peso_ciclo = 0.15
+    peso_fecha = 0.12   # nueva señal contextual
+    suma_pesos = sum(pesos.values()) + peso_ciclo + peso_fecha
 
     scores = {}
     for animal in todos:
@@ -531,12 +673,13 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         score_reciente = 0.0 if bloquear else reciente.get(animal, {}).get("score", 0)
 
         base = (
-            deuda.get(animal,    {}).get("score", 0)   * pesos["deuda"]     +
-            score_reciente                              * pesos["reciente"]  +
-            patron.get(animal,   {}).get("score", 0)   * pesos["patron"]    +
-            anti_info.get("score", 0.5)                * pesos["anti"]      +
-            markov.get(animal,   {}).get("score", 0)   * pesos["secuencia"] +
-            ciclo_exacto.get(animal, {}).get("score",0) * 0.15
+            deuda.get(animal,       {}).get("score", 0) * pesos["deuda"]     +
+            score_reciente                               * pesos["reciente"]  +
+            patron.get(animal,      {}).get("score", 0) * pesos["patron"]    +
+            anti_info.get("score", 0.5)                 * pesos["anti"]      +
+            markov.get(animal,      {}).get("score", 0) * pesos["secuencia"] +
+            ciclo_exacto.get(animal,{}).get("score", 0) * peso_ciclo         +
+            patron_fecha.get(animal,{}).get("score", 0) * peso_fecha
         )
         base /= suma_pesos
 
@@ -568,7 +711,8 @@ def wilson_lower(aciertos: int, total: int, z: float = 1.645) -> float:
 
 
 def calcular_indice_confianza_v10(scores, efectividad_hora_top3=None,
-                                   total_sorteos_hora=0, aciertos_top3_hora=0):
+                                   total_sorteos_hora=0, aciertos_top3_hora=0,
+                                   racha_fallos=0):
     """
     Score de separación entre candidatos + calibración por Wilson.
     Retorna: (indice 0-100, texto_señal, operar: bool)
@@ -589,6 +733,12 @@ def calcular_indice_confianza_v10(scores, efectividad_hora_top3=None,
 
     confianza = int(sep_rel * 55 + min(dominio - 1, 1) * 30 + brecha * 15)
 
+    # FILTRO DE ENTROPÍA: si top1 ≈ top2 el motor está adivinando → penalizar
+    if sep_rel < 0.10:
+        confianza = max(confianza - 20, 0)   # empate real → señal inútil
+    elif sep_rel < 0.20:
+        confianza = max(confianza - 8, 0)    # separación marginal
+
     # Bonus/malus por efectividad histórica real de la hora (Wilson lower bound)
     if total_sorteos_hora >= 30 and aciertos_top3_hora > 0:
         wilson = wilson_lower(aciertos_top3_hora, total_sorteos_hora)
@@ -603,6 +753,14 @@ def calcular_indice_confianza_v10(scores, efectividad_hora_top3=None,
             confianza = min(confianza + 10, 100)
         elif efectividad_hora_top3 < 8:
             confianza = max(confianza - 8, 0)
+
+    # FRENO DE MANO: racha de fallos consecutivos en esa hora → bajar confianza
+    if racha_fallos >= 5:
+        confianza = max(confianza - 18, 0)
+    elif racha_fallos >= 3:
+        confianza = max(confianza - 10, 0)
+    elif racha_fallos >= 2:
+        confianza = max(confianza - 5, 0)
 
     confianza = min(100, max(0, confianza))
     operar    = confianza >= UMBRAL_CONFIANZA_OPERAR
@@ -728,13 +886,23 @@ async def generar_prediccion(db) -> dict:
     try:
         tz      = pytz.timezone('America/Caracas')
         ahora   = datetime.now(tz)
-        hora_str= ahora.strftime("%I:00 %p").upper()
-        # Normalizar: "08:00 AM" en vez de "8:00 AM"
-        try:
-            hora_obj = datetime.strptime(hora_str, "%I:00 %p")
-            hora_str = hora_obj.strftime("%I:%M %p")
-        except Exception:
-            pass
+        _mn     = ahora.minute
+        _h      = ahora.hour
+        _slots  = [8,9,10,11,12,13,14,15,16,17,18,19]
+        _lbls   = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+                   12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+                   16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
+        # Si ya pasaron más de 2 min de la hora → sorteo pasó → predecir el siguiente
+        if _h < 8:
+            hora_str = _lbls[8]
+        elif _h >= 19:
+            hora_str = _lbls[8]
+        elif _mn > 2:
+            _sig = _h + 1
+            hora_str = _lbls.get(_sig, _lbls[8])
+        else:
+            hora_str = _lbls.get(_h, _lbls[8])
+
         dia_semana = ahora.weekday()
         hoy        = ahora.date()
 
@@ -742,25 +910,48 @@ async def generar_prediccion(db) -> dict:
         rent_hora  = await obtener_rentabilidad_hora(db, hora_str)
 
         # Señales
-        deuda       = await calcular_deuda(db, hora_str)
-        reciente    = await calcular_frecuencia_reciente(db, hora_str)
-        patron      = await calcular_patron_dia(db, hora_str, dia_semana)
-        anti        = await calcular_anti_racha(db, hora_str)
-        markov      = await calcular_markov_hora(db, hora_str)
-        ciclo_exacto= await calcular_ciclo_exacto(db, hora_str)
-        pen_rec     = await calcular_penalizacion_reciente(db, hora_str)
-        pen_sobrep  = await calcular_penalizacion_sobreprediccion(db, hora_str)
+        deuda        = await calcular_deuda(db, hora_str)
+        reciente     = await calcular_frecuencia_reciente(db, hora_str)
+        patron       = await calcular_patron_dia(db, hora_str, dia_semana)
+        anti         = await calcular_anti_racha(db, hora_str)
+        markov       = await calcular_markov_hora(db, hora_str)
+        ciclo_exacto = await calcular_ciclo_exacto(db, hora_str)
+        pen_rec      = await calcular_penalizacion_reciente(db, hora_str)
+        pen_sobrep   = await calcular_penalizacion_sobreprediccion(db, hora_str)
+        # NUEVA SEÑAL: mismo día de semana + mismo mes + misma hora en 8 años
+        patron_fecha = await calcular_patron_fecha_exacta(
+            db, hora_str, dia_semana, ahora.month
+        )
 
         scores = combinar_señales_v10(
             deuda, reciente, patron, anti, markov,
-            ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos
+            ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos,
+            patron_fecha=patron_fecha
         )
+
+        # Calcular racha de fallos recientes en esta hora (últimas 5 predicciones)
+        racha_fallos = 0
+        try:
+            res_racha = await db.execute(text("""
+                SELECT acierto FROM auditoria_ia
+                WHERE hora=:hora AND acierto IS NOT NULL
+                ORDER BY fecha DESC LIMIT 5
+            """), {"hora": hora_str})
+            ultimos = [r[0] for r in res_racha.fetchall()]
+            for ac in ultimos:
+                if ac is False:
+                    racha_fallos += 1
+                else:
+                    break  # cortar en primer acierto
+        except Exception:
+            racha_fallos = 0
 
         confianza_idx, señal_texto, operar = calcular_indice_confianza_v10(
             scores,
             efectividad_hora_top3 = rent_hora.get("efectividad_top3"),
             total_sorteos_hora    = rent_hora.get("total_sorteos", 0),
             aciertos_top3_hora    = rent_hora.get("aciertos_top3", 0),
+            racha_fallos          = racha_fallos,
         )
 
         ranking     = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -910,6 +1101,8 @@ async def aprender_desde_historico(db, fecha_inicio=None, dias_por_generacion=30
                     ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
                     pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
                     ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
+                    pfe = await calcular_patron_fecha_exacta(db, hora_s, dia_s,
+                              fecha_s.month, fecha_s)
 
                     for señal, datos in [("deuda",d),("reciente",r),("anti",a),
                                           ("patron",p),("secuencia",m)]:
@@ -918,7 +1111,8 @@ async def aprender_desde_historico(db, fecha_inicio=None, dias_por_generacion=30
                             if _normalizar(mejor) == real_n:
                                 ac_señal[señal] += 1
 
-                    sc = combinar_señales_v10(d,r,p,a,m,ce,pr,ps,hora_s,pesos)
+                    sc = combinar_señales_v10(d,r,p,a,m,ce,pr,ps,hora_s,pesos,
+                             patron_fecha=pfe)
                     if sc:
                         rank = sorted(sc.items(), key=lambda x:x[1], reverse=True)
                         top3_pred = [_normalizar(x[0]) for x in rank[:3]]
@@ -1030,31 +1224,56 @@ async def entrenar_modelo(db) -> dict:
         """))
 
         # Reconstruir probabilidades_hora
-        await db.execute(text("DELETE FROM probabilidades_hora"))
-        await db.execute(text("""
-            INSERT INTO probabilidades_hora
-                (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
-            WITH base AS (
-                SELECT hora, animalito, COUNT(*) AS total_hist
-                FROM historico WHERE loteria='Lotto Activo' GROUP BY hora, animalito
-            ),
-            reciente AS (
-                SELECT hora, animalito, COUNT(*) AS total_rec
-                FROM historico
-                WHERE fecha >= CURRENT_DATE-INTERVAL '60 days' AND loteria='Lotto Activo'
-                GROUP BY hora, animalito
-            ),
-            totales AS (
-                SELECT hora, SUM(total_hist) AS gran_total FROM base GROUP BY hora
-            )
-            SELECT b.hora, b.animalito, b.total_hist,
-                ROUND((b.total_hist::FLOAT/NULLIF(t.gran_total,0)*100)::numeric,2),
-                CASE WHEN COALESCE(r.total_rec,0)>=2 THEN 'CALIENTE' ELSE 'FRIO' END,
-                NOW()
-            FROM base b
-            JOIN totales t ON b.hora=t.hora
-            LEFT JOIN reciente r ON b.hora=r.hora AND b.animalito=r.animalito
-        """))
+        # Reconstruir probabilidades_hora (con fallback si schema difiere)
+        try:
+            await db.execute(text("DELETE FROM probabilidades_hora"))
+            await db.execute(text("""
+                INSERT INTO probabilidades_hora
+                    (hora, animalito, frecuencia, probabilidad, tendencia, ultima_actualizacion)
+                WITH base AS (
+                    SELECT hora, animalito, COUNT(*) AS total_hist
+                    FROM historico WHERE loteria='Lotto Activo' GROUP BY hora, animalito
+                ),
+                reciente_60 AS (
+                    SELECT hora, animalito, COUNT(*) AS total_rec
+                    FROM historico
+                    WHERE fecha >= CURRENT_DATE-INTERVAL '60 days' AND loteria='Lotto Activo'
+                    GROUP BY hora, animalito
+                ),
+                reciente_7 AS (
+                    SELECT hora, animalito, COUNT(*) AS total_7
+                    FROM historico
+                    WHERE fecha >= CURRENT_DATE-INTERVAL '7 days' AND loteria='Lotto Activo'
+                    GROUP BY hora, animalito
+                ),
+                score_pond AS (
+                    SELECT b.hora, b.animalito,
+                           b.total_hist * 0.50
+                           + COALESCE(r60.total_rec,0) * 2.0
+                           + COALESCE(r7.total_7,0) * 5.0 AS score_w
+                    FROM base b
+                    LEFT JOIN reciente_60 r60 ON b.hora=r60.hora AND b.animalito=r60.animalito
+                    LEFT JOIN reciente_7  r7  ON b.hora=r7.hora  AND b.animalito=r7.animalito
+                ),
+                totales AS (
+                    SELECT hora, SUM(score_w) AS gran_total FROM score_pond GROUP BY hora
+                )
+                SELECT sp.hora::VARCHAR, sp.animalito, b.total_hist,
+                    ROUND((sp.score_w / NULLIF(t.gran_total,0) * 100)::numeric, 2),
+                    CASE WHEN COALESCE(r7.total_7,0) >= 2 THEN 'CALIENTE'
+                         WHEN COALESCE(r60.total_rec,0) >= 3 THEN 'TIBIO'
+                         ELSE 'FRIO' END,
+                    NOW()
+                FROM score_pond sp
+                JOIN base b ON sp.hora=b.hora AND sp.animalito=b.animalito
+                JOIN totales t ON sp.hora=t.hora
+                LEFT JOIN reciente_60 r60 ON sp.hora=r60.hora AND sp.animalito=r60.animalito
+                LEFT JOIN reciente_7  r7  ON sp.hora=r7.hora  AND sp.animalito=r7.animalito
+            """))
+            await db.commit()
+        except Exception as e_prob:
+            await db.rollback()
+            import logging; logging.getLogger(__name__).warning(f"probabilidades_hora skip: {e_prob}")
 
         # Rentabilidad por hora
         rentabilidad = await calcular_rentabilidad_horas(db)
@@ -1277,7 +1496,10 @@ async def backtest(db, fecha_desde, fecha_hasta, max_sorteos=100) -> dict:
             ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
             pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
             ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
-            sc  = combinar_señales_v10(d,r,p,a,m,ce,pr,ps,hora_s,pesos)
+            pfe = await calcular_patron_fecha_exacta(db, hora_s, dia_s,
+                      fecha_s.month, fecha_s)
+            sc  = combinar_señales_v10(d,r,p,a,m,ce,pr,ps,hora_s,pesos,
+                      patron_fecha=pfe)
             if not sc:
                 continue
 
