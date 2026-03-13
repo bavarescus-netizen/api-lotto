@@ -211,13 +211,61 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "WHERE loteria='Lotto Activo' ORDER BY fecha DESC LIMIT 1"
         ))).fetchone()
 
-        # ── Última predicción ──
+        # ── Predicción para el PRÓXIMO sorteo ──
+        # Calcular hora del próximo sorteo (Venezuela UTC-4)
+        _mn = ahora.minute
+        _h  = ahora.hour
+        _slots = [8,9,10,11,12,13,14,15,16,17,18,19]
+        _lbls  = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+                  12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+                  16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
+        if _h < 8:
+            _hora_prox = _lbls[8]
+        elif _h >= 19:
+            _hora_prox = _lbls[8]
+        elif _mn > 2:
+            _sig = _h + 1
+            _hora_prox = _lbls.get(_sig, _lbls[8])
+        else:
+            _hora_prox = _lbls.get(_h, _lbls[8])
+
+        # Buscar predicción de hoy para esa hora
         p = (await db.execute(text(
             "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
             "prediccion_1,prediccion_2,prediccion_3,"
             "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
-            "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
-        ))).fetchone()
+            "FROM auditoria_ia "
+            "WHERE fecha=:hoy AND hora=:hora "
+            "ORDER BY fecha DESC LIMIT 1"
+        ), {"hoy": ahora.date(), "hora": _hora_prox})).fetchone()
+
+        # Si no hay predicción guardada para la próxima hora → generarla en vivo
+        if not p:
+            try:
+                from app.core.motor_v10 import generar_prediccion
+                _pred_live = await generar_prediccion(db)
+                if _pred_live and _pred_live.get("prediccion_1"):
+                    # Construir tupla compatible
+                    p = (
+                        ahora.date(),
+                        _pred_live.get("hora", _hora_prox),
+                        _pred_live.get("prediccion_1"),
+                        _pred_live.get("confianza_pct", 0),
+                        None, None,
+                        _pred_live.get("prediccion_1"),
+                        _pred_live.get("prediccion_2"),
+                        _pred_live.get("prediccion_3"),
+                        _pred_live.get("confianza_hora", 0),
+                        _pred_live.get("es_hora_rentable", False),
+                    )
+            except Exception:
+                # Fallback: última predicción de la BD
+                p = (await db.execute(text(
+                    "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
+                    "prediccion_1,prediccion_2,prediccion_3,"
+                    "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
+                    "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
+                ))).fetchone()
 
         # ── Métricas desde rentabilidad_hora (sin JOINs pesados) ──
         rh = (await db.execute(text("""
