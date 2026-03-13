@@ -388,6 +388,23 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             ORDER BY fecha DESC LIMIT 1
         """), {"hora": hora})).fetchone()
 
+        # Normalizar hora: "10:00 AM", "10:00AM", "10:00 am" → formato estándar
+        try:
+            from datetime import datetime as _dt
+            _h = hora.strip().upper().replace("  ", " ")
+            # Asegurar formato "HH:MM AM/PM"
+            if " " not in _h:
+                _h = _h[:-2] + " " + _h[-2:]
+            hora = _dt.strptime(_h, "%I:%M %p").strftime("%I:%M %p")
+        except Exception:
+            pass
+
+        # rent PRIMERO — pw lo necesita
+        rent = (await db.execute(text("""
+            SELECT efectividad_top1, efectividad_top3, es_rentable, total_sorteos
+            FROM rentabilidad_hora WHERE TRIM(hora) = TRIM(:hora)
+        """), {"hora": hora})).fetchone()
+
         pw = (await db.execute(text("""
             SELECT peso_decay, peso_markov, peso_gap, peso_reciente, efectividad
             FROM motor_pesos_hora
@@ -395,32 +412,23 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             ORDER BY generacion DESC LIMIT 1
         """), {"hora": hora})).fetchone()
 
-        # Si no hay pesos diferenciados, calcular adaptativos desde datos reales
+        # Si no hay pesos diferenciados, calcular adaptativos
         if not pw or (pw[0]==pw[1]==pw[2]==pw[3]):
-            # Obtener top3 de probabilidades para esa hora
             top3_prob = (await db.execute(text("""
-                SELECT animalito, probabilidad, tendencia
-                FROM probabilidades_hora WHERE hora=:hora
-                ORDER BY probabilidad DESC LIMIT 3
+                SELECT animalito, probabilidad FROM probabilidades_hora
+                WHERE hora=:hora ORDER BY probabilidad DESC LIMIT 3
             """), {"hora": hora})).fetchall()
-            # Markov signal para esa hora
             mk_count = (await db.execute(text("""
-                SELECT COUNT(*), AVG(probabilidad)
-                FROM markov_transiciones WHERE hora=:hora
+                SELECT COUNT(*) FROM markov_transiciones WHERE hora=:hora
             """), {"hora": hora})).fetchone()
-            # Calcular pesos proporcionales a la señal disponible
+            ef3 = float(rent[1]) if rent and rent[1] else 0
             p_decay  = 0.30 if top3_prob and float(top3_prob[0][1] or 0) > 3.5 else 0.25
             p_markov = 0.30 if mk_count and int(mk_count[0] or 0) > 50 else 0.20
             p_gap    = 0.25
-            p_rec    = 1.0 - p_decay - p_markov - p_gap
-            pw = (round(p_decay,2), round(p_markov,2), round(p_gap,2), round(p_rec,2), rent[1] if rent else 0)
+            p_rec    = round(1.0 - p_decay - p_markov - p_gap, 2)
+            pw = (round(p_decay,2), round(p_markov,2), round(p_gap,2), p_rec, ef3)
 
-        rent = (await db.execute(text("""
-            SELECT efectividad_top1, efectividad_top3, es_rentable, total_sorteos
-            FROM rentabilidad_hora WHERE hora = :hora
-        """), {"hora": hora})).fetchone()
-
-        # Animal previo para señal Markov
+        # Animal previo Markov (penúltimo sorteo de esa hora)
         prev = (await db.execute(text("""
             SELECT animalito FROM historico
             WHERE loteria='Lotto Activo' AND hora=:hora
@@ -431,9 +439,11 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
         markov_top = []
         if animal_previo:
             mk = (await db.execute(text("""
-                SELECT animal_sig, ROUND(probabilidad::numeric*100,2)
+                SELECT animal_sig, ROUND(probabilidad::numeric, 2) AS prob_pct
                 FROM markov_transiciones
-                WHERE hora=:hora AND LOWER(TRIM(animal_previo))=LOWER(TRIM(:animal))
+                WHERE hora=:hora
+                  AND LOWER(TRIM(animal_previo))=LOWER(TRIM(:animal))
+                  AND frecuencia >= 3
                 ORDER BY probabilidad DESC LIMIT 3
             """), {"hora": hora, "animal": animal_previo})).fetchall()
             markov_top = [{"animal": r[0], "prob_pct": float(r[1])} for r in mk]
@@ -493,6 +503,56 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
 # ═══════════════════════════════════════════════════════════
 # MARKOV — Por animal+hora
 # ═══════════════════════════════════════════════════════════
+@app.get("/fix-markov")
+async def fix_markov(db: AsyncSession = Depends(get_db)):
+    """Limpia y reconstruye markov_transiciones desde cero (TRUNCATE + INSERT)"""
+    try:
+        await db.execute(text("TRUNCATE TABLE markov_transiciones"))
+        await db.commit()
+        await db.execute(text("""
+            INSERT INTO markov_transiciones
+                (hora, animal_previo, animal_sig, frecuencia, probabilidad)
+            WITH pares AS (
+                SELECT h1.hora,
+                       h1.animalito AS animal_previo,
+                       h2.animalito AS animal_sig
+                FROM historico h1
+                JOIN historico h2
+                    ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
+                    AND h1.hora    = h2.hora
+                    AND h1.loteria = 'Lotto Activo'
+                    AND h2.loteria = 'Lotto Activo'
+            ),
+            conteos AS (
+                SELECT hora, animal_previo, animal_sig,
+                       COUNT(*)                                              AS frec,
+                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+                FROM pares
+                GROUP BY hora, animal_previo, animal_sig
+            )
+            SELECT hora, animal_previo, animal_sig,
+                   frec,
+                   ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
+            FROM conteos
+        """))
+        await db.commit()
+        n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+        # Verificar sanidad: no debe haber probabilidades > 100
+        bad = (await db.execute(text(
+            "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
+        ))).scalar() or 0
+        return {
+            "status": "success",
+            "transiciones": n,
+            "prob_invalidas": bad,
+            "message": f"✅ Markov reconstruido: {n:,} transiciones | Inválidas: {bad}"
+        }
+    except Exception as e:
+        await db.rollback()
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/markov")
 async def markov_animal(
     hora:   str = Query(...),
@@ -1062,37 +1122,42 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
-        # PASO 4: Reconstruir markov_transiciones completo (pares consecutivos por hora)
-        # Borrar y reinsertar (sin ON CONFLICT — evita error si no hay UNIQUE constraint)
-        await db.execute(text("DELETE FROM markov_transiciones"))
-        await db.commit()
-        await db.execute(text("""
-            INSERT INTO markov_transiciones (hora, animal_previo, animal_sig, frecuencia, probabilidad)
-            WITH pares AS (
-                SELECT
-                    h1.hora,
-                    h1.animalito AS animal_previo,
-                    h2.animalito AS animal_sig
-                FROM historico h1
-                JOIN historico h2
-                    ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
-                    AND h1.hora    = h2.hora
-                    AND h1.loteria = 'Lotto Activo'
-                    AND h2.loteria = 'Lotto Activo'
-            ),
-            conteos AS (
+        # PASO 4: Reconstruir markov_transiciones completo
+        # TRUNCATE es atómico — garantiza limpieza total antes del INSERT
+        try:
+            await db.execute(text("TRUNCATE TABLE markov_transiciones"))
+            await db.commit()
+            await db.execute(text("""
+                INSERT INTO markov_transiciones
+                    (hora, animal_previo, animal_sig, frecuencia, probabilidad)
+                WITH pares AS (
+                    SELECT h1.hora,
+                           h1.animalito AS animal_previo,
+                           h2.animalito AS animal_sig
+                    FROM historico h1
+                    JOIN historico h2
+                        ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
+                        AND h1.hora    = h2.hora
+                        AND h1.loteria = 'Lotto Activo'
+                        AND h2.loteria = 'Lotto Activo'
+                ),
+                conteos AS (
+                    SELECT hora, animal_previo, animal_sig,
+                           COUNT(*)                                             AS frec,
+                           SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+                    FROM pares
+                    GROUP BY hora, animal_previo, animal_sig
+                )
                 SELECT hora, animal_previo, animal_sig,
-                       COUNT(*)                                                    AS frec,
-                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo)       AS total_prev
-                FROM pares
-                GROUP BY hora, animal_previo, animal_sig
-            )
-            SELECT hora, animal_previo, animal_sig,
-                   frec,
-                   ROUND((frec::FLOAT / NULLIF(total_prev,0) * 100)::numeric, 2)
-            FROM conteos
-        """))
-        await db.commit()
+                       frec,
+                       ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
+                FROM conteos
+            """))
+            await db.commit()
+        except Exception as e_mk:
+            await db.rollback()
+            import traceback; traceback.print_exc()
+            logger.error(f"PASO 4 markov ERROR: {e_mk}")
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
         # Métricas finales
