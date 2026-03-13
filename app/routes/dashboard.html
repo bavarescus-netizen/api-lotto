@@ -140,7 +140,12 @@ tbody tr:last-child td{border-bottom:none}
         <button class="btn bg2" onclick="actualizarTodo()">↺ ACTUALIZAR</button>
         <button class="btn bb2" onclick="procesarAhora()">▶ PROCESAR</button>
         <button class="btn by2" onclick="cargarUltimo()">⬇ CARGAR ÚLTIMO</button>
-        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
+        <button onclick="fixMarkov()" id="btnFixMarkov"
+          style="background:linear-gradient(135deg,#ff4444,#900);border:1px solid #ff4444;
+                 color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;
+                 letter-spacing:1px;font-family:monospace;margin-right:6px">
+          🔧 REPARAR MARKOV
+        </button><button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
       </div>
     </div>
     <div>
@@ -637,7 +642,22 @@ async function procesarAhora(){
     if(btn){btn.disabled=false;btn.textContent='▶ PROCESAR';}
   }
 }
-async function entrenarSQL(){
+async function fixMarkov(){
+    const btn=document.getElementById('btnFixMarkov');
+    if(!btn) return;
+    btn.disabled=true; btn.textContent='⏳ Reparando...';
+    try{
+      const r=await fetch('/fix-markov');
+      const d=await r.json();
+      if(d.transiciones){
+        btn.textContent=`✅ ${d.transiciones.toLocaleString()} filas`;
+        setTimeout(()=>{ btn.textContent='🔧 REPARAR MARKOV'; btn.disabled=false; cargarEstado(); },4000);
+      } else {
+        btn.textContent='❌ Error'; btn.disabled=false;
+      }
+    }catch(e){ btn.textContent='❌ Error'; btn.disabled=false; }
+  }
+  async function entrenarSQL(){
     const btn = document.getElementById('btnSQL');
     if(!btn) return;
     btn.disabled = true;
