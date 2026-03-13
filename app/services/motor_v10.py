@@ -414,13 +414,18 @@ async def calcular_markov_hora(db, hora_str, fecha_limite=None):
         rows = res.fetchall()
         if rows:
             max_p = max(float(r[1]) for r in rows)
-            return {
-                _normalizar(r[0]): {
-                    "score": float(r[1]) / max_p if max_p > 0 else 0,
-                    "prob":  float(r[1]),
+            if max_p <= 0:
+                pass
+            else:
+                return {
+                    _normalizar(r[0]): {
+                        # score siempre normalizado 0-1 sin importar escala de prob
+                        "score": min(1.0, float(r[1]) / max_p),
+                        "prob":  round(float(r[1]), 2),
+                    }
+                    for r in rows
+                    if float(r[1]) > 0
                 }
-                for r in rows
-            }
     except Exception:
         pass
 
