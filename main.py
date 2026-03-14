@@ -553,47 +553,74 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
 # ═══════════════════════════════════════════════════════════
 @app.get("/fix-markov")
 async def fix_markov(db: AsyncSession = Depends(get_db)):
-    """Limpia y reconstruye markov_transiciones desde cero (TRUNCATE + INSERT)"""
+    """Reconstruye markov_transiciones hora por hora para evitar timeout de Render"""
+    HORAS = [
+        '08:00 AM','09:00 AM','10:00 AM','11:00 AM',
+        '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
+        '04:00 PM','05:00 PM','06:00 PM','07:00 PM',
+    ]
+    SQL_HORA = """
+        INSERT INTO markov_transiciones
+            (hora, animal_previo, animal_sig, frecuencia, probabilidad)
+        WITH pares AS (
+            SELECT h1.hora,
+                   h1.animalito AS animal_previo,
+                   h2.animalito AS animal_sig
+            FROM historico h1
+            JOIN historico h2
+                ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
+                AND h1.hora    = h2.hora
+                AND h1.loteria = 'Lotto Activo'
+                AND h2.loteria = 'Lotto Activo'
+                AND h1.hora    = :hora
+        ),
+        conteos AS (
+            SELECT hora, animal_previo, animal_sig,
+                   COUNT(*)                                              AS frec,
+                   SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+            FROM pares
+            GROUP BY hora, animal_previo, animal_sig
+        )
+        SELECT hora, animal_previo, animal_sig,
+               frec,
+               ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
+        FROM conteos
+        ON CONFLICT DO NOTHING
+    """
     try:
+        # PASO 1: limpiar tabla
         await db.execute(text("TRUNCATE TABLE markov_transiciones"))
         await db.commit()
-        await db.execute(text("""
-            INSERT INTO markov_transiciones
-                (hora, animal_previo, animal_sig, frecuencia, probabilidad)
-            WITH pares AS (
-                SELECT h1.hora,
-                       h1.animalito AS animal_previo,
-                       h2.animalito AS animal_sig
-                FROM historico h1
-                JOIN historico h2
-                    ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
-                    AND h1.hora    = h2.hora
-                    AND h1.loteria = 'Lotto Activo'
-                    AND h2.loteria = 'Lotto Activo'
-            ),
-            conteos AS (
-                SELECT hora, animal_previo, animal_sig,
-                       COUNT(*)                                              AS frec,
-                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
-                FROM pares
-                GROUP BY hora, animal_previo, animal_sig
-            )
-            SELECT hora, animal_previo, animal_sig,
-                   frec,
-                   ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
-            FROM conteos
-        """))
-        await db.commit()
-        n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
-        # Verificar sanidad: no debe haber probabilidades > 100
+
+        # PASO 2: INSERT por hora (12 queries pequeños, cada uno < 3s)
+        total = 0
+        errores = []
+        for hora in HORAS:
+            try:
+                await db.execute(text(SQL_HORA), {"hora": hora})
+                await db.commit()
+                n_hora = (await db.execute(text(
+                    "SELECT COUNT(*) FROM markov_transiciones WHERE hora=:h"
+                ), {"h": hora})).scalar() or 0
+                total += n_hora
+            except Exception as e_hora:
+                await db.rollback()
+                errores.append(f"{hora}: {e_hora}")
+
+        # PASO 3: verificar sanidad
         bad = (await db.execute(text(
             "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
         ))).scalar() or 0
+
         return {
-            "status": "success",
-            "transiciones": n,
+            "status": "success" if not errores else "partial",
+            "transiciones": total,
             "prob_invalidas": bad,
-            "message": f"✅ Markov reconstruido: {n:,} transiciones | Inválidas: {bad}"
+            "errores": errores,
+            "message": (
+                f"✅ Markov: {total:,} transiciones | Inválidas: {bad}"
+                + (f" | Errores: {errores}" if errores else "")
+            )
         }
     except Exception as e:
         await db.rollback()
@@ -1170,42 +1197,50 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
-        # PASO 4: Reconstruir markov_transiciones completo
-        # TRUNCATE es atómico — garantiza limpieza total antes del INSERT
+        # PASO 4: Reconstruir markov_transiciones HORA POR HORA (evita timeout Render)
+        _HORAS_MK = [
+            '08:00 AM','09:00 AM','10:00 AM','11:00 AM',
+            '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
+            '04:00 PM','05:00 PM','06:00 PM','07:00 PM',
+        ]
+        _SQL_MK_HORA = """
+            INSERT INTO markov_transiciones
+                (hora, animal_previo, animal_sig, frecuencia, probabilidad)
+            WITH pares AS (
+                SELECT h1.hora, h1.animalito AS animal_previo, h2.animalito AS animal_sig
+                FROM historico h1
+                JOIN historico h2
+                    ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
+                    AND h1.hora    = h2.hora
+                    AND h1.hora    = :hora
+                    AND h1.loteria = 'Lotto Activo'
+                    AND h2.loteria = 'Lotto Activo'
+            ),
+            conteos AS (
+                SELECT hora, animal_previo, animal_sig,
+                       COUNT(*) AS frec,
+                       SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
+                FROM pares GROUP BY hora, animal_previo, animal_sig
+            )
+            SELECT hora, animal_previo, animal_sig,
+                   frec,
+                   ROUND((frec::FLOAT / NULLIF(total_prev,0) * 100)::numeric, 2)
+            FROM conteos
+            ON CONFLICT DO NOTHING
+        """
         try:
             await db.execute(text("TRUNCATE TABLE markov_transiciones"))
             await db.commit()
-            await db.execute(text("""
-                INSERT INTO markov_transiciones
-                    (hora, animal_previo, animal_sig, frecuencia, probabilidad)
-                WITH pares AS (
-                    SELECT h1.hora,
-                           h1.animalito AS animal_previo,
-                           h2.animalito AS animal_sig
-                    FROM historico h1
-                    JOIN historico h2
-                        ON  h2.fecha   = h1.fecha + INTERVAL '1 day'
-                        AND h1.hora    = h2.hora
-                        AND h1.loteria = 'Lotto Activo'
-                        AND h2.loteria = 'Lotto Activo'
-                ),
-                conteos AS (
-                    SELECT hora, animal_previo, animal_sig,
-                           COUNT(*)                                             AS frec,
-                           SUM(COUNT(*)) OVER (PARTITION BY hora, animal_previo) AS total_prev
-                    FROM pares
-                    GROUP BY hora, animal_previo, animal_sig
-                )
-                SELECT hora, animal_previo, animal_sig,
-                       frec,
-                       ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
-                FROM conteos
-            """))
-            await db.commit()
+            for _h in _HORAS_MK:
+                try:
+                    await db.execute(text(_SQL_MK_HORA), {"hora": _h})
+                    await db.commit()
+                except Exception as _e_h:
+                    await db.rollback()
+                    logger.warning(f"PASO 4 markov hora {_h}: {_e_h}")
         except Exception as e_mk:
             await db.rollback()
-            import traceback; traceback.print_exc()
-            logger.error(f"PASO 4 markov ERROR: {e_mk}")
+            logger.error(f"PASO 4 markov TRUNCATE ERROR: {e_mk}")
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
         # Métricas finales
@@ -1253,5 +1288,47 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "version": "LOTTOAI PRO V10", "markov": True, "decay": True}
+async def health(db: AsyncSession = Depends(get_db)):
+    """Keep-alive para cron-job.org — llámalo cada 5 min"""
+    import pytz
+    from datetime import datetime
+    try:
+        ahora = datetime.now(pytz.timezone('America/Caracas'))
+        mk = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+
+        # Recovery automática: si hay sorteos sin predecir de hoy → calibrar + predecir
+        recovery_msg = None
+        try:
+            pendientes = (await db.execute(text("""
+                SELECT COUNT(*) FROM auditoria_ia
+                WHERE fecha = :hoy AND acierto IS NULL AND resultado_real IS NOT NULL
+            """), {"hoy": ahora.date()})).scalar() or 0
+
+            sin_prediccion = (await db.execute(text("""
+                SELECT COUNT(*) FROM historico h
+                WHERE h.fecha = :hoy
+                  AND h.loteria = 'Lotto Activo'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM auditoria_ia a
+                    WHERE a.fecha = h.fecha AND a.hora = h.hora
+                  )
+            """), {"hoy": ahora.date()})).scalar() or 0
+
+            if pendientes > 0 or sin_prediccion > 0:
+                from app.core.motor_v10 import calibrar_predicciones, generar_prediccion
+                await calibrar_predicciones(db)
+                await generar_prediccion(db)
+                recovery_msg = f"⚡ Recovery: {pendientes} calibradas, {sin_prediccion} predicciones insertadas"
+        except Exception as re:
+            recovery_msg = f"recovery_skip: {str(re)[:60]}"
+
+        return {
+            "status": "ok",
+            "version": "LOTTOAI PRO V10",
+            "hora_vzla": ahora.strftime("%Y-%m-%d %H:%M:%S"),
+            "markov_transiciones": int(mk),
+            "awake": True,
+            "recovery": recovery_msg,
+        }
+    except Exception:
+        return {"status": "ok", "awake": True}
