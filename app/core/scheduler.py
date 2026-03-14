@@ -480,7 +480,7 @@ async def ciclo_infinito():
             dia_semana    = ahora.weekday()   # 6 = domingo
 
             # ── Self-ping cada 8 min para evitar que Render duerma ──
-            if (ahora - ultimo_ping).total_seconds() > 480:
+            if (ahora - ultimo_ping).total_seconds() > 240:  # ping cada 4 min
                 try:
                     import httpx
                     # RENDER_EXTERNAL_URL debe estar en env vars de Render
