@@ -289,25 +289,26 @@ setInterval(()=>{document.getElementById('topClock').textContent=new Date().toLo
 async function keepAlive(){
   try{
     const ctrl=new AbortController();
-    const tid=setTimeout(()=>ctrl.abort(),8000);
+    const tid=setTimeout(()=>ctrl.abort(),10000);
     const r=await fetch('/health',{cache:'no-cache',signal:ctrl.signal});
     clearTimeout(tid);
     if(r.ok){
+      const wasDown = failCount > 0;
       failCount=0;
       document.getElementById('sleepBanner').classList.remove('show');
       document.getElementById('topPulse').style.background='var(--g)';
-      // Si venía de error, refrescar estado
-      if(failCount>0){ cargarEstado(); cargarAudit(); }
+      if(wasDown){ cargarEstado(); cargarAudit(); } // refrescar si venía de error
     }
   }catch(e){
     failCount++;
     document.getElementById('sleepBanner').classList.add('show');
     document.getElementById('topPulse').style.background='var(--r)';
-    // Reintentar rápido mientras despierta
-    setTimeout(keepAlive, failCount<5 ? 10000 : 30000);
+    // Reintentar cada 10s mientras despierta (Render tarda ~30s en despertar)
+    setTimeout(keepAlive, failCount < 8 ? 10000 : 60000);
   }
 }
-setInterval(keepAlive,4*60*1000);keepAlive();
+setInterval(keepAlive, 2*60*1000); // cada 2 min
+keepAlive();
 
 // NAV
 function showTab(id,el){
@@ -737,6 +738,10 @@ document.addEventListener('DOMContentLoaded',async()=>{
   await cargarAudit();
   cargarHistorial();
   setInterval(async()=>{await cargarEstado();await cargarAudit();},5*60*1000);
+  // Keep-alive: ping a /health cada 4 min para evitar sleep de Render
+  setInterval(async()=>{
+    try{ await fetch('/health'); }catch(e){}
+  }, 4*60*1000);
   // Setear selector Markov a hora venezolana actual
   (function(){
     const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
