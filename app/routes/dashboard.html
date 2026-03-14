@@ -646,17 +646,36 @@ async function procesarAhora(){
 async function fixMarkov(){
     const btn=document.getElementById('btnFixMarkov');
     if(!btn) return;
-    btn.disabled=true; btn.textContent='⏳ Reparando...';
+    btn.disabled=true;
+    // Mostrar progreso con puntos animados
+    let dots=0;
+    const iv=setInterval(()=>{ dots=(dots+1)%4; btn.textContent='⏳ Reparando'+'.'.repeat(dots+1); },800);
     try{
-      const r=await fetch('/fix-markov');
+      // Timeout extendido: el fix tarda ~40s (12 horas × ~3s)
+      const ctrl=new AbortController();
+      const tid=setTimeout(()=>ctrl.abort(), 90000); // 90s timeout
+      const r=await fetch('/fix-markov',{signal:ctrl.signal});
+      clearTimeout(tid);
+      clearInterval(iv);
       const d=await r.json();
-      if(d.transiciones){
-        btn.textContent=`✅ ${d.transiciones.toLocaleString()} filas`;
-        setTimeout(()=>{ btn.textContent='🔧 REPARAR MARKOV'; btn.disabled=false; cargarEstado(); },4000);
+      const bad=d.prob_invalidas||0;
+      if(d.transiciones && d.transiciones>1000){
+        btn.textContent=`✅ ${d.transiciones.toLocaleString()} filas${bad?` ⚠${bad} inv`:''}`;
+        setTimeout(()=>{ btn.textContent='🔧 REPARAR MARKOV'; btn.disabled=false; cargarEstado(); },5000);
       } else {
-        btn.textContent='❌ Error'; btn.disabled=false;
+        btn.textContent=`⚠ Solo ${d.transiciones||0} filas — ver consola`;
+        console.error('fix-markov:', d);
+        btn.disabled=false;
       }
-    }catch(e){ btn.textContent='❌ Error'; btn.disabled=false; }
+    }catch(e){
+      clearInterval(iv);
+      if(e.name==='AbortError'){
+        btn.textContent='⏰ Timeout — volver a intentar';
+      } else {
+        btn.textContent='❌ Error';
+      }
+      btn.disabled=false;
+    }
   }
   async function entrenarSQL(){
     const btn = document.getElementById('btnSQL');
