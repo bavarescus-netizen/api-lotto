@@ -1771,6 +1771,13 @@ async def backtest(db, fecha_desde, fecha_hasta, max_sorteos=100) -> dict:
 # Procesa desde 2018 en bloques para no agotar memoria
 # ══════════════════════════════════════════════════════
 async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, dias=30) -> dict:
+    """
+    Procesa todo el histórico desde fecha_desde hasta fecha_hasta.
+    Llena AMBAS tablas:
+      - auditoria_ia      → predicciones + aciertos
+      - auditoria_señales → desglose de score por señal (para calibración)
+    Commit cada 200 registros para no saturar memoria en Render.
+    """
     try:
         hoy = date.today()
         if fecha_desde is None:
@@ -1778,11 +1785,12 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
         if fecha_hasta is None:
             fecha_hasta = hoy - timedelta(days=1)
 
-        # Sin límite de rango — procesamos todo el histórico disponible
-
         pesos = await _obtener_pesos_globales(db)
+
+        # Cargar todos los sorteos del rango en memoria de una vez
         res = await db.execute(text("""
-            SELECT fecha, hora, animalito, EXTRACT(DOW FROM fecha)::int
+            SELECT fecha, hora, animalito, EXTRACT(DOW FROM fecha)::int,
+                   EXTRACT(MONTH FROM fecha)::int
             FROM historico
             WHERE fecha BETWEEN :desde AND :hasta AND loteria='Lotto Activo'
             ORDER BY fecha ASC, hora ASC
@@ -1794,21 +1802,35 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                     "message": f"Sin sorteos entre {fecha_desde} y {fecha_hasta}"}
 
         insertados = 0; omitidos = 0; aciertos1 = 0; aciertos3 = 0
+        señales_insertadas = 0
 
         for sorteo in sorteos:
-            fecha_s, hora_s, real, dia_s = sorteo
+            fecha_s, hora_s, real, dia_s, mes_s = sorteo
             dia_s  = int(dia_s)
+            mes_s  = int(mes_s)
             real_n = _normalizar(real)
             try:
+                # Saltar si ya existe en auditoria_ia CON desglose (no rehacer)
                 res_e = await db.execute(text(
                     "SELECT 1 FROM auditoria_ia "
                     "WHERE fecha=:f AND hora=:h AND acierto IS NOT NULL "
                     "AND prediccion_1 IS NOT NULL LIMIT 1"
                 ), {"f": fecha_s, "h": hora_s})
-                if res_e.fetchone():
+                ya_existe_ia = res_e.fetchone() is not None
+
+                # Verificar si ya existe en auditoria_señales
+                res_sig = await db.execute(text(
+                    "SELECT 1 FROM auditoria_señales "
+                    "WHERE fecha=:f AND hora=:h LIMIT 1"
+                ), {"f": fecha_s, "h": hora_s})
+                ya_existe_sig = res_sig.fetchone() is not None
+
+                # Si ambas tablas ya tienen el registro, saltar
+                if ya_existe_ia and ya_existe_sig:
                     omitidos += 1
                     continue
 
+                # Calcular todas las señales con datos ANTERIORES a la fecha del sorteo
                 d   = await calcular_deuda(db, hora_s, fecha_s)
                 r   = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
                 p   = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
@@ -1817,8 +1839,10 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                 ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
                 pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
                 ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
+                pfe = await calcular_patron_fecha_exacta(db, hora_s, dia_s, mes_s, fecha_s)
 
-                sc = combinar_señales_v10(d, r, p, a, m, ce, pr, ps, hora_s, pesos)
+                sc = combinar_señales_v10(d, r, p, a, m, ce, pr, ps, hora_s, pesos,
+                                          patron_fecha=pfe)
                 if not sc:
                     continue
 
@@ -1831,31 +1855,89 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                 acerto1 = (pred1 == real_n)
                 acerto3 = real_n in [x for x in [pred1, pred2, pred3] if x]
 
-                await db.execute(text("""
-                    INSERT INTO auditoria_ia
-                        (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
-                         confianza_pct, resultado_real, acierto)
-                    VALUES (:f,:h,:a,:p1,:p2,:p3,:c,:r,:ac)
-                    ON CONFLICT (fecha, hora) DO UPDATE SET
-                        animal_predicho = EXCLUDED.animal_predicho,
-                        prediccion_1    = EXCLUDED.prediccion_1,
-                        prediccion_2    = EXCLUDED.prediccion_2,
-                        prediccion_3    = EXCLUDED.prediccion_3,
-                        confianza_pct   = EXCLUDED.confianza_pct,
-                        resultado_real  = EXCLUDED.resultado_real,
-                        acierto         = EXCLUDED.acierto
-                """), {
-                    "f": fecha_s, "h": hora_s, "a": pred1,
-                    "p1": pred1, "p2": pred2, "p3": pred3,
-                    "c": float(confianza_idx),
-                    "r": real_n, "ac": acerto1,
-                })
-                insertados += 1
-                if acerto1: aciertos1 += 1
-                if acerto3: aciertos3 += 1
+                # ── INSERT auditoria_ia ──
+                if not ya_existe_ia:
+                    await db.execute(text("""
+                        INSERT INTO auditoria_ia
+                            (fecha, hora, animal_predicho, prediccion_1, prediccion_2,
+                             prediccion_3, confianza_pct, resultado_real, acierto)
+                        VALUES (:f,:h,:a,:p1,:p2,:p3,:c,:r,:ac)
+                        ON CONFLICT (fecha, hora) DO UPDATE SET
+                            animal_predicho = EXCLUDED.animal_predicho,
+                            prediccion_1    = EXCLUDED.prediccion_1,
+                            prediccion_2    = EXCLUDED.prediccion_2,
+                            prediccion_3    = EXCLUDED.prediccion_3,
+                            confianza_pct   = EXCLUDED.confianza_pct,
+                            resultado_real  = EXCLUDED.resultado_real,
+                            acierto         = EXCLUDED.acierto
+                    """), {
+                        "f": fecha_s, "h": hora_s, "a": pred1,
+                        "p1": pred1, "p2": pred2, "p3": pred3,
+                        "c": float(confianza_idx),
+                        "r": real_n, "ac": acerto1,
+                    })
+                    insertados += 1
+                    if acerto1: aciertos1 += 1
+                    if acerto3: aciertos3 += 1
 
-                # Commit cada 500 para no saturar memoria
-                if insertados % 500 == 0:
+                # ── INSERT auditoria_señales (desglose por señal) ──
+                if not ya_existe_sig and pred1:
+                    await db.execute(text("""
+                        INSERT INTO auditoria_señales (
+                            fecha, hora, animal_predicho, resultado_real,
+                            acierto_top1, acierto_top3, confianza,
+                            score_deuda, score_reciente, score_patron_dia,
+                            score_anti_racha, score_markov, score_ciclo_exacto,
+                            score_patron_fecha, score_final,
+                            peso_deuda, peso_reciente, peso_patron,
+                            peso_anti, peso_markov
+                        ) VALUES (
+                            :f, :h, :animal, :real,
+                            :ac1, :ac3, :conf,
+                            :s_deuda, :s_rec, :s_patron,
+                            :s_anti, :s_markov, :s_ciclo,
+                            :s_fecha, :s_final,
+                            :p_deuda, :p_rec, :p_patron,
+                            :p_anti, :p_markov
+                        )
+                        ON CONFLICT (fecha, hora) DO UPDATE SET
+                            resultado_real     = EXCLUDED.resultado_real,
+                            acierto_top1       = EXCLUDED.acierto_top1,
+                            acierto_top3       = EXCLUDED.acierto_top3,
+                            score_deuda        = EXCLUDED.score_deuda,
+                            score_reciente     = EXCLUDED.score_reciente,
+                            score_patron_dia   = EXCLUDED.score_patron_dia,
+                            score_anti_racha   = EXCLUDED.score_anti_racha,
+                            score_markov       = EXCLUDED.score_markov,
+                            score_ciclo_exacto = EXCLUDED.score_ciclo_exacto,
+                            score_patron_fecha = EXCLUDED.score_patron_fecha,
+                            score_final        = EXCLUDED.score_final
+                    """), {
+                        "f":       fecha_s,
+                        "h":       hora_s,
+                        "animal":  pred1,
+                        "real":    real_n,
+                        "ac1":     acerto1,
+                        "ac3":     acerto3,
+                        "conf":    int(confianza_idx),
+                        "s_deuda":  round(d.get(pred1, {}).get("score", 0) * pesos["deuda"], 4),
+                        "s_rec":    round(r.get(pred1, {}).get("score", 0) * pesos["reciente"], 4),
+                        "s_patron": round(p.get(pred1, {}).get("score", 0) * pesos["patron"], 4),
+                        "s_anti":   round(a.get(pred1, {}).get("score", 0) * pesos["anti"], 4),
+                        "s_markov": round(m.get(pred1, {}).get("score", 0) * pesos["secuencia"], 4),
+                        "s_ciclo":  round(ce.get(pred1, {}).get("score", 0) * 0.15, 4),
+                        "s_fecha":  round(pfe.get(pred1, {}).get("score", 0) * 0.12, 4),
+                        "s_final":  round(sc.get(pred1, 0), 6),
+                        "p_deuda":  pesos["deuda"],
+                        "p_rec":    pesos["reciente"],
+                        "p_patron": pesos["patron"],
+                        "p_anti":   pesos["anti"],
+                        "p_markov": pesos["secuencia"],
+                    })
+                    señales_insertadas += 1
+
+                # Commit cada 200 registros para no saturar memoria en Render
+                if (insertados + señales_insertadas) % 200 == 0:
                     await db.commit()
 
             except Exception:
@@ -1867,15 +1949,16 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
 
         return {
             "status": "success",
-            "procesados": insertados,
-            "omitidos_ya_existian": omitidos,
-            "aciertos_top1": aciertos1,
-            "aciertos_top3": aciertos3,
-            "efectividad_top1": ef1,
-            "efectividad_top3": ef3,
+            "procesados":              insertados,
+            "señales_insertadas":      señales_insertadas,
+            "omitidos_ya_existian":    omitidos,
+            "aciertos_top1":           aciertos1,
+            "aciertos_top3":           aciertos3,
+            "efectividad_top1":        ef1,
+            "efectividad_top3":        ef3,
             "message": (
-                f"✅ V10 retroactivo {fecha_desde}→{fecha_hasta}: "
-                f"{insertados} predicciones. "
+                f"✅ Retroactivo {fecha_desde}→{fecha_hasta}: "
+                f"{insertados} predicciones | {señales_insertadas} desgloses de señales. "
                 f"Top1: {ef1}% | Top3: {ef3}%"
             ),
         }
