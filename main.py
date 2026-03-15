@@ -742,9 +742,8 @@ async def backtest_motor(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Walk-forward backtest: entrena con datos ANTES de año_corte,
-    evalúa en datos DESDE año_corte. Mide EF.TOP3 real por hora.
-    Sin contaminar: el motor nunca ve los datos que va a predecir.
+    Walk-forward backtest por hora individual.
+    Evalúa SOLO el año indicado (año_corte) — train = todo lo anterior.
     """
     from datetime import date as _date
     from collections import Counter, defaultdict as _dd
@@ -754,6 +753,8 @@ async def backtest_motor(
         "04:00 PM","05:00 PM","06:00 PM","07:00 PM",
     ]
     fecha_corte = _date(año_corte, 1, 1)
+    # Limitar test a UN solo año para que no haga timeout en Render
+    fecha_fin   = _date(año_corte + 1, 1, 1)
     t0 = datetime.datetime.now()
     horas_a_evaluar = [hora_filtro] if hora_filtro != "todas" else HORAS_BT
     resultados_hora = {}
@@ -767,14 +768,15 @@ async def backtest_motor(
             ORDER BY fecha ASC
         """), {"hora": hora, "corte": fecha_corte})).fetchall()
 
-        # ── TEST: desde el corte ──
+        # ── TEST: solo el año seleccionado (no todos los años siguientes) ──
         test_rows = (await db.execute(text("""
             SELECT fecha, animalito FROM historico
-            WHERE hora=:hora AND loteria='Lotto Activo' AND fecha >= :corte
+            WHERE hora=:hora AND loteria='Lotto Activo'
+              AND fecha >= :corte AND fecha < :fin
             ORDER BY fecha ASC
-        """), {"hora": hora, "corte": fecha_corte})).fetchall()
+        """), {"hora": hora, "corte": fecha_corte, "fin": fecha_fin})).fetchall()
 
-        if len(test_rows) < 30:
+        if len(test_rows) < 10:
             resultados_hora[hora] = {"n_test": len(test_rows), "skip": True}
             continue
 
