@@ -1,152 +1,4 @@
-<!DOC
-
-  <div id="backtest" class="panel" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-      <select id="btCorte" style="font-family:monospace;font-size:11px;padding:6px 10px;background:var(--bg2);border:1px solid var(--b);color:var(--t);border-radius:4px">
-        <option value="2025">Test: 2025-2026</option>
-        <option value="2024">Test: 2024-2026</option>
-        <option value="2023">Test: 2023-2026</option>
-      </select>
-      <select id="btHora" style="font-family:monospace;font-size:11px;padding:6px 10px;background:var(--bg2);border:1px solid var(--b);color:var(--t);border-radius:4px">
-        <option value="todas">Todas las horas</option>
-        <option value="08:00 AM">08:00 AM</option>
-        <option value="09:00 AM">09:00 AM</option>
-        <option value="10:00 AM">10:00 AM</option>
-        <option value="11:00 AM">11:00 AM</option>
-        <option value="12:00 PM">12:00 PM</option>
-        <option value="01:00 PM">01:00 PM</option>
-        <option value="02:00 PM">02:00 PM</option>
-        <option value="03:00 PM">03:00 PM</option>
-        <option value="04:00 PM">04:00 PM</option>
-        <option value="05:00 PM">05:00 PM</option>
-        <option value="06:00 PM">06:00 PM</option>
-        <option value="07:00 PM">07:00 PM</option>
-      </select>
-      <button class="btn bg2" id="btnBacktest" onclick="correrBacktest()">▶ CORRER BACKTEST</button>
-      <button class="btn by2" id="btnOptPesos" onclick="optimizarPesos()" style="display:none">⚙ OPTIMIZAR PESOS HORA</button>
-      <span id="btStatus" style="font-family:monospace;font-size:11px;color:var(--y)"></span>
-    </div>
-
-    <div id="btGlobal" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;display:none">
-      <div class="kcard"><div class="kval" id="btEf3" style="color:var(--g)">—</div><div class="klbl">EF.TOP3 REAL</div><div class="ksub" id="btN">— predicciones</div></div>
-      <div class="kcard"><div class="kval" id="btEf1" style="color:var(--b2)">—</div><div class="klbl">EF.TOP1 REAL</div><div class="ksub">walk-forward</div></div>
-      <div class="kcard"><div class="kval" id="btVsAzar" style="color:var(--y)">—</div><div class="klbl">VS AZAR</div><div class="ksub">azar: 7.89%</div></div>
-      <div class="kcard"><div class="kval" id="btRatio" style="color:var(--p)">—</div><div class="klbl">RATIO AZAR</div><div class="ksub" id="btTiempo">—</div></div>
-    </div>
-
-    <div id="btRanking" style="display:none">
-      <div style="font-family:monospace;font-size:11px;color:var(--t2);letter-spacing:1px;margin-bottom:8px">RANKING POR HORA</div>
-      <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:12px">
-        <thead>
-          <tr style="color:var(--t2);font-size:10px;letter-spacing:1px;border-bottom:1px solid var(--b)">
-            <td style="padding:6px 4px">#</td>
-            <td>HORA</td>
-            <td style="text-align:right">TRAIN</td>
-            <td style="text-align:right">TEST</td>
-            <td style="text-align:right">EF.TOP1</td>
-            <td style="text-align:right">EF.TOP3</td>
-            <td style="text-align:right">VS AZAR</td>
-            <td style="text-align:right">RATIO</td>
-            <td style="text-align:right">SEÑAL</td>
-          </tr>
-        </thead>
-        <tbody id="btTbody"></tbody>
-      </table>
-      <div style="margin-top:12px;font-family:monospace;font-size:10px;color:var(--t3)">
-        Walk-forward: el motor entrena con datos ANTERIORES a la fecha de corte y predice datos POSTERIORES.
-        Sin contaminación — refleja el rendimiento real en producción.
-      </div>
-    </div>
-  </div>
-
-  <!-- BACKTEST -->
-  <div class="panel" id="panel-backtest" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-      <span style="font-size:11px;letter-spacing:1px;color:var(--c)">FECHA CORTE</span>
-      <select id="btCorte" style="background:var(--bg2);border:1px solid var(--b);color:var(--t);padding:5px 10px;border-radius:3px;font-size:11px;font-family:monospace">
-        <option value="2025-01-01">2025-01-01 (train 7 años, test 2025-2026)</option>
-        <option value="2024-01-01">2024-01-01 (train 6 años, test 2024-2026)</option>
-        <option value="2023-06-01">2023-06-01 (test últimos 3 años)</option>
-        <option value="2026-01-01">2026-01-01 (test solo 2026)</option>
-      </select>
-      <button class="btn bg2" id="btnBT" onclick="correrBacktest()">▶ CORRER BACKTEST</button>
-      <span id="btStatus" style="font-size:11px;color:var(--c)"></span>
-    </div>
-
-    <div id="btGlobal" style="display:none;margin-bottom:20px">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
-        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
-          <div style="font-size:11px;color:var(--c);letter-spacing:1px">EF.TOP3 BACKTEST</div>
-          <div id="btEf3" style="font-size:28px;font-weight:700;color:var(--g);margin:6px 0">—</div>
-          <div style="font-size:10px;color:var(--c)">azar: 7.89%</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
-          <div style="font-size:11px;color:var(--c);letter-spacing:1px">VS AZAR</div>
-          <div id="btVsAzar" style="font-size:28px;font-weight:700;color:var(--y);margin:6px 0">—</div>
-          <div style="font-size:10px;color:var(--c)">puntos extra</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
-          <div style="font-size:11px;color:var(--c);letter-spacing:1px">RATIO AZAR</div>
-          <div id="btRatio" style="font-size:28px;font-weight:700;color:#a78bfa;margin:6px 0">—</div>
-          <div style="font-size:10px;color:var(--c)">× el azar</div>
-        </div>
-        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
-          <div style="font-size:11px;color:var(--c);letter-spacing:1px">PREDICCIONES TEST</div>
-          <div id="btTotal" style="font-size:28px;font-weight:700;margin:6px 0">—</div>
-          <div style="font-size:10px;color:var(--c)">sorteos evaluados</div>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <!-- Tabla por hora -->
-        <div>
-          <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EF.TOP3 POR HORA</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px" id="btTablaHoras">
-            <thead>
-              <tr style="border-bottom:1px solid var(--b)">
-                <th style="text-align:left;padding:5px 8px;color:var(--c);font-weight:400">HORA</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SORTEOS</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP3</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">VS AZAR</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SEÑAL</th>
-              </tr>
-            </thead>
-            <tbody id="btHorasBody"></tbody>
-          </table>
-        </div>
-
-        <!-- Tabla por año -->
-        <div>
-          <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EVOLUCIÓN ANUAL (PERÍODO TEST)</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px" id="btTablaAnos">
-            <thead>
-              <tr style="border-bottom:1px solid var(--b)">
-                <th style="text-align:left;padding:5px 8px;color:var(--c);font-weight:400">AÑO</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SORTEOS</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP3</th>
-                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP1</th>
-              </tr>
-            </thead>
-            <tbody id="btAnosBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Gráfico de evolución mensual -->
-      <div style="margin-top:20px">
-        <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EF.TOP3 MENSUAL EN PERÍODO TEST</div>
-        <div id="btGraficoMeses" style="display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--b);padding-bottom:4px"></div>
-        <div id="btGraficoLabels" style="display:flex;gap:3px;margin-top:4px;font-size:9px;color:var(--c)"></div>
-      </div>
-
-      <div id="btHorasOperar" style="margin-top:16px;padding:12px;background:var(--bg2);border:1px solid var(--g);border-radius:4px;display:none">
-        <span style="font-size:11px;color:var(--g);letter-spacing:1px">HORAS A OPERAR SEGÚN BACKTEST: </span>
-        <span id="btHorasLista" style="font-size:13px;font-weight:700;color:var(--g)"></span>
-      </div>
-    </div>
-
-    <div id="btError" style="display:none;color:var(--r);font-size:13px;padding:12px;border:1px solid var(--r);border-radius:4px"></div>
-  </div>TYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -798,6 +650,7 @@ async function correrBacktest(){
     const btn=document.getElementById('btnBT');
     const status=document.getElementById('btStatus');
     const corte=document.getElementById('btCorte').value;
+    const horaFiltro=(document.getElementById('btHoraFiltro')||{}).value||'todas';
     btn.disabled=true; btn.textContent='⏳ Calculando...';
     status.textContent='Esto puede tardar 60-90s con 29,000 registros...';
     document.getElementById('btGlobal').style.display='none';
@@ -805,7 +658,7 @@ async function correrBacktest(){
     try{
       const ctrl=new AbortController();
       const tid=setTimeout(()=>ctrl.abort(),120000);
-      const r=await fetch(`/backtest?fecha_corte=${corte}`,{signal:ctrl.signal});
+      const r=await fetch(`/backtest?fecha_corte=${corte}&hora_filtro=${encodeURIComponent(horaFiltro)}`,{signal:ctrl.signal});
       clearTimeout(tid);
       const d=await r.json();
       if(d.status!=='success'){ throw new Error(d.message||'Error'); }
@@ -1185,7 +1038,106 @@ async function lanzarRetroactivo2018(){
 </script>
 
 <!-- ══ TAB SEÑALES ══ -->
-<div id="page-senales" class="page" style="display:none;padding:20px 24px">
+<div id="page-backtest" class="page">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;padding:20px 24px 0">
+    <span style="font-size:11px;letter-spacing:1px;color:var(--muted);font-family:var(--mono)">FECHA CORTE</span>
+    <select id="btCorte" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:3px;font-size:11px;font-family:var(--mono)">
+      <option value="2025">Test: 2025-2026 (train 7 años)</option>
+      <option value="2024">Test: 2024-2026 (train 6 años)</option>
+      <option value="2023">Test: 2023-2026 (train 5 años)</option>
+    </select>
+    <select id="btHoraFiltro" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:3px;font-size:11px;font-family:var(--mono)">
+      <option value="todas">Todas las horas</option>
+      <option value="08:00 AM">08:00 AM</option>
+      <option value="09:00 AM">09:00 AM</option>
+      <option value="10:00 AM">10:00 AM</option>
+      <option value="11:00 AM">11:00 AM</option>
+      <option value="12:00 PM">12:00 PM</option>
+      <option value="01:00 PM">01:00 PM</option>
+      <option value="02:00 PM">02:00 PM</option>
+      <option value="03:00 PM">03:00 PM</option>
+      <option value="04:00 PM">04:00 PM</option>
+      <option value="05:00 PM">05:00 PM</option>
+      <option value="06:00 PM">06:00 PM</option>
+      <option value="07:00 PM">07:00 PM</option>
+    </select>
+    <button id="btnBT" class="btn bg2" onclick="correrBacktest()">▶ CORRER BACKTEST</button>
+    <span id="btStatus" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+  </div>
+
+  <div style="padding:0 24px 20px">
+    <div id="btGlobal" style="display:none;margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:1px;font-family:var(--mono)">EF.TOP3 BACKTEST</div>
+          <div id="btEf3" style="font-size:28px;font-weight:700;color:var(--g);margin:6px 0;font-family:var(--mono)">—</div>
+          <div style="font-size:10px;color:var(--muted)">azar: 7.89%</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:1px;font-family:var(--mono)">VS AZAR</div>
+          <div id="btVsAzar" style="font-size:28px;font-weight:700;color:var(--y);margin:6px 0;font-family:var(--mono)">—</div>
+          <div style="font-size:10px;color:var(--muted)">puntos extra</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:1px;font-family:var(--mono)">RATIO AZAR</div>
+          <div id="btRatio" style="font-size:28px;font-weight:700;color:var(--p);margin:6px 0;font-family:var(--mono)">—</div>
+          <div style="font-size:10px;color:var(--muted)">× el azar</div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted);letter-spacing:1px;font-family:var(--mono)">PREDICCIONES TEST</div>
+          <div id="btTotal" style="font-size:28px;font-weight:700;margin:6px 0;font-family:var(--mono)">—</div>
+          <div style="font-size:10px;color:var(--muted)">sorteos evaluados</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:11px;letter-spacing:1px;color:var(--muted);margin-bottom:8px;font-family:var(--mono)">EF.TOP3 POR HORA</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border)">
+                <th style="text-align:left;padding:5px 8px;color:var(--muted);font-weight:400">HORA</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">SORTEOS</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">EF.TOP3</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">VS AZAR</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">SEÑAL</th>
+              </tr>
+            </thead>
+            <tbody id="btHorasBody"></tbody>
+          </table>
+        </div>
+        <div>
+          <div style="font-size:11px;letter-spacing:1px;color:var(--muted);margin-bottom:8px;font-family:var(--mono)">EVOLUCIÓN ANUAL (PERÍODO TEST)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border)">
+                <th style="text-align:left;padding:5px 8px;color:var(--muted);font-weight:400">AÑO</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">SORTEOS</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">EF.TOP3</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:400">EF.TOP1</th>
+              </tr>
+            </thead>
+            <tbody id="btAnosBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="margin-top:20px">
+        <div style="font-size:11px;letter-spacing:1px;color:var(--muted);margin-bottom:8px;font-family:var(--mono)">EF.TOP3 MENSUAL EN PERÍODO TEST</div>
+        <div id="btGraficoMeses" style="display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--border);padding-bottom:4px"></div>
+        <div id="btGraficoLabels" style="display:flex;gap:3px;margin-top:4px;font-size:9px;color:var(--muted);font-family:var(--mono)"></div>
+      </div>
+
+      <div id="btHorasOperar" style="margin-top:16px;padding:12px;background:rgba(0,232,122,.05);border:1px solid rgba(0,232,122,.2);border-radius:4px;display:none">
+        <span style="font-size:11px;color:var(--g);letter-spacing:1px;font-family:var(--mono)">HORAS A OPERAR SEGÚN BACKTEST: </span>
+        <span id="btHorasLista" style="font-size:13px;font-weight:700;color:var(--g);font-family:var(--mono)"></span>
+      </div>
+    </div>
+    <div id="btError" style="display:none;color:var(--r);font-size:13px;padding:12px;border:1px solid var(--r);border-radius:4px;font-family:var(--mono)"></div>
+  </div>
+</div>
+
+<div id="page-senales" class="page" style="padding:20px 24px">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
     <span style="font-family:monospace;font-size:11px;color:var(--muted,#4a4f6e);letter-spacing:1px">PERÍODO</span>
     <select id="selDiasSeñales" style="background:var(--panel,#0d0f17);border:1px solid var(--border,#1a1d2e);color:var(--text,#dde1f5);padding:5px 10px;border-radius:3px;font-size:11px;font-family:monospace">
@@ -1207,7 +1159,7 @@ async function lanzarRetroactivo2018(){
       <span style="color:var(--y)">Primera vez:</span> presiona ⚙ MIGRAR TABLA primero para crear la tabla en Neon.
     </div>
   </div>
-</div>
+</div><!-- /page-senales -->
 
 </body>
 </html>
