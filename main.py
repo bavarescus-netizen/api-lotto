@@ -648,7 +648,7 @@ async def backtest_motor(
         "04:00 PM","05:00 PM","06:00 PM","07:00 PM",
     ]
     fecha_corte = _date(año_corte, 1, 1)
-    t0 = datetime.now()
+    t0 = datetime.datetime.now()
     horas_a_evaluar = [hora_filtro] if hora_filtro != "todas" else HORAS_BT
     resultados_hora = {}
     total_test = total_top3 = total_top1 = 0
@@ -744,7 +744,7 @@ async def backtest_motor(
         "ranking":   [{"hora": h, **v} for h, v in ranking],
         "por_hora":  resultados_hora,
         "azar_top3": azar,
-        "tiempo_s":  round((datetime.now() - t0).total_seconds(), 1),
+        "tiempo_s":  round((datetime.datetime.now() - t0).total_seconds(), 1),
     }
 
 
@@ -764,7 +764,7 @@ async def optimizar_pesos_hora(
     import itertools
 
     fecha_corte = _date(año_corte, 1, 1)
-    t0 = datetime.now()
+    t0 = datetime.datetime.now()
 
     train_rows = (await db.execute(text("""
         SELECT animalito FROM historico
@@ -869,7 +869,7 @@ async def optimizar_pesos_hora(
         "azar_top3": round(3/38*100, 2),
         "top5_pesos": top5,
         "mejor_ef_top3": top5[0]["ef_top3"] if top5 else 0,
-        "tiempo_s": round((datetime.now() - t0).total_seconds(), 1),
+        "tiempo_s": round((datetime.datetime.now() - t0).total_seconds(), 1),
     }
 
 
