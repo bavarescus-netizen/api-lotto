@@ -13,7 +13,7 @@ from app.services.motor_v10 import (
     generar_prediccion, obtener_estadisticas, obtener_bitacora,
     entrenar_modelo, backtest, calibrar_predicciones,
     llenar_auditoria_retroactiva, aprender_desde_historico,
-    migrar_schema,
+    migrar_schema, actualizar_resultados_señales, obtener_score_señales,
 )
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
@@ -1849,3 +1849,82 @@ async def health(db: AsyncSession = Depends(get_db)):
         }
     except Exception:
         return {"status": "ok", "awake": True}
+
+
+# ══════════════════════════════════════════════════════
+# SCORE POR SEÑAL — qué señal aporta valor real
+# ══════════════════════════════════════════════════════
+@app.get("/score-señales")
+async def endpoint_score_señales(dias: int = 90, db: AsyncSession = Depends(get_db)):
+    """
+    Analiza auditoria_señales y muestra qué señal es realmente útil.
+    Parámetro: dias=90 (por defecto últimos 90 días)
+    """
+    return await obtener_score_señales(db, dias=dias)
+
+
+@app.post("/actualizar-señales")
+async def endpoint_actualizar_señales(db: AsyncSession = Depends(get_db)):
+    """
+    Sincroniza resultado_real y aciertos en auditoria_señales.
+    Llamar después de /entrenar o /calibrar.
+    """
+    resultado = await actualizar_resultados_señales(db)
+    return {"status": "ok", **resultado}
+
+
+@app.post("/migrar-señales")
+async def endpoint_migrar_señales(db: AsyncSession = Depends(get_db)):
+    """
+    Crea la tabla auditoria_señales si no existe.
+    Ejecutar una sola vez tras el deploy.
+    """
+    sqls = [
+        """
+        CREATE TABLE IF NOT EXISTS auditoria_señales (
+            id              SERIAL PRIMARY KEY,
+            fecha           DATE        NOT NULL,
+            hora            VARCHAR(20) NOT NULL,
+            animal_predicho VARCHAR(50),
+            resultado_real  VARCHAR(50),
+            acierto_top1    BOOLEAN,
+            acierto_top3    BOOLEAN,
+            confianza       INT DEFAULT 0,
+            score_deuda         FLOAT DEFAULT 0,
+            score_reciente      FLOAT DEFAULT 0,
+            score_patron_dia    FLOAT DEFAULT 0,
+            score_anti_racha    FLOAT DEFAULT 0,
+            score_markov        FLOAT DEFAULT 0,
+            score_ciclo_exacto  FLOAT DEFAULT 0,
+            score_patron_fecha  FLOAT DEFAULT 0,
+            score_final         FLOAT DEFAULT 0,
+            peso_deuda      FLOAT DEFAULT 0,
+            peso_reciente   FLOAT DEFAULT 0,
+            peso_patron     FLOAT DEFAULT 0,
+            peso_anti       FLOAT DEFAULT 0,
+            peso_markov     FLOAT DEFAULT 0,
+            creado_en       TIMESTAMP DEFAULT NOW(),
+            UNIQUE (fecha, hora)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_audsig_fecha    ON auditoria_señales(fecha)",
+        "CREATE INDEX IF NOT EXISTS idx_audsig_hora     ON auditoria_señales(hora)",
+        "CREATE INDEX IF NOT EXISTS idx_audsig_acierto  ON auditoria_señales(acierto_top3)",
+    ]
+    errores = []
+    for sql in sqls:
+        try:
+            await db.execute(text(sql))
+        except Exception as e:
+            errores.append(str(e)[:80])
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+    return {
+        "status": "ok" if not errores else "parcial",
+        "tabla": "auditoria_señales",
+        "mensaje": "✅ Tabla lista para recibir desgloses de señales",
+        "errores": errores,
+    }
