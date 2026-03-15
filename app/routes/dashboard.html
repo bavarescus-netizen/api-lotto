@@ -1,4 +1,63 @@
-<!DOCTYPE html>
+<!DOC
+
+  <div id="backtest" class="panel" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <select id="btCorte" style="font-family:monospace;font-size:11px;padding:6px 10px;background:var(--bg2);border:1px solid var(--b);color:var(--t);border-radius:4px">
+        <option value="2025">Test: 2025-2026</option>
+        <option value="2024">Test: 2024-2026</option>
+        <option value="2023">Test: 2023-2026</option>
+      </select>
+      <select id="btHora" style="font-family:monospace;font-size:11px;padding:6px 10px;background:var(--bg2);border:1px solid var(--b);color:var(--t);border-radius:4px">
+        <option value="todas">Todas las horas</option>
+        <option value="08:00 AM">08:00 AM</option>
+        <option value="09:00 AM">09:00 AM</option>
+        <option value="10:00 AM">10:00 AM</option>
+        <option value="11:00 AM">11:00 AM</option>
+        <option value="12:00 PM">12:00 PM</option>
+        <option value="01:00 PM">01:00 PM</option>
+        <option value="02:00 PM">02:00 PM</option>
+        <option value="03:00 PM">03:00 PM</option>
+        <option value="04:00 PM">04:00 PM</option>
+        <option value="05:00 PM">05:00 PM</option>
+        <option value="06:00 PM">06:00 PM</option>
+        <option value="07:00 PM">07:00 PM</option>
+      </select>
+      <button class="btn bg2" id="btnBacktest" onclick="correrBacktest()">▶ CORRER BACKTEST</button>
+      <button class="btn by2" id="btnOptPesos" onclick="optimizarPesos()" style="display:none">⚙ OPTIMIZAR PESOS HORA</button>
+      <span id="btStatus" style="font-family:monospace;font-size:11px;color:var(--y)"></span>
+    </div>
+
+    <div id="btGlobal" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;display:none">
+      <div class="kcard"><div class="kval" id="btEf3" style="color:var(--g)">—</div><div class="klbl">EF.TOP3 REAL</div><div class="ksub" id="btN">— predicciones</div></div>
+      <div class="kcard"><div class="kval" id="btEf1" style="color:var(--b2)">—</div><div class="klbl">EF.TOP1 REAL</div><div class="ksub">walk-forward</div></div>
+      <div class="kcard"><div class="kval" id="btVsAzar" style="color:var(--y)">—</div><div class="klbl">VS AZAR</div><div class="ksub">azar: 7.89%</div></div>
+      <div class="kcard"><div class="kval" id="btRatio" style="color:var(--p)">—</div><div class="klbl">RATIO AZAR</div><div class="ksub" id="btTiempo">—</div></div>
+    </div>
+
+    <div id="btRanking" style="display:none">
+      <div style="font-family:monospace;font-size:11px;color:var(--t2);letter-spacing:1px;margin-bottom:8px">RANKING POR HORA</div>
+      <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:12px">
+        <thead>
+          <tr style="color:var(--t2);font-size:10px;letter-spacing:1px;border-bottom:1px solid var(--b)">
+            <td style="padding:6px 4px">#</td>
+            <td>HORA</td>
+            <td style="text-align:right">TRAIN</td>
+            <td style="text-align:right">TEST</td>
+            <td style="text-align:right">EF.TOP1</td>
+            <td style="text-align:right">EF.TOP3</td>
+            <td style="text-align:right">VS AZAR</td>
+            <td style="text-align:right">RATIO</td>
+            <td style="text-align:right">SEÑAL</td>
+          </tr>
+        </thead>
+        <tbody id="btTbody"></tbody>
+      </table>
+      <div style="margin-top:12px;font-family:monospace;font-size:10px;color:var(--t3)">
+        Walk-forward: el motor entrena con datos ANTERIORES a la fecha de corte y predice datos POSTERIORES.
+        Sin contaminación — refleja el rendimiento real en producción.
+      </div>
+    </div>
+  </div>TYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -113,6 +172,7 @@ tbody tr:last-child td{border-bottom:none}
   <div class="tab" onclick="showTab('horas',this)">⏱ Rentabilidad Horas</div>
   <div class="tab" onclick="showTab('markov',this)">🔗 Markov</div>
   <div class="tab" onclick="showTab('historial',this)">📋 Historial</div>
+  <div class="tab" onclick="showTab('backtest',this)">🧪 Backtest</div>
 </div>
 <div class="main">
 
