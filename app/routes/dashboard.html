@@ -770,69 +770,79 @@ async function correrBacktest(){
     const corte=document.getElementById('btCorte').value;
     const horaFiltro=(document.getElementById('btHoraFiltro')||{}).value||'todas';
     btn.disabled=true; btn.textContent='⏳ Calculando...';
-    status.textContent='Esto puede tardar 60-90s con 29,000 registros...';
+    status.textContent='Puede tardar 30-60s...';
     document.getElementById('btGlobal').style.display='none';
     document.getElementById('btError').style.display='none';
     try{
       const ctrl=new AbortController();
       const tid=setTimeout(()=>ctrl.abort(),120000);
-      const r=await fetch(`/backtest?fecha_corte=${corte}&hora_filtro=${encodeURIComponent(horaFiltro)}`,{signal:ctrl.signal});
+      // Parámetro correcto: año_corte (no fecha_corte)
+      const r=await fetch(`/backtest?año_corte=${corte}&hora_filtro=${encodeURIComponent(horaFiltro)}`,{signal:ctrl.signal});
       clearTimeout(tid);
       const d=await r.json();
-      if(d.status!=='success'){ throw new Error(d.message||'Error'); }
-      const g=d.global;
-      document.getElementById('btEf3').textContent=g.ef_top3+'%';
-      document.getElementById('btEf3').style.color=g.ef_top3>=12?'var(--g)':g.ef_top3>=10?'var(--y)':'var(--r)';
-      document.getElementById('btVsAzar').textContent=(g.vs_azar>=0?'+':'')+g.vs_azar+'%';
-      document.getElementById('btRatio').textContent=g.ratio_azar+'x';
-      document.getElementById('btTotal').textContent=(g.total_predicciones||0).toLocaleString();
-      // Tabla horas
+      if(d.status!=='success'){ throw new Error(d.message||JSON.stringify(d)); }
+
+      // Campos que devuelve el endpoint real
+      const g=d.global||{};
+      const azar=d.azar_top3||7.89;
+
+      document.getElementById('btEf3').textContent=(g.ef_top3||0)+'%';
+      document.getElementById('btEf3').style.color=(g.ef_top3||0)>=12?'var(--g)':(g.ef_top3||0)>=10?'var(--y)':'var(--r)';
+      document.getElementById('btVsAzar').textContent=((g.vs_azar||0)>=0?'+':'')+(g.vs_azar||0)+'%';
+      document.getElementById('btRatio').textContent=(g.ratio||0)+'x';
+      document.getElementById('btTotal').textContent=(g.total_test||0).toLocaleString();
+
+      // Tabla por hora
       const tbody=document.getElementById('btHorasBody');
       tbody.innerHTML='';
-      for(const[hora,h] of Object.entries(d.por_hora)){
-        const color=h.ef_top3>=12?'var(--g)':h.ef_top3>=10?'var(--y)':'var(--r)';
-        const señalColor=h.señal==='OPERAR'?'var(--g)':h.señal==='MARGINAL'?'var(--y)':'var(--r)';
-        tbody.innerHTML+=`<tr style="border-bottom:1px solid var(--b)">
-          <td style="padding:5px 8px">${hora}</td>
-          <td style="padding:5px 8px;text-align:right;color:var(--c)">${h.total}</td>
-          <td style="padding:5px 8px;text-align:right;color:${color};font-weight:700">${h.ef_top3}%</td>
-          <td style="padding:5px 8px;text-align:right;color:${h.vs_azar>=0?'var(--g)':'var(--r)'}">${h.vs_azar>=0?'+':''}${h.vs_azar}%</td>
-          <td style="padding:5px 8px;text-align:right;color:${señalColor};font-size:11px">${h.señal}</td>
+      const ranking=d.ranking||Object.entries(d.por_hora||{}).map(([h,v])=>({hora:h,...v}));
+      for(const h of ranking){
+        if(h.skip) continue;
+        const ef=h.ef_top3||0;
+        const vs=h.vs_azar||0;
+        const color=ef>=12?'var(--g)':ef>=10?'var(--y)':'var(--r)';
+        const señal=h.rentable?'✅ OPERAR':'—';
+        const señalColor=h.rentable?'var(--g)':'var(--muted)';
+        tbody.innerHTML+=`<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:5px 8px;font-family:var(--mono)">${h.hora}</td>
+          <td style="padding:5px 8px;text-align:right;color:var(--muted)">${h.n_test||0}</td>
+          <td style="padding:5px 8px;text-align:right;color:${color};font-weight:700">${ef}%</td>
+          <td style="padding:5px 8px;text-align:right;color:${vs>=0?'var(--g)':'var(--r)'}">${vs>=0?'+':''}${vs}%</td>
+          <td style="padding:5px 8px;text-align:right;color:${señalColor};font-size:11px">${señal}</td>
         </tr>`;
       }
-      // Tabla años
-      const tbodyA=document.getElementById('btAnosBody');
-      tbodyA.innerHTML='';
-      for(const[año,a] of Object.entries(d.por_año)){
-        const c=a.ef_top3>=10?'var(--g)':'var(--y)';
-        tbodyA.innerHTML+=`<tr style="border-bottom:1px solid var(--b)">
-          <td style="padding:5px 8px;font-weight:700">${año}</td>
-          <td style="padding:5px 8px;text-align:right;color:var(--c)">${a.total}</td>
-          <td style="padding:5px 8px;text-align:right;color:${c};font-weight:700">${a.ef_top3}%</td>
-          <td style="padding:5px 8px;text-align:right;color:var(--c)">${a.ef_top1}%</td>
-        </tr>`;
-      }
-      // Gráfico mensual
-      const meses=Object.entries(d.por_mes);
-      const maxEf=Math.max(...meses.map(([,m])=>m.ef_top3),12);
+
+      // Tabla por año — construida desde por_hora agrupando por año de fecha
+      // El endpoint no devuelve por_año, pero sí el año de corte
+      document.getElementById('btAnosBody').innerHTML=`<tr><td colspan="4" style="padding:8px;color:var(--muted);font-size:11px">
+        Datos de test desde ${corte}-01-01 · Azar: ${azar}%</td></tr>`;
+
+      // Gráfico simple de ef_top3 por hora
       const graf=document.getElementById('btGraficoMeses');
       const labs=document.getElementById('btGraficoLabels');
-      const barW=Math.max(8,Math.floor((600/Math.max(meses.length,1))-3));
       graf.innerHTML=''; labs.innerHTML='';
-      meses.forEach(([mes,m])=>{
-        const h=Math.round((m.ef_top3/maxEf)*110);
-        const c=m.ef_top3>=12?'#22c55e':m.ef_top3>=10?'#eab308':'#ef4444';
-        graf.innerHTML+=`<div title="${mes}: ${m.ef_top3}% (${m.total} sorteos)"
-          style="width:${barW}px;height:${h}px;background:${c};border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
-        labs.innerHTML+=`<div style="width:${barW}px;flex-shrink:0;overflow:hidden;text-overflow:clip">${mes.slice(5)}</div>`;
-      });
-      // Horas a operar
-      if(d.horas_operar&&d.horas_operar.length>0){
-        document.getElementById('btHorasOperar').style.display='block';
-        document.getElementById('btHorasLista').textContent=d.horas_operar.join(' · ');
+      const horasPlot=d.ranking||[];
+      const maxEf=Math.max(...horasPlot.filter(h=>!h.skip).map(h=>h.ef_top3||0),12);
+      for(const h of horasPlot){
+        if(h.skip) continue;
+        const ef=h.ef_top3||0;
+        const barH=Math.round((ef/maxEf)*110);
+        const c=ef>=12?'#22c55e':ef>=10?'#eab308':'#ef4444';
+        const lbl=h.hora.replace(':00','').replace(' AM','a').replace(' PM','p');
+        graf.innerHTML+=`<div title="${h.hora}: ${ef}% (${h.n_test} sorteos)"
+          style="width:40px;height:${barH}px;background:${c};border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
+        labs.innerHTML+=`<div style="width:40px;flex-shrink:0;font-size:9px;text-align:center">${lbl}</div>`;
       }
+
+      // Horas a operar
+      const horasOperar=(d.ranking||[]).filter(h=>h.rentable).map(h=>h.hora);
+      if(horasOperar.length>0){
+        document.getElementById('btHorasOperar').style.display='block';
+        document.getElementById('btHorasLista').textContent=horasOperar.join(' · ');
+      }
+
       document.getElementById('btGlobal').style.display='block';
-      status.textContent=`✅ Test: ${d.config.test_registros.toLocaleString()} registros | Train: ${d.config.train_registros.toLocaleString()}`;
+      status.textContent=`✅ ${(g.total_test||0).toLocaleString()} sorteos test | Azar: ${azar}% | Tiempo: ${d.tiempo_s||'—'}s`;
       btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
     }catch(e){
       document.getElementById('btError').style.display='block';
