@@ -16,7 +16,7 @@ from app.services.motor_v10 import (
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
 )
 
-# ── Estado global de tareas largas (no bloquean el servidor) ── 
+# ── Estado global de tareas largas (no bloquean el servidor) ──
 _tarea = {
     "nombre": None,
     "estado": "idle",    # idle | running | done | error
@@ -551,6 +551,98 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
 # ═══════════════════════════════════════════════════════════
 # MARKOV — Por animal+hora
 # ═══════════════════════════════════════════════════════════
+@app.get("/diagnostico-markov")
+async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
+    """
+    Diagnóstico completo de markov_transiciones.
+    Muestra: estructura real, constraints, conteos, muestra de datos corruptos.
+    """
+    resultado = {}
+    try:
+        # 1. Estructura de la tabla (columnas y tipos)
+        r = await db.execute(text("""
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'markov_transiciones'
+            ORDER BY ordinal_position
+        """))
+        resultado["columnas"] = [
+            {"col": row[0], "tipo": row[1], "nullable": row[2]}
+            for row in r.fetchall()
+        ]
+
+        # 2. Constraints (PRIMARY KEY, UNIQUE, etc.)
+        r = await db.execute(text("""
+            SELECT conname, contype, pg_get_constraintdef(oid)
+            FROM pg_constraint
+            WHERE conrelid = 'markov_transiciones'::regclass
+        """))
+        resultado["constraints"] = [
+            {"nombre": row[0], "tipo": row[1], "def": row[2]}
+            for row in r.fetchall()
+        ]
+
+        # 3. Conteos generales
+        r = await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))
+        resultado["total_filas"] = r.scalar() or 0
+
+        r = await db.execute(text("SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"))
+        resultado["filas_prob_mayor_100"] = r.scalar() or 0
+
+        r = await db.execute(text("SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad <= 0"))
+        resultado["filas_prob_cero_o_neg"] = r.scalar() or 0
+
+        r = await db.execute(text("SELECT MAX(probabilidad), MIN(probabilidad), AVG(probabilidad) FROM markov_transiciones"))
+        row = r.fetchone()
+        resultado["prob_max"]  = float(row[0]) if row[0] else None
+        resultado["prob_min"]  = float(row[1]) if row[1] else None
+        resultado["prob_avg"]  = round(float(row[2]), 2) if row[2] else None
+
+        # 4. Muestra de las 5 filas más corruptas
+        r = await db.execute(text("""
+            SELECT hora, animal_previo, animal_sig, frecuencia, probabilidad
+            FROM markov_transiciones
+            ORDER BY probabilidad DESC
+            LIMIT 10
+        """))
+        resultado["top10_por_prob"] = [
+            {"hora": row[0], "previo": row[1], "sig": row[2],
+             "frec": row[3], "prob": float(row[4])}
+            for row in r.fetchall()
+        ]
+
+        # 5. Filas por hora
+        r = await db.execute(text("""
+            SELECT hora, COUNT(*), MAX(probabilidad), AVG(probabilidad)
+            FROM markov_transiciones
+            GROUP BY hora ORDER BY hora
+        """))
+        resultado["por_hora"] = [
+            {"hora": row[0], "filas": row[1],
+             "prob_max": round(float(row[2]),2) if row[2] else None,
+             "prob_avg": round(float(row[3]),2) if row[3] else None}
+            for row in r.fetchall()
+        ]
+
+        # 6. Verificar si la tabla viene de un schema diferente
+        r = await db.execute(text("""
+            SELECT schemaname, tablename
+            FROM pg_tables WHERE tablename = 'markov_transiciones'
+        """))
+        resultado["schema"] = [{"schema": row[0], "tabla": row[1]} for row in r.fetchall()]
+
+        resultado["diagnostico"] = (
+            "CORRUPTO — probabilidades > 100%" if resultado["filas_prob_mayor_100"] > 0
+            else "OK — probabilidades válidas" if resultado["total_filas"] > 1000
+            else "VACIO — tabla sin datos suficientes"
+        )
+
+    except Exception as e:
+        resultado["error"] = str(e)
+
+    return resultado
+
+
 @app.get("/fix-markov")
 async def fix_markov(db: AsyncSession = Depends(get_db)):
     """Reconstruye markov_transiciones hora por hora para evitar timeout de Render"""
@@ -590,9 +682,16 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
             probabilidad = EXCLUDED.probabilidad
     """
     try:
-        # PASO 1: limpiar tabla
-        await db.execute(text("TRUNCATE TABLE markov_transiciones"))
+        # PASO 1: limpiar tabla con DELETE (más compatible con transacciones que TRUNCATE)
+        await db.execute(text("DELETE FROM markov_transiciones"))
         await db.commit()
+
+        # Verificar que quedó vacía
+        n_antes = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+        if n_antes > 0:
+            # Forzar con TRUNCATE si DELETE no alcanzó
+            await db.execute(text("TRUNCATE TABLE markov_transiciones RESTART IDENTITY"))
+            await db.commit()
 
         # PASO 2: INSERT por hora (12 queries pequeños, cada uno < 3s)
         total = 0
@@ -609,10 +708,15 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
                 await db.rollback()
                 errores.append(f"{hora}: {e_hora}")
 
-        # PASO 3: verificar sanidad
+        # PASO 3: verificar sanidad — prob > 100 es corrupto
         bad = (await db.execute(text(
             "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
         ))).scalar() or 0
+
+        # Si todavía hay corruptos, eliminarlos
+        if bad > 0:
+            await db.execute(text("DELETE FROM markov_transiciones WHERE probabilidad > 100"))
+            await db.commit()
 
         return {
             "status": "success" if not errores else "partial",
@@ -620,7 +724,7 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
             "prob_invalidas": bad,
             "errores": errores,
             "message": (
-                f"✅ Markov: {total:,} transiciones | Inválidas: {bad}"
+                f"✅ Markov: {total:,} transiciones | Inválidas eliminadas: {bad}"
                 + (f" | Errores: {errores}" if errores else "")
             )
         }
@@ -875,653 +979,6 @@ async def optimizar_pesos_hora(
     }
 
 
-
-# ═══════════════════════════════════════════════════════════════
-# SPRINT 1 — WALK-FORWARD BACKTEST
-# Entrena con datos hasta fecha_corte, predice el resto
-# Mide EF.TOP3 real por hora, por señal, por año
-# ═══════════════════════════════════════════════════════════════
-@app.get("/backtest")
-async def backtest(
-    fecha_corte: str = Query(default="2025-01-01"),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Walk-forward backtest sobre datos históricos.
-    fecha_corte: entrenar con datos ANTES de esta fecha, testear DESPUÉS.
-    Default: entrenar 2018-2024, testear 2025-2026.
-    """
-    import pytz
-    from datetime import datetime as _dt, date as _date
-    try:
-        corte = _date.fromisoformat(fecha_corte)
-    except Exception:
-        corte = _date(2025, 1, 1)
-
-    HORAS_BT = [
-        '08:00 AM','09:00 AM','10:00 AM','11:00 AM',
-        '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
-        '04:00 PM','05:00 PM','06:00 PM','07:00 PM',
-    ]
-
-    try:
-        # ── Cargar TRAIN: datos antes de la fecha corte ──
-        train_rows = (await db.execute(text("""
-            SELECT fecha, hora, animalito
-            FROM historico
-            WHERE loteria='Lotto Activo' AND fecha < :corte
-            ORDER BY fecha ASC, hora ASC
-        """), {"corte": corte})).fetchall()
-
-        # ── Cargar TEST: datos desde la fecha corte ──
-        test_rows = (await db.execute(text("""
-            SELECT fecha, hora, animalito
-            FROM historico
-            WHERE loteria='Lotto Activo' AND fecha >= :corte
-            ORDER BY fecha ASC, hora ASC
-        """), {"corte": corte})).fetchall()
-
-        if not test_rows:
-            return {"status": "error", "message": "Sin datos de test para esa fecha"}
-
-        # ── Construir modelo desde TRAIN ──
-        # Frecuencia por hora
-        freq_hora = {}         # {hora: {animal: count}}
-        # Markov por hora
-        markov_hora = {}       # {hora: {animal_prev: {animal_sig: count}}}
-        # Gap (última aparición) por hora
-        ultima_aparicion = {}  # {hora: {animal: fecha_index}}
-        # Patrón día de semana por hora
-        patron_dia = {}        # {hora: {dia: {animal: count}}}
-
-        for i, (fecha, hora, animal) in enumerate(train_rows):
-            if hora not in freq_hora:
-                freq_hora[hora] = {}
-                markov_hora[hora] = {}
-                ultima_aparicion[hora] = {}
-                patron_dia[hora] = {}
-            # frecuencia
-            freq_hora[hora][animal] = freq_hora[hora].get(animal, 0) + 1
-            # patrón día
-            dia = fecha.weekday()
-            if dia not in patron_dia[hora]:
-                patron_dia[hora][dia] = {}
-            patron_dia[hora][dia][animal] = patron_dia[hora][dia].get(animal, 0) + 1
-            # última aparición
-            ultima_aparicion[hora][animal] = i
-
-        # Markov requiere pares consecutivos por hora (mismo par fecha consecutiva)
-        # Agrupar train por hora
-        train_por_hora = {}
-        for fecha, hora, animal in train_rows:
-            if hora not in train_por_hora:
-                train_por_hora[hora] = []
-            train_por_hora[hora].append((fecha, animal))
-
-        for hora, sorteos in train_por_hora.items():
-            markov_hora[hora] = {}
-            for i in range(1, len(sorteos)):
-                f_prev, a_prev = sorteos[i-1]
-                f_curr, a_curr = sorteos[i]
-                # Solo pares de días consecutivos
-                if (f_curr - f_prev).days == 1:
-                    if a_prev not in markov_hora[hora]:
-                        markov_hora[hora][a_prev] = {}
-                    markov_hora[hora][a_prev][a_curr] = (
-                        markov_hora[hora][a_prev].get(a_curr, 0) + 1
-                    )
-
-        # ── Función de predicción simplificada (top3) ──
-        ANIMALES_ALL = [
-            'carnero','toro','ciempies','alacran','pavo','cabra','burro','elefante',
-            'camello','lechon','yegua','gallo','mono','paloma','oso','lechuza',
-            'gato','caballo','perro','loro','pato','aguila','rana','cebra',
-            'iguana','gallina','lapa','leon','jirafa','tortuga','delfin',
-            'perico','ballena','caiman','tigre','venado','ardilla','cochino',
-            'culebra','chivo','pescado','vaca','zamuro',
-        ]
-
-        def predecir_top3(hora, animal_previo, dia_semana, total_train_hora):
-            scores = {}
-            fh = freq_hora.get(hora, {})
-            total = max(sum(fh.values()), 1)
-
-            for a in ANIMALES_ALL:
-                # Señal 1: frecuencia reciente (base)
-                s_freq = fh.get(a, 0) / total
-
-                # Señal 2: Markov
-                s_markov = 0
-                if animal_previo and hora in markov_hora:
-                    mk = markov_hora[hora].get(animal_previo, {})
-                    total_mk = max(sum(mk.values()), 1)
-                    s_markov = mk.get(a, 0) / total_mk
-
-                # Señal 3: patrón día de semana
-                s_patron = 0
-                if hora in patron_dia and dia_semana in patron_dia[hora]:
-                    pd = patron_dia[hora][dia_semana]
-                    total_pd = max(sum(pd.values()), 1)
-                    s_patron = pd.get(a, 0) / total_pd
-
-                # Señal 4: anti-repetición (si salió ayer, penalizar)
-                penaliz = 0.85 if a == animal_previo else 1.0
-
-                # Score combinado (pesos base — sprint 2 los optimizará)
-                scores[a] = (
-                    s_freq   * 0.35 +
-                    s_markov * 0.30 +
-                    s_patron * 0.20 +
-                    s_freq   * 0.15  # deuda simplificada
-                ) * penaliz
-
-            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
-            return top3, scores
-
-        # ── Evaluar TEST ──
-        resultados_hora = {h: {"total":0,"top1":0,"top3":0,"top1_real":[],"top3_real":[]} for h in HORAS_BT}
-        resultados_año  = {}
-        resultados_mes  = {}
-
-        # Para Markov en test: necesitamos saber el animal previo (último de esa hora antes)
-        # Combinar train_por_hora con lo que va del test
-        test_por_hora = {}
-        for fecha, hora, animal in test_rows:
-            if hora not in test_por_hora:
-                test_por_hora[hora] = []
-            test_por_hora[hora].append((fecha, animal))
-
-        for hora in HORAS_BT:
-            sorteos_train = train_por_hora.get(hora, [])
-            sorteos_test  = test_por_hora.get(hora, [])
-            if not sorteos_test:
-                continue
-
-            # Concatenar para obtener animal previo correcto
-            todos = sorteos_train + sorteos_test
-            idx_inicio_test = len(sorteos_train)
-
-            for i in range(idx_inicio_test, len(todos)):
-                fecha_t, real = todos[i]
-                # Animal previo: último de día anterior
-                animal_previo = None
-                for j in range(i-1, max(i-5, -1), -1):
-                    fj, aj = todos[j]
-                    if (fecha_t - fj).days == 1:
-                        animal_previo = aj
-                        break
-
-                dia_semana = fecha_t.weekday()
-                top3, _ = predecir_top3(hora, animal_previo, dia_semana, len(sorteos_train))
-
-                año = fecha_t.year
-                mes = f"{fecha_t.year}-{fecha_t.month:02d}"
-
-                if hora not in resultados_hora:
-                    resultados_hora[hora] = {"total":0,"top1":0,"top3":0}
-                resultados_hora[hora]["total"] += 1
-
-                if año not in resultados_año:
-                    resultados_año[año] = {"total":0,"top1":0,"top3":0}
-                resultados_año[año]["total"] += 1
-
-                if mes not in resultados_mes:
-                    resultados_mes[mes] = {"total":0,"top1":0,"top3":0}
-                resultados_mes[mes]["total"] += 1
-
-                if top3 and real == top3[0]:
-                    resultados_hora[hora]["top1"] += 1
-                    resultados_año[año]["top1"] += 1
-                    resultados_mes[mes]["top1"] += 1
-
-                if top3 and real in top3:
-                    resultados_hora[hora]["top3"] += 1
-                    resultados_año[año]["top3"] += 1
-                    resultados_mes[mes]["top3"] += 1
-
-        # ── Calcular efectividades ──
-        azar_top3 = round(3/38*100, 2)
-        azar_top1 = round(1/38*100, 2)
-
-        por_hora = {}
-        for h, d in resultados_hora.items():
-            t = max(d["total"], 1)
-            ef3 = round(d["top3"]/t*100, 2)
-            ef1 = round(d["top1"]/t*100, 2)
-            por_hora[h] = {
-                "total": d["total"],
-                "ef_top1": ef1,
-                "ef_top3": ef3,
-                "vs_azar": round(ef3 - azar_top3, 2),
-                "ratio": round(ef3 / azar_top3, 2) if azar_top3 > 0 else 0,
-                "señal": "OPERAR" if ef3 >= 12 else "MARGINAL" if ef3 >= 10 else "NO",
-            }
-
-        por_año = {}
-        for a, d in sorted(resultados_año.items()):
-            t = max(d["total"], 1)
-            por_año[str(a)] = {
-                "total": d["total"],
-                "ef_top3": round(d["top3"]/t*100, 2),
-                "ef_top1": round(d["top1"]/t*100, 2),
-            }
-
-        por_mes = {}
-        for m, d in sorted(resultados_mes.items()):
-            t = max(d["total"], 1)
-            por_mes[m] = {
-                "total": d["total"],
-                "ef_top3": round(d["top3"]/t*100, 2),
-            }
-
-        total_test = sum(d["total"] for d in resultados_hora.values())
-        total_top3 = sum(d["top3"] for d in resultados_hora.values())
-        ef_global  = round(total_top3 / max(total_test, 1) * 100, 2)
-
-        # Ordenar horas por EF.TOP3 desc
-        mejor_hora = sorted(por_hora.items(), key=lambda x: -x[1]["ef_top3"])
-
-        return {
-            "status": "success",
-            "config": {
-                "fecha_corte": str(corte),
-                "train_registros": len(train_rows),
-                "test_registros": len(test_rows),
-            },
-            "global": {
-                "ef_top3": ef_global,
-                "ef_top1": round(sum(d["top1"] for d in resultados_hora.values()) / max(total_test,1) * 100, 2),
-                "total_predicciones": total_test,
-                "azar_top3": azar_top3,
-                "vs_azar": round(ef_global - azar_top3, 2),
-                "ratio_azar": round(ef_global / azar_top3, 2),
-            },
-            "por_hora": dict(mejor_hora),
-            "por_año": por_año,
-            "por_mes": por_mes,
-            "horas_operar": [h for h, d in mejor_hora if d["ef_top3"] >= 10],
-        }
-
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/markov")
-async def markov_animal(
-    hora:   str = Query(...),
-    animal: str = Query(...),
-    db: AsyncSession = Depends(get_db)
-):
-    try:
-        rows = (await db.execute(text("""
-            SELECT hora, animal_previo, animal_sig,
-                   frecuencia,
-                   ROUND(probabilidad::numeric * 100, 2) AS probabilidad_pct
-            FROM markov_transiciones
-            WHERE hora = :hora
-              AND LOWER(TRIM(animal_previo)) = LOWER(TRIM(:animal))
-            ORDER BY probabilidad DESC
-            LIMIT 20
-        """), {"hora": hora, "animal": animal})).fetchall()
-        return [
-            {
-                "hora": r[0], "animal_previo": r[1], "animal_sig": r[2],
-                "frecuencia": int(r[3]),
-                "probabilidad_pct": float(r[4]) if r[4] else 0,
-            }
-            for r in rows
-        ]
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# ═══════════════════════════════════════════════════════════
-# HISTORIAL — con pred1/2/3, offset y doble alias de filtros
-# ═══════════════════════════════════════════════════════════
-@app.get("/historial")
-async def get_historial(
-    fecha:     str = None,
-    resultado: str = None,
-    animal:    str = None,
-    limit:     int = 200,
-    offset:    int = 0,
-    db: AsyncSession = Depends(get_db)
-):
-    try:
-        conditions = [
-            "h.animalito IS NOT NULL",
-            "h.loteria='Lotto Activo'",
-            "a.prediccion_1 IS NOT NULL",
-        ]
-        params = {"limit": limit, "offset": offset}
-
-        if fecha:
-            conditions.append("a.fecha=:fecha")
-            params["fecha"] = fecha
-        if animal:
-            conditions.append("""(a.prediccion_1 ILIKE :animal OR a.prediccion_2 ILIKE :animal
-                OR a.prediccion_3 ILIKE :animal OR h.animalito ILIKE :animal)""")
-            params["animal"] = f"%{animal}%"
-        if resultado in ("win", "true"):
-            conditions.append("""h.animalito IN (
-                COALESCE(a.prediccion_1,'__'),COALESCE(a.prediccion_2,'__'),
-                COALESCE(a.prediccion_3,'__'))""")
-        elif resultado in ("fail", "false"):
-            conditions.append("""h.animalito NOT IN (
-                COALESCE(a.prediccion_1,'__'),COALESCE(a.prediccion_2,'__'),
-                COALESCE(a.prediccion_3,'__'))""")
-
-        where = " AND ".join(conditions)
-        rows = (await db.execute(text(f"""
-            SELECT a.fecha, a.hora,
-                   a.prediccion_1, a.prediccion_2, a.prediccion_3,
-                   a.confianza_pct, h.animalito AS resultado,
-                   a.es_hora_rentable, a.acierto,
-                   CASE WHEN h.animalito IN (
-                       COALESCE(a.prediccion_1,'__'),
-                       COALESCE(a.prediccion_2,'__'),
-                       COALESCE(a.prediccion_3,'__')
-                   ) THEN true ELSE false END AS acierto_top3
-            FROM auditoria_ia a
-            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
-            WHERE {where}
-            ORDER BY a.fecha DESC, a.hora DESC
-            LIMIT :limit OFFSET :offset
-        """), params)).fetchall()
-
-        predicciones = [
-            {
-                "fecha":          r[0].strftime("%Y-%m-%d") if r[0] else "—",
-                "hora":           str(r[1]) if r[1] else "—",
-                "prediccion_1":   r[2] or "—",
-                "prediccion_2":   r[3] or "—",
-                "prediccion_3":   r[4] or "—",
-                "pred1": r[2] or "—", "pred2": r[3] or "—", "pred3": r[4] or "—",
-                "confianza_pct":  round(float(r[5]),1) if r[5] else None,
-                "resultado_real": r[6] or "—",
-                "resultado":      r[6] or "—",
-                "hora_rentable":  bool(r[7]) if r[7] is not None else False,
-                "acierto":        bool(r[8]) if r[8] is not None else bool(r[9]),
-                "acierto_top3":   bool(r[9]),
-            }
-            for r in rows
-        ]
-        total = len(predicciones)
-        ac1   = sum(1 for p in predicciones if p["acierto"] is True)
-        ac3   = sum(1 for p in predicciones if p["acierto_top3"])
-        return {
-            "predicciones": predicciones, "registros": predicciones, "data": predicciones,
-            "stats": {
-                "total": total, "aciertos": ac3,
-                "aciertos_top1": ac1, "aciertos_top3": ac3,
-                "fallos": total - ac3,
-                "efectividad": round(ac3/total*100,2) if total>0 else 0,
-            },
-        }
-    except Exception as e:
-        return JSONResponse(status_code=500, content={
-            "error": str(e), "predicciones": [], "registros": [], "stats": {}
-        })
-
-
-# ═══════════════════════════════════════════════════════════
-# RENTABILIDAD — V10 con ganancia estimada y aliases
-# ═══════════════════════════════════════════════════════════
-@app.get("/rentabilidad")
-async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
-    try:
-        res = (await db.execute(text("""
-            SELECT hora, total_sorteos, aciertos_top1, aciertos_top3,
-                   efectividad_top1, efectividad_top3,
-                   es_rentable, ultima_actualizacion
-            FROM rentabilidad_hora ORDER BY efectividad_top3 DESC
-        """))).fetchall()
-        horas = []
-        for r in res:
-            ef3 = float(r[5] or 0)
-            horas.append({
-                "hora":             r[0],
-                "total_sorteos":    int(r[1] or 0),
-                "aciertos_top1":    int(r[2] or 0),
-                "aciertos_top3":    int(r[3] or 0),
-                "efectividad_top1": float(r[4] or 0),
-                "efectividad_top3": ef3,
-                "es_rentable":      bool(r[6]),
-                "ultima_actualizacion": str(r[7]) if r[7] else None,
-                "vs_azar":    round(ef3 - 8.33, 2),
-                "ventaja_pct": round(ef3 - 3.33, 2),
-                "ganancia_x1": round(ef3/100*30 - (1 - ef3/100), 2),
-                "señal": (
-                    "✅ OPERAR" if bool(r[6])
-                    else "⚠️ MARGINAL" if ef3 >= 8.0
-                    else "❌ NO OPERAR"
-                ),
-            })
-        rentables = [h for h in horas if h["es_rentable"]]
-        return {
-            "umbral_minimo": 3.33, "umbral_top3": 10.0,
-            "pago_loteria": 30, "n_animales": 3, "azar_top3": 8.33,
-            "horas_rentables": len(rentables),
-            "mejor_hora": horas[0] if horas else None,
-            "detalle": horas, "horas": horas, "data": horas,
-            "resumen": (
-                f"{len(rentables)}/{len(horas)} horas rentables. "
-                f"Mejor: {horas[0]['hora']} ({horas[0]['efectividad_top3']}%)"
-                if horas else "Sin datos"
-            ),
-        }
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# ═══════════════════════════════════════════════════════════
-# ENDPOINTS SIN CAMBIOS
-# ═══════════════════════════════════════════════════════════
-@app.get("/cargar-ultimo")
-async def cargar_ultimo(db: AsyncSession = Depends(get_db)):
-    try:
-        from app.routes.cargarhist import capturar_ultimo_resultado
-        resultado = await capturar_ultimo_resultado(db)
-        return {"message": f"✅ Capturado: {resultado}", "ok": True}
-    except ImportError:
-        return {"message": "⚠️ capturar_ultimo_resultado no expuesta en cargarhist", "ok": False}
-    except Exception as e:
-        return {"message": f"❌ Error: {str(e)}", "ok": False}
-
-
-@app.get("/procesar")
-async def procesar(db: AsyncSession = Depends(get_db)):
-    """
-    Procesa rápido: calibra filas pendientes + genera predicción para hora actual.
-    Para entrenamiento completo usa /aprender-sql.
-    """
-    try:
-        import pytz
-        from datetime import datetime
-        ahora = datetime.now(pytz.timezone('America/Caracas'))
-
-        # PASO 1: Calibrar solo las filas pendientes (rápido)
-        r = await db.execute(text("""
-            UPDATE auditoria_ia a
-            SET acierto        = (LOWER(TRIM(a.animal_predicho)) = LOWER(TRIM(h.animalito))),
-                resultado_real = h.animalito
-            FROM historico h
-            WHERE a.fecha = h.fecha AND a.hora = h.hora
-              AND h.loteria = 'Lotto Activo'
-              AND (a.acierto IS NULL
-                   OR a.resultado_real IS NULL
-                   OR a.resultado_real IN ('PENDIENTE',''))
-        """))
-        calibradas = r.rowcount
-        await db.commit()
-
-        # PASO 2: Insertar predicción para la hora actual/próxima si no existe
-        horas_map = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
-                     12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
-                     16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
-        h_actual = ahora.hour
-        # Siguiente hora de sorteo
-        siguiente = None
-        for h in sorted(horas_map.keys()):
-            if h > h_actual:
-                siguiente = horas_map[h]; break
-        if not siguiente:
-            siguiente = '08:00 AM'
-
-        # Obtener top3 de probabilidades_hora para esa hora
-        top3 = (await db.execute(text("""
-            SELECT animalito, probabilidad
-            FROM probabilidades_hora
-            WHERE hora = :hora
-            ORDER BY probabilidad DESC LIMIT 3
-        """), {"hora": siguiente})).fetchall()
-
-        pred_insertada = 0
-        if top3 and len(top3) >= 1:
-            p1 = top3[0][0]; p2 = top3[1][0] if len(top3)>1 else p1
-            p3 = top3[2][0] if len(top3)>2 else p2
-            conf = round(float(top3[0][1] - (top3[1][1] if len(top3)>1 else top3[0][1]))*100, 1) if len(top3)>1 else 5.0
-
-            # Calcular ef_top3 de esa hora
-            rent = (await db.execute(text("""
-                SELECT efectividad_top3, es_rentable
-                FROM rentabilidad_hora WHERE hora=:hora
-            """), {"hora": siguiente})).fetchone()
-            ef3 = float(rent[0]) if rent else 0
-            es_rent = bool(rent[1]) if rent else False
-
-            await db.execute(text("""
-                INSERT INTO auditoria_ia
-                    (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
-                     confianza_pct, resultado_real, acierto, confianza_hora, es_hora_rentable)
-                VALUES (:fecha, :hora, :p1, :p1, :p2, :p3,
-                        :conf, 'PENDIENTE', NULL, :ef3, :rent)
-                ON CONFLICT (fecha, hora) DO UPDATE SET
-                    prediccion_1    = EXCLUDED.prediccion_1,
-                    prediccion_2    = EXCLUDED.prediccion_2,
-                    prediccion_3    = EXCLUDED.prediccion_3,
-                    animal_predicho = EXCLUDED.animal_predicho,
-                    confianza_hora  = EXCLUDED.confianza_hora,
-                    es_hora_rentable= EXCLUDED.es_hora_rentable
-                WHERE auditoria_ia.resultado_real IN ('PENDIENTE','')
-                   OR auditoria_ia.resultado_real IS NULL
-            """), {
-                "fecha": ahora.date(), "hora": siguiente,
-                "p1": p1, "p2": p2, "p3": p3, "conf": conf,
-                "ef3": ef3, "rent": es_rent,
-            })
-            pred_insertada = 1
-            await db.commit()
-
-        # PASO 3: insertar predicciones retroactivas para horas de HOY sin predicción
-        hoy = ahora.date()
-        horas_hoy = (await db.execute(text("""
-            SELECT DISTINCT h.hora FROM historico h
-            WHERE h.fecha = :hoy AND h.loteria = 'Lotto Activo'
-              AND NOT EXISTS (
-                  SELECT 1 FROM auditoria_ia a
-                  WHERE a.fecha = h.fecha AND a.hora = h.hora
-              )
-        """), {"hoy": hoy})).fetchall()
-
-        retro = 0
-        for (hora_r,) in horas_hoy:
-            t3 = (await db.execute(text("""
-                SELECT animalito, probabilidad FROM probabilidades_hora
-                WHERE hora=:hora ORDER BY probabilidad DESC LIMIT 3
-            """), {"hora": hora_r})).fetchall()
-            if not t3: continue
-            r2 = (await db.execute(text("""
-                SELECT efectividad_top3, es_rentable FROM rentabilidad_hora WHERE hora=:hora
-            """), {"hora": hora_r})).fetchone()
-            rr = (await db.execute(text("""
-                SELECT animalito FROM historico
-                WHERE fecha=:hoy AND hora=:hora AND loteria='Lotto Activo' LIMIT 1
-            """), {"hoy": hoy, "hora": hora_r})).fetchone()
-            await db.execute(text("""
-                INSERT INTO auditoria_ia
-                    (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
-                     confianza_pct, resultado_real, acierto, confianza_hora, es_hora_rentable)
-                VALUES (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :res, :ac, :ef3, :rent)
-                ON CONFLICT (fecha, hora) DO NOTHING
-            """), {
-                "fecha": hoy, "hora": hora_r,
-                "p1": t3[0][0], "p2": t3[1][0] if len(t3)>1 else t3[0][0],
-                "p3": t3[2][0] if len(t3)>2 else t3[0][0],
-                "conf": round(float(t3[0][1])*100, 1),
-                "res": rr[0] if rr else "PENDIENTE",
-                "ac": (t3[0][0].lower()==rr[0].lower()) if rr else None,
-                "ef3": float(r2[0]) if r2 else 0,
-                "rent": bool(r2[1]) if r2 else False,
-            })
-            retro += 1
-        if retro: await db.commit()
-
-        return {
-            "status": "success",
-            "calibradas": calibradas,
-            "retro_insertadas": retro,
-            "prediccion_hora": siguiente,
-            "pred_insertada": pred_insertada,
-            "message": (f"✅ {calibradas} calibradas | {retro} retro | "
-                       f"Pred → {siguiente}: {top3[0][0].upper() if top3 else '?'}")
-        }
-    except Exception as e:
-        await db.rollback()
-        import traceback; traceback.print_exc()
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/aprender")
-async def aprender(background_tasks: BackgroundTasks, desde: str = None):
-    """
-    Lanza el aprendizaje en BACKGROUND — no bloquea el servidor.
-    Llama /tarea para ver el progreso.
-    """
-    if _tarea["estado"] == "running":
-        return {"status": "ya_corriendo", "tarea": _tarea["nombre"],
-                "progreso": _tarea["progreso"]}
-    from datetime import date
-    fecha_inicio = date(2018, 1, 1)
-    if desde:
-        try: fecha_inicio = date.fromisoformat(desde)
-        except: return {"error": "Formato inválido. Use YYYY-MM-DD"}
-    background_tasks.add_task(_run_aprender, fecha_inicio)
-    return {"status": "iniciado", "message": f"Aprendizaje desde {fecha_inicio} corriendo en background",
-            "tip": "Llama /tarea para ver el progreso"}
-
-
-@app.get("/pesos")
-async def ver_pesos(db: AsyncSession = Depends(get_db)):
-    try:
-        rows = (await db.execute(text("""
-            SELECT id,fecha,peso_reciente,peso_deuda,peso_anti,peso_patron,
-                   peso_secuencia,efectividad,total_evaluados,aciertos,generacion
-            FROM motor_pesos ORDER BY id DESC LIMIT 10
-        """))).fetchall()
-        rows_hora = (await db.execute(text("""
-            SELECT hora,generacion,peso_decay,peso_markov,peso_gap,peso_reciente,efectividad
-            FROM motor_pesos_hora ORDER BY hora, generacion DESC
-        """))).fetchall()
-        return {
-            "historial_pesos": [
-                {"generacion":r[10],"fecha":str(r[1]),
-                 "pesos":{"reciente":r[2],"deuda":r[3],"anti":r[4],"patron":r[5],"secuencia":r[6]},
-                 "efectividad":r[7],"total":r[8],"aciertos":r[9]}
-                for r in rows
-            ],
-            "pesos_por_hora_v10": [
-                {"hora":r[0],"generacion":r[1],
-                 "pesos":{"decay":r[2],"markov":r[3],"gap":r[4],"reciente":r[5]},
-                 "efectividad":r[6]}
-                for r in rows_hora
-            ],
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
 @app.get("/retroactivo")
 async def retroactivo(
     background_tasks: BackgroundTasks,
@@ -1569,20 +1026,6 @@ async def ver_tarea():
 @app.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": await obtener_estadisticas(db), "bitacora_hoy": await obtener_bitacora(db)}
-
-
-@app.get("/backtest")
-async def run_backtest(desde: str, hasta: str, db: AsyncSession = Depends(get_db)):
-    from datetime import date
-    try:
-        fd = date.fromisoformat(desde)
-        fh = date.fromisoformat(hasta)
-        if (fh - fd).days > 180:
-            return {"error": "Rango máximo: 6 meses"}
-        return await backtest(db, fd, fh, max_sorteos=100)
-    except ValueError:
-        return {"error": "Formato inválido. Use YYYY-MM-DD"}
-
 
 
 
