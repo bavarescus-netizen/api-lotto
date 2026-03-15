@@ -16,7 +16,7 @@ from app.services.motor_v10 import (
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
 )
 
-# ── Estado global de tareas largas (no bloquean el servidor) ──
+# ── Estado global de tareas largas (no bloquean el servidor) ── 
 _tarea = {
     "nombre": None,
     "estado": "idle",    # idle | running | done | error
