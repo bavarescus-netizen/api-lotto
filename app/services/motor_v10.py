@@ -1016,6 +1016,64 @@ async def generar_prediccion(db) -> dict:
             except Exception as e:
                 await db.rollback()
 
+            # ── Guardar desglose por señal en auditoria_señales ──
+            try:
+                animal_top1 = _normalizar(top3[0]["animal"]) if top3 else None
+                if animal_top1:
+                    sc_t = scores.get(animal_top1, 0) or 0
+                    total_sc_raw = sum(scores.values()) or 1
+                    await db.execute(text("""
+                        INSERT INTO auditoria_señales (
+                            fecha, hora, animal_predicho, resultado_real,
+                            score_deuda, score_reciente, score_patron_dia,
+                            score_anti_racha, score_markov, score_ciclo_exacto,
+                            score_patron_fecha, score_final,
+                            peso_deuda, peso_reciente, peso_patron,
+                            peso_anti, peso_markov,
+                            confianza
+                        ) VALUES (
+                            :f, :h, :animal, 'PENDIENTE',
+                            :s_deuda, :s_rec, :s_patron,
+                            :s_anti, :s_markov, :s_ciclo,
+                            :s_fecha, :s_final,
+                            :p_deuda, :p_rec, :p_patron,
+                            :p_anti, :p_markov,
+                            :conf
+                        )
+                        ON CONFLICT (fecha, hora) DO UPDATE SET
+                            animal_predicho    = EXCLUDED.animal_predicho,
+                            score_deuda        = EXCLUDED.score_deuda,
+                            score_reciente     = EXCLUDED.score_reciente,
+                            score_patron_dia   = EXCLUDED.score_patron_dia,
+                            score_anti_racha   = EXCLUDED.score_anti_racha,
+                            score_markov       = EXCLUDED.score_markov,
+                            score_ciclo_exacto = EXCLUDED.score_ciclo_exacto,
+                            score_patron_fecha = EXCLUDED.score_patron_fecha,
+                            score_final        = EXCLUDED.score_final,
+                            confianza          = EXCLUDED.confianza
+                    """), {
+                        "f":        hoy,
+                        "h":        hora_str,
+                        "animal":   animal_top1,
+                        "s_deuda":  round(deuda.get(animal_top1, {}).get("score", 0) * pesos["deuda"], 4),
+                        "s_rec":    round(reciente.get(animal_top1, {}).get("score", 0) * pesos["reciente"], 4),
+                        "s_patron": round(patron.get(animal_top1, {}).get("score", 0) * pesos["patron"], 4),
+                        "s_anti":   round(anti.get(animal_top1, {}).get("score", 0) * pesos["anti"], 4),
+                        "s_markov": round(markov.get(animal_top1, {}).get("score", 0) * pesos["secuencia"], 4),
+                        "s_ciclo":  round(ciclo_exacto.get(animal_top1, {}).get("score", 0) * 0.15, 4),
+                        "s_fecha":  round(patron_fecha.get(animal_top1, {}).get("score", 0) * 0.12, 4),
+                        "s_final":  round(sc_t, 6),
+                        "p_deuda":  pesos["deuda"],
+                        "p_rec":    pesos["reciente"],
+                        "p_patron": pesos["patron"],
+                        "p_anti":   pesos["anti"],
+                        "p_markov": pesos["secuencia"],
+                        "conf":     int(confianza_idx),
+                    })
+                    await db.commit()
+            except Exception:
+                await db.rollback()  # No romper la predicción si falla el desglose
+
         idx_actual  = HORAS_SORTEO_STR.index(hora_str) if hora_str in HORAS_SORTEO_STR else -1
         proxima_hora = (HORAS_SORTEO_STR[idx_actual + 1]
                         if 0 <= idx_actual < len(HORAS_SORTEO_STR) - 1 else None)
@@ -1320,6 +1378,149 @@ async def entrenar_modelo(db) -> dict:
     except Exception as e:
         await db.rollback()
         return {"status": "error", "message": str(e)}
+
+
+# ══════════════════════════════════════════════════════
+# ACTUALIZAR RESULTADO EN auditoria_señales
+# Se llama junto con calibrar_predicciones
+# ══════════════════════════════════════════════════════
+async def actualizar_resultados_señales(db) -> dict:
+    """Sincroniza resultado_real, acierto_top1 y acierto_top3 en auditoria_señales."""
+    try:
+        r = await db.execute(text("""
+            UPDATE auditoria_señales s
+            SET
+                resultado_real = h.animalito,
+                acierto_top1   = (LOWER(TRIM(s.animal_predicho)) = LOWER(TRIM(h.animalito))),
+                acierto_top3   = (
+                    LOWER(TRIM(h.animalito)) IN (
+                        SELECT LOWER(TRIM(a.prediccion_1)) FROM auditoria_ia a
+                        WHERE a.fecha=s.fecha AND a.hora=s.hora
+                        UNION
+                        SELECT LOWER(TRIM(a.prediccion_2)) FROM auditoria_ia a
+                        WHERE a.fecha=s.fecha AND a.hora=s.hora
+                        UNION
+                        SELECT LOWER(TRIM(a.prediccion_3)) FROM auditoria_ia a
+                        WHERE a.fecha=s.fecha AND a.hora=s.hora
+                    )
+                )
+            FROM historico h
+            WHERE s.fecha = h.fecha
+              AND s.hora  = h.hora
+              AND h.loteria = 'Lotto Activo'
+              AND (s.resultado_real = 'PENDIENTE' OR s.resultado_real IS NULL)
+        """))
+        actualizados = r.rowcount
+        await db.commit()
+        return {"actualizados": actualizados}
+    except Exception as e:
+        await db.rollback()
+        return {"actualizados": 0, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════
+# SCORE POR SEÑAL — para /score-señales
+# ══════════════════════════════════════════════════════
+async def obtener_score_señales(db, dias=90) -> dict:
+    """
+    Analiza auditoria_señales para determinar qué señal tiene valor real.
+    Retorna efectividad por señal cuando ella es la 'dominante' en la predicción.
+    """
+    try:
+        fecha_ini = date.today() - timedelta(days=dias)
+        res = await db.execute(text("""
+            SELECT
+                -- Señal dominante (la que más aportó)
+                CASE
+                    WHEN score_deuda >= GREATEST(score_reciente, score_patron_dia,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'deuda'
+                    WHEN score_reciente >= GREATEST(score_deuda, score_patron_dia,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'reciente'
+                    WHEN score_patron_dia >= GREATEST(score_deuda, score_reciente,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'patron_dia'
+                    WHEN score_markov >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'markov'
+                    WHEN score_ciclo_exacto >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_markov, score_patron_fecha)
+                    THEN 'ciclo_exacto'
+                    WHEN score_patron_fecha >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_markov, score_ciclo_exacto)
+                    THEN 'patron_fecha'
+                    ELSE 'anti_racha'
+                END AS señal_dominante,
+                COUNT(*)                                        AS total,
+                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END)  AS aciertos,
+                ROUND(AVG(score_deuda)::numeric, 4)             AS avg_score_deuda,
+                ROUND(AVG(score_reciente)::numeric, 4)          AS avg_score_reciente,
+                ROUND(AVG(score_markov)::numeric, 4)            AS avg_score_markov,
+                ROUND(AVG(score_patron_fecha)::numeric, 4)      AS avg_score_fecha
+            FROM auditoria_señales
+            WHERE fecha >= :desde
+              AND acierto_top3 IS NOT NULL
+            GROUP BY señal_dominante
+            ORDER BY total DESC
+        """), {"desde": fecha_ini})
+        rows = res.fetchall()
+
+        señales = []
+        for r in rows:
+            total = int(r[1])
+            ac    = int(r[2])
+            ef    = round(ac / total * 100, 1) if total > 0 else 0
+            señales.append({
+                "señal":      r[0],
+                "total":      total,
+                "aciertos":   ac,
+                "ef_top3":    ef,
+                "vs_azar":    round(ef / 7.89, 2),   # 7.89% = azar top3 (3/38)
+                "recomendacion": (
+                    "✅ MANTENER" if ef >= 9.0 else
+                    "⚠️ REVISAR"  if ef >= 7.0 else
+                    "🔴 REDUCIR PESO"
+                ),
+            })
+
+        # Stats globales
+        res_global = await db.execute(text("""
+            SELECT
+                COUNT(*),
+                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END),
+                ROUND(AVG(score_deuda)::numeric, 4),
+                ROUND(AVG(score_reciente)::numeric, 4),
+                ROUND(AVG(score_markov)::numeric, 4),
+                ROUND(AVG(score_patron_fecha)::numeric, 4),
+                ROUND(AVG(confianza)::numeric, 1)
+            FROM auditoria_señales
+            WHERE fecha >= :desde AND acierto_top3 IS NOT NULL
+        """), {"desde": fecha_ini})
+        g = res_global.fetchone()
+        total_g = int(g[0] or 0)
+        ac_g    = int(g[1] or 0)
+
+        return {
+            "dias_analizados":   dias,
+            "total_predicciones": total_g,
+            "ef_top3_global":    round(ac_g / total_g * 100, 1) if total_g > 0 else 0,
+            "por_señal":         señales,
+            "avg_scores": {
+                "deuda":        float(g[2] or 0),
+                "reciente":     float(g[3] or 0),
+                "markov":       float(g[4] or 0),
+                "patron_fecha": float(g[5] or 0),
+            },
+            "confianza_promedio": float(g[6] or 0),
+            "mensaje": (
+                f"{'✅' if total_g >= 50 else '⚠️'} "
+                f"{total_g} predicciones analizadas | "
+                f"{'Muestra suficiente' if total_g >= 50 else 'Muestra pequeña — acumular más datos'}"
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e), "por_señal": []}
 
 
 # ══════════════════════════════════════════════════════
