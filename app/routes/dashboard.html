@@ -57,6 +57,95 @@
         Sin contaminación — refleja el rendimiento real en producción.
       </div>
     </div>
+  </div>
+
+  <!-- BACKTEST -->
+  <div class="panel" id="panel-backtest" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <span style="font-size:11px;letter-spacing:1px;color:var(--c)">FECHA CORTE</span>
+      <select id="btCorte" style="background:var(--bg2);border:1px solid var(--b);color:var(--t);padding:5px 10px;border-radius:3px;font-size:11px;font-family:monospace">
+        <option value="2025-01-01">2025-01-01 (train 7 años, test 2025-2026)</option>
+        <option value="2024-01-01">2024-01-01 (train 6 años, test 2024-2026)</option>
+        <option value="2023-06-01">2023-06-01 (test últimos 3 años)</option>
+        <option value="2026-01-01">2026-01-01 (test solo 2026)</option>
+      </select>
+      <button class="btn bg2" id="btnBT" onclick="correrBacktest()">▶ CORRER BACKTEST</button>
+      <span id="btStatus" style="font-size:11px;color:var(--c)"></span>
+    </div>
+
+    <div id="btGlobal" style="display:none;margin-bottom:20px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:11px;color:var(--c);letter-spacing:1px">EF.TOP3 BACKTEST</div>
+          <div id="btEf3" style="font-size:28px;font-weight:700;color:var(--g);margin:6px 0">—</div>
+          <div style="font-size:10px;color:var(--c)">azar: 7.89%</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:11px;color:var(--c);letter-spacing:1px">VS AZAR</div>
+          <div id="btVsAzar" style="font-size:28px;font-weight:700;color:var(--y);margin:6px 0">—</div>
+          <div style="font-size:10px;color:var(--c)">puntos extra</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:11px;color:var(--c);letter-spacing:1px">RATIO AZAR</div>
+          <div id="btRatio" style="font-size:28px;font-weight:700;color:#a78bfa;margin:6px 0">—</div>
+          <div style="font-size:10px;color:var(--c)">× el azar</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--b);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:11px;color:var(--c);letter-spacing:1px">PREDICCIONES TEST</div>
+          <div id="btTotal" style="font-size:28px;font-weight:700;margin:6px 0">—</div>
+          <div style="font-size:10px;color:var(--c)">sorteos evaluados</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- Tabla por hora -->
+        <div>
+          <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EF.TOP3 POR HORA</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px" id="btTablaHoras">
+            <thead>
+              <tr style="border-bottom:1px solid var(--b)">
+                <th style="text-align:left;padding:5px 8px;color:var(--c);font-weight:400">HORA</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SORTEOS</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP3</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">VS AZAR</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SEÑAL</th>
+              </tr>
+            </thead>
+            <tbody id="btHorasBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Tabla por año -->
+        <div>
+          <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EVOLUCIÓN ANUAL (PERÍODO TEST)</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px" id="btTablaAnos">
+            <thead>
+              <tr style="border-bottom:1px solid var(--b)">
+                <th style="text-align:left;padding:5px 8px;color:var(--c);font-weight:400">AÑO</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">SORTEOS</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP3</th>
+                <th style="text-align:right;padding:5px 8px;color:var(--c);font-weight:400">EF.TOP1</th>
+              </tr>
+            </thead>
+            <tbody id="btAnosBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Gráfico de evolución mensual -->
+      <div style="margin-top:20px">
+        <div style="font-size:11px;letter-spacing:1px;color:var(--c);margin-bottom:8px">EF.TOP3 MENSUAL EN PERÍODO TEST</div>
+        <div id="btGraficoMeses" style="display:flex;align-items:flex-end;gap:3px;height:120px;border-bottom:1px solid var(--b);padding-bottom:4px"></div>
+        <div id="btGraficoLabels" style="display:flex;gap:3px;margin-top:4px;font-size:9px;color:var(--c)"></div>
+      </div>
+
+      <div id="btHorasOperar" style="margin-top:16px;padding:12px;background:var(--bg2);border:1px solid var(--g);border-radius:4px;display:none">
+        <span style="font-size:11px;color:var(--g);letter-spacing:1px">HORAS A OPERAR SEGÚN BACKTEST: </span>
+        <span id="btHorasLista" style="font-size:13px;font-weight:700;color:var(--g)"></span>
+      </div>
+    </div>
+
+    <div id="btError" style="display:none;color:var(--r);font-size:13px;padding:12px;border:1px solid var(--r);border-radius:4px"></div>
   </div>TYPE html>
 <html lang="es">
 <head>
@@ -172,6 +261,7 @@ tbody tr:last-child td{border-bottom:none}
   <div class="tab" onclick="showTab('horas',this)">⏱ Rentabilidad Horas</div>
   <div class="tab" onclick="showTab('markov',this)">🔗 Markov</div>
   <div class="tab" onclick="showTab('historial',this)">📋 Historial</div>
+  <div class="tab" onclick="showTab('backtest',this)">🔬 Backtest</div>
   <div class="tab" onclick="showTab('backtest',this)">🧪 Backtest</div>
 </div>
 <div class="main">
@@ -703,7 +793,83 @@ async function procesarAhora(){
     if(btn){btn.disabled=false;btn.textContent='▶ PROCESAR';}
   }
 }
-async function fixMarkov(){
+async function correrBacktest(){
+    const btn=document.getElementById('btnBT');
+    const status=document.getElementById('btStatus');
+    const corte=document.getElementById('btCorte').value;
+    btn.disabled=true; btn.textContent='⏳ Calculando...';
+    status.textContent='Esto puede tardar 60-90s con 29,000 registros...';
+    document.getElementById('btGlobal').style.display='none';
+    document.getElementById('btError').style.display='none';
+    try{
+      const ctrl=new AbortController();
+      const tid=setTimeout(()=>ctrl.abort(),120000);
+      const r=await fetch(`/backtest?fecha_corte=${corte}`,{signal:ctrl.signal});
+      clearTimeout(tid);
+      const d=await r.json();
+      if(d.status!=='success'){ throw new Error(d.message||'Error'); }
+      const g=d.global;
+      document.getElementById('btEf3').textContent=g.ef_top3+'%';
+      document.getElementById('btEf3').style.color=g.ef_top3>=12?'var(--g)':g.ef_top3>=10?'var(--y)':'var(--r)';
+      document.getElementById('btVsAzar').textContent=(g.vs_azar>=0?'+':'')+g.vs_azar+'%';
+      document.getElementById('btRatio').textContent=g.ratio_azar+'x';
+      document.getElementById('btTotal').textContent=(g.total_predicciones||0).toLocaleString();
+      // Tabla horas
+      const tbody=document.getElementById('btHorasBody');
+      tbody.innerHTML='';
+      for(const[hora,h] of Object.entries(d.por_hora)){
+        const color=h.ef_top3>=12?'var(--g)':h.ef_top3>=10?'var(--y)':'var(--r)';
+        const señalColor=h.señal==='OPERAR'?'var(--g)':h.señal==='MARGINAL'?'var(--y)':'var(--r)';
+        tbody.innerHTML+=`<tr style="border-bottom:1px solid var(--b)">
+          <td style="padding:5px 8px">${hora}</td>
+          <td style="padding:5px 8px;text-align:right;color:var(--c)">${h.total}</td>
+          <td style="padding:5px 8px;text-align:right;color:${color};font-weight:700">${h.ef_top3}%</td>
+          <td style="padding:5px 8px;text-align:right;color:${h.vs_azar>=0?'var(--g)':'var(--r)'}">${h.vs_azar>=0?'+':''}${h.vs_azar}%</td>
+          <td style="padding:5px 8px;text-align:right;color:${señalColor};font-size:11px">${h.señal}</td>
+        </tr>`;
+      }
+      // Tabla años
+      const tbodyA=document.getElementById('btAnosBody');
+      tbodyA.innerHTML='';
+      for(const[año,a] of Object.entries(d.por_año)){
+        const c=a.ef_top3>=10?'var(--g)':'var(--y)';
+        tbodyA.innerHTML+=`<tr style="border-bottom:1px solid var(--b)">
+          <td style="padding:5px 8px;font-weight:700">${año}</td>
+          <td style="padding:5px 8px;text-align:right;color:var(--c)">${a.total}</td>
+          <td style="padding:5px 8px;text-align:right;color:${c};font-weight:700">${a.ef_top3}%</td>
+          <td style="padding:5px 8px;text-align:right;color:var(--c)">${a.ef_top1}%</td>
+        </tr>`;
+      }
+      // Gráfico mensual
+      const meses=Object.entries(d.por_mes);
+      const maxEf=Math.max(...meses.map(([,m])=>m.ef_top3),12);
+      const graf=document.getElementById('btGraficoMeses');
+      const labs=document.getElementById('btGraficoLabels');
+      const barW=Math.max(8,Math.floor((600/Math.max(meses.length,1))-3));
+      graf.innerHTML=''; labs.innerHTML='';
+      meses.forEach(([mes,m])=>{
+        const h=Math.round((m.ef_top3/maxEf)*110);
+        const c=m.ef_top3>=12?'#22c55e':m.ef_top3>=10?'#eab308':'#ef4444';
+        graf.innerHTML+=`<div title="${mes}: ${m.ef_top3}% (${m.total} sorteos)"
+          style="width:${barW}px;height:${h}px;background:${c};border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
+        labs.innerHTML+=`<div style="width:${barW}px;flex-shrink:0;overflow:hidden;text-overflow:clip">${mes.slice(5)}</div>`;
+      });
+      // Horas a operar
+      if(d.horas_operar&&d.horas_operar.length>0){
+        document.getElementById('btHorasOperar').style.display='block';
+        document.getElementById('btHorasLista').textContent=d.horas_operar.join(' · ');
+      }
+      document.getElementById('btGlobal').style.display='block';
+      status.textContent=`✅ Test: ${d.config.test_registros.toLocaleString()} registros | Train: ${d.config.train_registros.toLocaleString()}`;
+      btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
+    }catch(e){
+      document.getElementById('btError').style.display='block';
+      document.getElementById('btError').textContent='Error: '+(e.message||e);
+      status.textContent='';
+      btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
+    }
+  }
+  async function fixMarkov(){
     const btn=document.getElementById('btnFixMarkov');
     if(!btn) return;
     btn.disabled=true;
