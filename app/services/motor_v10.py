@@ -886,13 +886,23 @@ async def generar_prediccion(db) -> dict:
     try:
         tz      = pytz.timezone('America/Caracas')
         ahora   = datetime.now(tz)
-        hora_str= ahora.strftime("%I:00 %p").upper()
-        # Normalizar: "08:00 AM" en vez de "8:00 AM"
-        try:
-            hora_obj = datetime.strptime(hora_str, "%I:00 %p")
-            hora_str = hora_obj.strftime("%I:%M %p")
-        except Exception:
-            pass
+        _mn     = ahora.minute
+        _h      = ahora.hour
+        _slots  = [8,9,10,11,12,13,14,15,16,17,18,19]
+        _lbls   = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+                   12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+                   16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
+        # Si ya pasaron más de 2 min de la hora → sorteo pasó → predecir el siguiente
+        if _h < 8:
+            hora_str = _lbls[8]
+        elif _h >= 19:
+            hora_str = _lbls[8]
+        elif _mn > 2:
+            _sig = _h + 1
+            hora_str = _lbls.get(_sig, _lbls[8])
+        else:
+            hora_str = _lbls.get(_h, _lbls[8])
+
         dia_semana = ahora.weekday()
         hoy        = ahora.date()
 
