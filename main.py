@@ -585,7 +585,9 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
                frec,
                ROUND((frec::FLOAT / NULLIF(total_prev, 0) * 100)::numeric, 2)
         FROM conteos
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (hora, animal_previo, animal_sig) DO UPDATE SET
+            frecuencia   = EXCLUDED.frecuencia,
+            probabilidad = EXCLUDED.probabilidad
     """
     try:
         # PASO 1: limpiar tabla
