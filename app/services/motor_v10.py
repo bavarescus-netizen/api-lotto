@@ -1464,7 +1464,7 @@ async def obtener_estadisticas(db) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# BACKTEST V10
+# BACKTEST V10   
 # ══════════════════════════════════════════════════════
 async def backtest(db, fecha_desde, fecha_hasta, max_sorteos=100) -> dict:
     try:
