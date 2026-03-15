@@ -282,11 +282,17 @@ tbody tr:last-child td{border-bottom:none}
 <!-- ══ BACKTEST ══ -->
 <div id="page-backtest" class="page">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;padding:20px 24px 0">
-    <span style="font-size:11px;letter-spacing:1px;color:var(--muted);font-family:var(--mono)">FECHA CORTE</span>
+    <span style="font-size:11px;letter-spacing:1px;color:var(--muted);font-family:var(--mono)">AÑO TEST</span>
     <select id="btCorte" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:3px;font-size:11px;font-family:var(--mono)">
-      <option value="2025">Test: 2025-2026 (train 7 años)</option>
-      <option value="2024">Test: 2024-2026 (train 6 años)</option>
-      <option value="2023">Test: 2023-2026 (train 5 años)</option>
+      <option value="2026">Solo 2026 (~430 sorteos)</option>
+      <option value="2025" selected>Solo 2025 (~4380 sorteos)</option>
+      <option value="2024">Solo 2024 (~4380 sorteos)</option>
+      <option value="2023">Solo 2023 (~4380 sorteos)</option>
+      <option value="2022">Solo 2022 (~4380 sorteos)</option>
+      <option value="2021">Solo 2021 (~4380 sorteos)</option>
+      <option value="2020">Solo 2020 (~4380 sorteos)</option>
+      <option value="2019">Solo 2019 (~4380 sorteos)</option>
+      <option value="2018">Solo 2018 (~4380 sorteos)</option>
     </select>
     <select id="btHoraFiltro" style="background:var(--panel);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:3px;font-size:11px;font-family:var(--mono)">
       <option value="todas">Todas las horas</option>
@@ -767,87 +773,138 @@ async function procesarAhora(){
 async function correrBacktest(){
     const btn=document.getElementById('btnBT');
     const status=document.getElementById('btStatus');
-    const corte=document.getElementById('btCorte').value;
+    const corte=+document.getElementById('btCorte').value;
     const horaFiltro=(document.getElementById('btHoraFiltro')||{}).value||'todas';
     btn.disabled=true; btn.textContent='⏳ Calculando...';
-    status.textContent='Puede tardar 30-60s...';
     document.getElementById('btGlobal').style.display='none';
     document.getElementById('btError').style.display='none';
+
+    const HORAS=['08:00 AM','09:00 AM','10:00 AM','11:00 AM',
+                 '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
+                 '04:00 PM','05:00 PM','06:00 PM','07:00 PM'];
+
+    // Si elige una hora específica: 1 llamada. Si "todas": 12 llamadas secuenciales
+    const horasACorrer = horaFiltro==='todas' ? HORAS : [horaFiltro];
+
+    const resultadosHora={};
+    let totalTest=0, totalTop3=0, totalTop1=0;
+    const azar=7.89;
+
     try{
-      const ctrl=new AbortController();
-      const tid=setTimeout(()=>ctrl.abort(),120000);
-      // Parámetro correcto: año_corte (no fecha_corte)
-      const r=await fetch(`/backtest?año_corte=${corte}&hora_filtro=${encodeURIComponent(horaFiltro)}`,{signal:ctrl.signal});
-      clearTimeout(tid);
-      const d=await r.json();
-      if(d.status!=='success'){ throw new Error(d.message||JSON.stringify(d)); }
+      for(let i=0;i<horasACorrer.length;i++){
+        const hora=horasACorrer[i];
+        status.textContent=`Hora ${i+1}/${horasACorrer.length}: ${hora}...`;
 
-      // Campos que devuelve el endpoint real
-      const g=d.global||{};
-      const azar=d.azar_top3||7.89;
+        const ctrl=new AbortController();
+        const tid=setTimeout(()=>ctrl.abort(),25000); // 25s por hora
+        try{
+          const r=await fetch(
+            `/backtest?año_corte=${corte}&hora_filtro=${encodeURIComponent(hora)}`,
+            {signal:ctrl.signal}
+          );
+          clearTimeout(tid);
 
-      document.getElementById('btEf3').textContent=(g.ef_top3||0)+'%';
-      document.getElementById('btEf3').style.color=(g.ef_top3||0)>=12?'var(--g)':(g.ef_top3||0)>=10?'var(--y)':'var(--r)';
-      document.getElementById('btVsAzar').textContent=((g.vs_azar||0)>=0?'+':'')+(g.vs_azar||0)+'%';
-      document.getElementById('btRatio').textContent=(g.ratio||0)+'x';
-      document.getElementById('btTotal').textContent=(g.total_test||0).toLocaleString();
+          if(!r.ok){ throw new Error(`HTTP ${r.status}`); }
+          const text=await r.text();
+          let d;
+          try{ d=JSON.parse(text); }
+          catch(e){ throw new Error('Respuesta no válida: '+text.slice(0,80)); }
 
-      // Tabla por hora
+          if(d.status!=='success'){ throw new Error(d.message||JSON.stringify(d)); }
+
+          // Guardar resultado de esta hora
+          const h=d.por_hora?.[hora]||{};
+          if(!h.skip && h.n_test>0){
+            resultadosHora[hora]=h;
+            totalTest+=h.n_test||0;
+            totalTop3+=h.top3_ok||0;
+            totalTop1+=h.top1_ok||0;
+          }
+        }catch(eHora){
+          clearTimeout(tid);
+          resultadosHora[hora]={skip:true, error:eHora.message};
+        }
+        // Pausa breve entre horas
+        if(i<horasACorrer.length-1) await new Promise(r=>setTimeout(r,500));
+      }
+
+      // Calcular globales
+      const ef3=totalTest>0?Math.round(totalTop3/totalTest*10000)/100:0;
+      const ef1=totalTest>0?Math.round(totalTop1/totalTest*10000)/100:0;
+      const vs=Math.round((ef3-azar)*100)/100;
+      const ratio=Math.round(ef3/azar*100)/100;
+
+      // Renderizar cards globales
+      document.getElementById('btEf3').textContent=ef3+'%';
+      document.getElementById('btEf3').style.color=ef3>=10?'var(--g)':ef3>=7.89?'var(--y)':'var(--r)';
+      document.getElementById('btVsAzar').textContent=(vs>=0?'+':'')+vs+'%';
+      document.getElementById('btRatio').textContent=ratio+'x';
+      document.getElementById('btTotal').textContent=totalTest.toLocaleString();
+
+      // Tabla por hora — ordenada por EF.TOP3 desc
       const tbody=document.getElementById('btHorasBody');
       tbody.innerHTML='';
-      const ranking=d.ranking||Object.entries(d.por_hora||{}).map(([h,v])=>({hora:h,...v}));
-      for(const h of ranking){
-        if(h.skip) continue;
+      const sorted=Object.entries(resultadosHora)
+        .filter(([,h])=>!h.skip)
+        .sort(([,a],[,b])=>(b.ef_top3||0)-(a.ef_top3||0));
+
+      for(const[hora,h] of sorted){
         const ef=h.ef_top3||0;
-        const vs=h.vs_azar||0;
-        const color=ef>=12?'var(--g)':ef>=10?'var(--y)':'var(--r)';
+        const vs2=h.vs_azar||0;
+        const color=ef>=10?'var(--g)':ef>=7.89?'var(--y)':'var(--r)';
         const señal=h.rentable?'✅ OPERAR':'—';
-        const señalColor=h.rentable?'var(--g)':'var(--muted)';
         tbody.innerHTML+=`<tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:5px 8px;font-family:var(--mono)">${h.hora}</td>
-          <td style="padding:5px 8px;text-align:right;color:var(--muted)">${h.n_test||0}</td>
-          <td style="padding:5px 8px;text-align:right;color:${color};font-weight:700">${ef}%</td>
-          <td style="padding:5px 8px;text-align:right;color:${vs>=0?'var(--g)':'var(--r)'}">${vs>=0?'+':''}${vs}%</td>
-          <td style="padding:5px 8px;text-align:right;color:${señalColor};font-size:11px">${señal}</td>
+          <td style="padding:6px 8px;font-family:var(--mono)">${hora}</td>
+          <td style="padding:6px 8px;text-align:right;color:var(--muted)">${h.n_test}</td>
+          <td style="padding:6px 8px;text-align:right;color:${color};font-weight:700">${ef}%</td>
+          <td style="padding:6px 8px;text-align:right;color:${vs2>=0?'var(--g)':'var(--r)'}">${vs2>=0?'+':''}${vs2}%</td>
+          <td style="padding:6px 8px;text-align:right;color:${h.rentable?'var(--g)':'var(--muted)'};font-size:11px">${señal}</td>
         </tr>`;
       }
 
-      // Tabla por año — construida desde por_hora agrupando por año de fecha
-      // El endpoint no devuelve por_año, pero sí el año de corte
-      document.getElementById('btAnosBody').innerHTML=`<tr><td colspan="4" style="padding:8px;color:var(--muted);font-size:11px">
-        Datos de test desde ${corte}-01-01 · Azar: ${azar}%</td></tr>`;
+      // Año en tabla de evolución
+      document.getElementById('btAnosBody').innerHTML=`
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:6px 8px;font-family:var(--mono);font-weight:700">${corte}</td>
+          <td style="padding:6px 8px;text-align:right;color:var(--muted)">${totalTest.toLocaleString()}</td>
+          <td style="padding:6px 8px;text-align:right;color:${ef3>=10?'var(--g)':'var(--y)'};font-weight:700">${ef3}%</td>
+          <td style="padding:6px 8px;text-align:right;color:var(--muted)">${ef1}%</td>
+        </tr>`;
 
-      // Gráfico simple de ef_top3 por hora
+      // Gráfico barras por hora
       const graf=document.getElementById('btGraficoMeses');
       const labs=document.getElementById('btGraficoLabels');
       graf.innerHTML=''; labs.innerHTML='';
-      const horasPlot=d.ranking||[];
-      const maxEf=Math.max(...horasPlot.filter(h=>!h.skip).map(h=>h.ef_top3||0),12);
-      for(const h of horasPlot){
-        if(h.skip) continue;
+      const maxEf=Math.max(...sorted.map(([,h])=>h.ef_top3||0),10);
+      for(const[hora,h] of sorted){
         const ef=h.ef_top3||0;
         const barH=Math.round((ef/maxEf)*110);
-        const c=ef>=12?'#22c55e':ef>=10?'#eab308':'#ef4444';
-        const lbl=h.hora.replace(':00','').replace(' AM','a').replace(' PM','p');
-        graf.innerHTML+=`<div title="${h.hora}: ${ef}% (${h.n_test} sorteos)"
-          style="width:40px;height:${barH}px;background:${c};border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
-        labs.innerHTML+=`<div style="width:40px;flex-shrink:0;font-size:9px;text-align:center">${lbl}</div>`;
+        const c=ef>=10?'#22c55e':ef>=7.89?'#eab308':'#ef4444';
+        const lbl=hora.replace(':00','').replace(' AM','a').replace(' PM','p');
+        graf.innerHTML+=`<div title="${hora}: ${ef}% (${h.n_test} sorteos)"
+          style="width:42px;height:${Math.max(barH,2)}px;background:${c};border-radius:2px 2px 0 0;flex-shrink:0"></div>`;
+        labs.innerHTML+=`<div style="width:42px;flex-shrink:0;font-size:9px;text-align:center;color:var(--muted)">${lbl}</div>`;
       }
 
       // Horas a operar
-      const horasOperar=(d.ranking||[]).filter(h=>h.rentable).map(h=>h.hora);
-      if(horasOperar.length>0){
+      const operar=sorted.filter(([,h])=>h.rentable).map(([hora])=>hora);
+      if(operar.length>0){
         document.getElementById('btHorasOperar').style.display='block';
-        document.getElementById('btHorasLista').textContent=horasOperar.join(' · ');
+        document.getElementById('btHorasLista').textContent=operar.join(' · ');
+      } else {
+        document.getElementById('btHorasOperar').style.display='none';
       }
 
       document.getElementById('btGlobal').style.display='block';
-      status.textContent=`✅ ${(g.total_test||0).toLocaleString()} sorteos test | Azar: ${azar}% | Tiempo: ${d.tiempo_s||'—'}s`;
-      btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
+      const horasOk=sorted.length;
+      const horasErr=Object.values(resultadosHora).filter(h=>h.skip).length;
+      status.textContent=`✅ Año ${corte} | ${totalTest.toLocaleString()} sorteos | ${horasOk} horas OK${horasErr>0?' | ⚠ '+horasErr+' horas fallaron':''}`;
+
     }catch(e){
       document.getElementById('btError').style.display='block';
       document.getElementById('btError').textContent='Error: '+(e.message||e);
       status.textContent='';
+    }finally{
       btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
     }
   }
