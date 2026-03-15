@@ -1107,6 +1107,81 @@ async function migrarTablaSeñales(){
   }catch(e){alert('Error: '+e.message);}
   finally{btn.disabled=false;btn.textContent='⚙ MIGRAR TABLA';}
 }
+
+async function lanzarRetroactivo2018(){
+  const btn=document.getElementById('btnRetro2018');
+  const status=document.getElementById('retroStatus');
+  btn.disabled=true;
+  status.style.display='block';
+  status.style.background='rgba(255,194,51,.07)';
+  status.style.borderColor='rgba(255,194,51,.25)';
+  status.style.color='var(--y)';
+
+  // Bloques de 30 días desde 2018-01-01 hasta ayer
+  // Render gratuito tiene ~25s de timeout por request
+  // 30 días × ~360 sorteos = ~360 registros por bloque → cabe en ~15s
+  const INICIO = new Date('2018-01-01');
+  const TOPE   = new Date(); TOPE.setDate(TOPE.getDate()-1);
+
+  function fmtFecha(d){
+    return d.toISOString().slice(0,10);
+  }
+
+  // Calcular todos los bloques de 30 días
+  const bloques=[];
+  let cur=new Date(INICIO);
+  while(cur<TOPE){
+    const fin=new Date(cur); fin.setDate(fin.getDate()+30);
+    if(fin>TOPE) fin.setTime(TOPE.getTime());
+    bloques.push({desde:fmtFecha(cur), hasta:fmtFecha(fin)});
+    cur.setDate(cur.getDate()+31);
+  }
+
+  let totalProcesados=0; let totalSeñales=0; let totalOmitidos=0;
+  let ef1Acc=0; let ef3Acc=0; let bloquesConDatos=0;
+
+  for(let i=0;i<bloques.length;i++){
+    const b=bloques[i];
+    const pct=Math.round((i+1)/bloques.length*100);
+    status.textContent=`⏳ Bloque ${i+1}/${bloques.length} (${pct}%) — ${b.desde} → ${b.hasta} | Procesados: ${totalProcesados} | Señales: ${totalSeñales}`;
+
+    try{
+      const r=await fetch(`/retroactivo?desde=${b.desde}&hasta=${b.hasta}`,{method:'POST'});
+      const d=await r.json();
+      if(d.status==='error'){
+        status.style.color='var(--r)';
+        status.textContent=`❌ Error en bloque ${b.desde}: ${d.message}`;
+        break;
+      }
+      totalProcesados += d.procesados||0;
+      totalSeñales    += d.señales_insertadas||0;
+      totalOmitidos   += d.omitidos_ya_existian||0;
+      if((d.procesados||0)>0){
+        ef3Acc += d.efectividad_top3||0;
+        bloquesConDatos++;
+      }
+    }catch(e){
+      // Si falla un bloque por timeout, continuar con el siguiente
+      status.textContent=`⚠️ Bloque ${b.desde} timeout, continuando...`;
+      await new Promise(res=>setTimeout(res,3000));
+      continue;
+    }
+
+    // Pausa breve entre bloques para no saturar Render
+    await new Promise(res=>setTimeout(res,1500));
+  }
+
+  const ef3Final = bloquesConDatos>0? (ef3Acc/bloquesConDatos).toFixed(1) : '—';
+  status.style.background='rgba(0,232,122,.07)';
+  status.style.borderColor='rgba(0,232,122,.25)';
+  status.style.color='var(--g)';
+  status.textContent=`✅ Completado — ${totalProcesados} predicciones | ${totalSeñales} desgloses de señales | ${totalOmitidos} ya existían | EF.TOP3 prom: ${ef3Final}%`;
+
+  btn.disabled=false; btn.textContent='⏳ CARGAR 2018→HOY';
+
+  // Cargar análisis automáticamente
+  setTimeout(()=>cargarScoreSeñales(3000),1500);
+}
 </script>
 
 <!-- ══ TAB SEÑALES ══ -->
@@ -1118,11 +1193,13 @@ async function migrarTablaSeñales(){
       <option value="90" selected>Últimos 90 días</option>
       <option value="180">Últimos 180 días</option>
       <option value="365">Último año</option>
+      <option value="3000">Todo el histórico</option>
     </select>
     <button id="btnScoreSeñales" class="btn bg2" onclick="cargarScoreSeñales(+document.getElementById('selDiasSeñales').value)">🔍 ANALIZAR SEÑALES</button>
+    <button id="btnRetro2018" class="btn" style="background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.35);color:var(--g);font-size:10px" onclick="lanzarRetroactivo2018()">⏳ CARGAR 2018→HOY</button>
     <button id="btnMigrarSig" class="btn" style="background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.4);color:#a855f7;font-size:10px" onclick="migrarTablaSeñales()">⚙ MIGRAR TABLA</button>
-    <span style="font-size:10px;color:var(--muted,#4a4f6e)">Primera vez: presiona MIGRAR TABLA, luego ANALIZAR</span>
   </div>
+  <div id="retroStatus" style="display:none;margin-bottom:14px;padding:10px;background:rgba(255,194,51,.07);border:1px solid rgba(255,194,51,.25);border-radius:4px;font-family:monospace;font-size:11px;color:var(--y)"></div>
   <div id="scoreSeñalesOut">
     <div style="color:var(--muted,#4a4f6e);font-family:monospace;font-size:12px;padding:20px 0">
       Presiona 🔍 ANALIZAR SEÑALES para ver qué señal aporta valor real al motor.
