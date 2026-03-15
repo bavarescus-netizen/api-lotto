@@ -1928,3 +1928,38 @@ async def endpoint_migrar_señales(db: AsyncSession = Depends(get_db)):
         "mensaje": "✅ Tabla lista para recibir desgloses de señales",
         "errores": errores,
     }
+
+
+@app.post("/retroactivo")
+async def endpoint_retroactivo_bloque(
+    desde: str = "2018-01-01",
+    hasta: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Procesa UN bloque de máximo 30 días y retorna.
+    El dashboard llama esto en loop hasta cubrir 2018→hoy.
+    Así nunca supera el timeout de Render gratuito (~25s por bloque).
+    """
+    from datetime import date as _date, timedelta
+    try:
+        fecha_desde = _date.fromisoformat(desde)
+    except Exception:
+        fecha_desde = _date(2018, 1, 1)
+
+    if hasta:
+        try:
+            fecha_hasta = _date.fromisoformat(hasta)
+        except Exception:
+            fecha_hasta = fecha_desde + timedelta(days=30)
+    else:
+        fecha_hasta = fecha_desde + timedelta(days=30)
+
+    # Nunca pasar de ayer
+    tope = _date.today() - timedelta(days=1)
+    if fecha_hasta > tope:
+        fecha_hasta = tope
+
+    return await llenar_auditoria_retroactiva(
+        db, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta
+    )
