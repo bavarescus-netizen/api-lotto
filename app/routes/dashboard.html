@@ -262,7 +262,7 @@ tbody tr:last-child td{border-bottom:none}
   <div class="tab" onclick="showTab('markov',this)">🔗 Markov</div>
   <div class="tab" onclick="showTab('historial',this)">📋 Historial</div>
   <div class="tab" onclick="showTab('backtest',this)">🔬 Backtest</div>
-  <div class="tab" onclick="showTab('backtest',this)">🧪 Backtest</div>
+  <div class="tab" onclick="showTab('senales',this)">📡 Señales</div>
 </div>
 <div class="main">
 
@@ -470,6 +470,7 @@ function showTab(id,el){
   if(id==='markov')cargarMarkovTop();
   if(id==='prediccion')cargarPredHora();
   if(id==='historial'&&!histRows.length)cargarHistorial();
+  if(id==='senales')cargarScoreSeñales(90);
 }
 
 // ESTADO
@@ -1001,6 +1002,135 @@ document.addEventListener('DOMContentLoaded',async()=>{
     if(sel){for(const o of sel.options){if(o.textContent.trim()===label){o.selected=true;break;}}}
   })();
 });
+
+// ══════════════════════════════════════════════
+// TAB SEÑALES — score por señal
+// ══════════════════════════════════════════════
+async function cargarScoreSeñales(dias=90){
+  const btn=document.getElementById('btnScoreSeñales');
+  const out=document.getElementById('scoreSeñalesOut');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Analizando...';}
+  out.innerHTML='<div style="color:var(--y);font-family:monospace;font-size:12px">Cargando datos de señales...</div>';
+  try{
+    // Primero sincronizar resultados pendientes
+    await fetch('/actualizar-señales',{method:'POST'});
+    const r=await fetch(`/score-señales?dias=${dias}`);
+    const d=await r.json();
+    if(d.error){
+      out.innerHTML=`<div style="color:var(--r);font-family:monospace;font-size:12px">❌ ${d.error}<br><br>
+        <b>Si la tabla no existe:</b> presiona MIGRAR SEÑALES primero.</div>`;
+      return;
+    }
+    const total=d.total_predicciones||0;
+    const ef=d.ef_top3_global||0;
+    const aviso=total<50
+      ? `<div style="background:rgba(255,194,51,.1);border:1px solid var(--y);border-radius:4px;padding:10px;font-family:monospace;font-size:11px;color:var(--y);margin-bottom:14px">
+          ⚠️ Muestra pequeña (${total} predicciones). Los porcentajes serán más precisos a medida que el motor opere más.
+          El tab se alimenta solo — cada predicción registra automáticamente el desglose.
+        </div>`
+      : '';
+    const colorEf=ef>=10?'var(--g)':ef>=7.89?'var(--y)':'var(--r)';
+    let html=`
+      ${aviso}
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
+        <div style="background:var(--bg2,#0d0f17);border:1px solid var(--border,#1a1d2e);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted,#4a4f6e);letter-spacing:1px;margin-bottom:4px">PREDICCIONES ANALIZADAS</div>
+          <div style="font-size:26px;font-weight:700;font-family:monospace">${total}</div>
+          <div style="font-size:10px;color:var(--muted,#4a4f6e)">últimos ${d.dias_analizados} días</div>
+        </div>
+        <div style="background:var(--bg2,#0d0f17);border:1px solid var(--border,#1a1d2e);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted,#4a4f6e);letter-spacing:1px;margin-bottom:4px">EF.TOP3 GLOBAL</div>
+          <div style="font-size:26px;font-weight:700;font-family:monospace;color:${colorEf}">${ef}%</div>
+          <div style="font-size:10px;color:var(--muted,#4a4f6e)">azar: 7.89%</div>
+        </div>
+        <div style="background:var(--bg2,#0d0f17);border:1px solid var(--border,#1a1d2e);border-radius:4px;padding:12px;text-align:center">
+          <div style="font-size:10px;color:var(--muted,#4a4f6e);letter-spacing:1px;margin-bottom:4px">CONF. PROMEDIO</div>
+          <div style="font-size:26px;font-weight:700;font-family:monospace;color:var(--b)">${d.confianza_promedio||0}</div>
+          <div style="font-size:10px;color:var(--muted,#4a4f6e)">umbral operar: 25</div>
+        </div>
+      </div>
+
+      <div style="font-size:11px;letter-spacing:1px;color:var(--muted,#4a4f6e);margin-bottom:8px">EFECTIVIDAD POR SEÑAL DOMINANTE</div>
+      <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:12px">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border,#1a1d2e);color:var(--muted,#4a4f6e);font-size:10px;letter-spacing:1px">
+            <th style="text-align:left;padding:6px 8px">SEÑAL</th>
+            <th style="text-align:right;padding:6px 8px">PREDICCIONES</th>
+            <th style="text-align:right;padding:6px 8px">ACIERTOS</th>
+            <th style="text-align:right;padding:6px 8px">EF.TOP3</th>
+            <th style="text-align:right;padding:6px 8px">VS AZAR</th>
+            <th style="text-align:right;padding:6px 8px">ACCIÓN</th>
+          </tr>
+        </thead>
+        <tbody>`;
+    for(const s of (d.por_señal||[])){
+      const c=s.ef_top3>=10?'var(--g)':s.ef_top3>=7.89?'var(--y)':'var(--r)';
+      const ratio=s.vs_azar||0;
+      const nombres={
+        'deuda':'📉 Deuda (días ausente)',
+        'reciente':'🔥 Frecuencia Reciente',
+        'patron_dia':'📅 Patrón Día Semana',
+        'anti_racha':'🛑 Anti-racha',
+        'markov':'🔗 Markov',
+        'ciclo_exacto':'⏱ Ciclo Exacto',
+        'patron_fecha':'🗓 Patrón Fecha Exacta',
+      };
+      html+=`<tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+        <td style="padding:8px">${nombres[s.señal]||s.señal}</td>
+        <td style="text-align:right;padding:8px">${s.total}</td>
+        <td style="text-align:right;padding:8px">${s.aciertos}</td>
+        <td style="text-align:right;padding:8px;color:${c};font-weight:700">${s.ef_top3}%</td>
+        <td style="text-align:right;padding:8px;color:${ratio>=1.2?'var(--g)':ratio>=0.9?'var(--y)':'var(--r)'}">${ratio}×</td>
+        <td style="text-align:right;padding:8px;font-size:10px">${s.recomendacion}</td>
+      </tr>`;
+    }
+    html+=`</tbody></table>
+      <div style="margin-top:14px;padding:10px;background:rgba(0,232,122,.05);border:1px solid rgba(0,232,122,.15);border-radius:4px;font-family:monospace;font-size:10px;color:var(--muted,#4a4f6e)">
+        ℹ️ "Señal dominante" = la que más aportó al score final de esa predicción. 
+        VS AZAR > 1.0 = esa señal agrega valor. EF>10% = candidata a mayor peso en Sprint 2.
+      </div>`;
+    out.innerHTML=html;
+  }catch(e){
+    out.innerHTML=`<div style="color:var(--r);font-family:monospace;font-size:12px">❌ Error: ${e.message}</div>`;
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🔍 ANALIZAR SEÑALES';}
+  }
+}
+
+async function migrarTablaSeñales(){
+  const btn=document.getElementById('btnMigrarSig');
+  btn.disabled=true; btn.textContent='⏳ Creando tabla...';
+  try{
+    const r=await fetch('/migrar-señales',{method:'POST'});
+    const d=await r.json();
+    alert(d.mensaje||JSON.stringify(d));
+  }catch(e){alert('Error: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='⚙ MIGRAR TABLA';}
+}
 </script>
+
+<!-- ══ TAB SEÑALES ══ -->
+<div id="page-senales" class="page" style="display:none;padding:20px 24px">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+    <span style="font-family:monospace;font-size:11px;color:var(--muted,#4a4f6e);letter-spacing:1px">PERÍODO</span>
+    <select id="selDiasSeñales" style="background:var(--panel,#0d0f17);border:1px solid var(--border,#1a1d2e);color:var(--text,#dde1f5);padding:5px 10px;border-radius:3px;font-size:11px;font-family:monospace">
+      <option value="30">Últimos 30 días</option>
+      <option value="90" selected>Últimos 90 días</option>
+      <option value="180">Últimos 180 días</option>
+      <option value="365">Último año</option>
+    </select>
+    <button id="btnScoreSeñales" class="btn bg2" onclick="cargarScoreSeñales(+document.getElementById('selDiasSeñales').value)">🔍 ANALIZAR SEÑALES</button>
+    <button id="btnMigrarSig" class="btn" style="background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.4);color:#a855f7;font-size:10px" onclick="migrarTablaSeñales()">⚙ MIGRAR TABLA</button>
+    <span style="font-size:10px;color:var(--muted,#4a4f6e)">Primera vez: presiona MIGRAR TABLA, luego ANALIZAR</span>
+  </div>
+  <div id="scoreSeñalesOut">
+    <div style="color:var(--muted,#4a4f6e);font-family:monospace;font-size:12px;padding:20px 0">
+      Presiona 🔍 ANALIZAR SEÑALES para ver qué señal aporta valor real al motor.
+      <br><br>
+      <span style="color:var(--y)">Primera vez:</span> presiona ⚙ MIGRAR TABLA primero para crear la tabla en Neon.
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
