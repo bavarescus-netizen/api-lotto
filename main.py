@@ -628,6 +628,251 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "message": str(e)}
 
 
+
+@app.get("/backtest")
+async def backtest_motor(
+    año_corte: int = Query(default=2025, description="Año donde empieza el test set"),
+    hora_filtro: str = Query(default="todas"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Walk-forward backtest: entrena con datos ANTES de año_corte,
+    evalúa en datos DESDE año_corte. Mide EF.TOP3 real por hora.
+    Sin contaminar: el motor nunca ve los datos que va a predecir.
+    """
+    from datetime import date as _date
+    from collections import Counter, defaultdict as _dd
+    HORAS_BT = [
+        "08:00 AM","09:00 AM","10:00 AM","11:00 AM",
+        "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
+        "04:00 PM","05:00 PM","06:00 PM","07:00 PM",
+    ]
+    fecha_corte = _date(año_corte, 1, 1)
+    t0 = datetime.now()
+    horas_a_evaluar = [hora_filtro] if hora_filtro != "todas" else HORAS_BT
+    resultados_hora = {}
+    total_test = total_top3 = total_top1 = 0
+
+    for hora in horas_a_evaluar:
+        # ── TRAIN: todo antes del corte ──
+        train_rows = (await db.execute(text("""
+            SELECT animalito FROM historico
+            WHERE hora=:hora AND loteria='Lotto Activo' AND fecha < :corte
+            ORDER BY fecha ASC
+        """), {"hora": hora, "corte": fecha_corte})).fetchall()
+
+        # ── TEST: desde el corte ──
+        test_rows = (await db.execute(text("""
+            SELECT fecha, animalito FROM historico
+            WHERE hora=:hora AND loteria='Lotto Activo' AND fecha >= :corte
+            ORDER BY fecha ASC
+        """), {"hora": hora, "corte": fecha_corte})).fetchall()
+
+        if len(test_rows) < 30:
+            resultados_hora[hora] = {"n_test": len(test_rows), "skip": True}
+            continue
+
+        animales_train = [r[0] for r in train_rows]
+        n_train = len(animales_train)
+
+        # ── Señales iniciales sobre TRAIN ──
+        freq = Counter(animales_train)
+        total_f = max(n_train, 1)
+        markov_c = _dd(lambda: _dd(int))
+        for i in range(1, len(animales_train)):
+            markov_c[animales_train[i-1]][animales_train[i]] += 1
+        ultima_vez = {a: i for i, a in enumerate(animales_train)}
+
+        acum = list(animales_train)
+        top1_ok = top3_ok = n_test = 0
+
+        for idx_t, (fecha_t, real) in enumerate(test_rows):
+            prev = acum[-1]
+            # Scores: deuda + frecuencia + markov
+            all_a = set(list(freq.keys()) + [real])
+            scores = {}
+            for a in all_a:
+                gap = (n_train + idx_t) - ultima_vez.get(a, 0)
+                intervalo_esp = total_f / max(freq.get(a, 1), 1)
+                deuda_s = min(gap / max(intervalo_esp, 1), 3.0) / 3.0
+                freq_s  = freq.get(a, 0.5 / total_f) / total_f
+                mk_total = sum(markov_c[prev].values())
+                mk_s    = markov_c[prev].get(a, 0) / max(mk_total, 1)
+                scores[a] = deuda_s*0.28 + freq_s*0.25 + mk_s*0.25 + (1/38)*0.22
+
+            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
+            if top3[0] == real: top1_ok += 1
+            if real in top3:    top3_ok += 1
+            n_test += 1
+
+            # Walk-forward: actualizar con el resultado real
+            acum.append(real)
+            freq[real] = freq.get(real, 0) + 1
+            total_f += 1
+            markov_c[prev][real] += 1
+            ultima_vez[real] = n_train + idx_t
+
+        ef_t3 = round(top3_ok / n_test * 100, 2) if n_test else 0
+        ef_t1 = round(top1_ok / n_test * 100, 2) if n_test else 0
+        azar  = round(3/38*100, 2)
+        resultados_hora[hora] = {
+            "n_train": n_train, "n_test": n_test,
+            "top1_ok": top1_ok, "top3_ok": top3_ok,
+            "ef_top1": ef_t1,   "ef_top3": ef_t3,
+            "vs_azar": round(ef_t3 - azar, 2),
+            "ratio":   round(ef_t3 / azar, 2),
+            "rentable": ef_t3 >= 10.0,
+        }
+        total_test += n_test; total_top3 += top3_ok; total_top1 += top1_ok
+
+    azar = round(3/38*100, 2)
+    ef_g3 = round(total_top3 / max(total_test,1) * 100, 2)
+    ef_g1 = round(total_top1 / max(total_test,1) * 100, 2)
+    ranking = sorted(
+        [(h,v) for h,v in resultados_hora.items() if not v.get("skip")],
+        key=lambda x: x[1]["ef_top3"], reverse=True
+    )
+    return {
+        "status":    "success",
+        "año_corte": año_corte,
+        "global": {
+            "total_test": total_test,
+            "ef_top1": ef_g1, "ef_top3": ef_g3,
+            "vs_azar": round(ef_g3 - azar, 2),
+            "ratio":   round(ef_g3 / azar, 2),
+        },
+        "ranking":   [{"hora": h, **v} for h, v in ranking],
+        "por_hora":  resultados_hora,
+        "azar_top3": azar,
+        "tiempo_s":  round((datetime.now() - t0).total_seconds(), 1),
+    }
+
+
+@app.get("/optimizar-pesos")
+async def optimizar_pesos_hora(
+    hora: str = Query(default="08:00 AM"),
+    año_corte: int = Query(default=2025),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Grid search: prueba 125 combinaciones de pesos para UNA hora.
+    Devuelve los 5 mejores combos con su EF.TOP3 real (walk-forward).
+    Guarda el mejor en motor_pesos_hora.
+    """
+    from datetime import date as _date
+    from collections import Counter, defaultdict as _dd
+    import itertools
+
+    fecha_corte = _date(año_corte, 1, 1)
+    t0 = datetime.now()
+
+    train_rows = (await db.execute(text("""
+        SELECT animalito FROM historico
+        WHERE hora=:hora AND loteria='Lotto Activo' AND fecha < :corte
+        ORDER BY fecha ASC
+    """), {"hora": hora, "corte": fecha_corte})).fetchall()
+
+    test_rows = (await db.execute(text("""
+        SELECT animalito FROM historico
+        WHERE hora=:hora AND loteria='Lotto Activo' AND fecha >= :corte
+        ORDER BY fecha ASC
+    """), {"hora": hora, "corte": fecha_corte})).fetchall()
+
+    if len(test_rows) < 50:
+        return {"status": "error", "message": f"Insuficiente test data para {hora} ({len(test_rows)} filas)"}
+
+    animales_train = [r[0] for r in train_rows]
+    test_animales  = [r[0] for r in test_rows]
+
+    # Pre-calcular señales base (se recalculan igual para todos los pesos)
+    freq = Counter(animales_train)
+    total_f = len(animales_train)
+    markov_c = _dd(lambda: _dd(int))
+    for i in range(1, len(animales_train)):
+        markov_c[animales_train[i-1]][animales_train[i]] += 1
+    ultima_vez = {a: i for i, a in enumerate(animales_train)}
+
+    # Grid de pesos a probar (suman ~1.0)
+    VALS = [0.10, 0.20, 0.30, 0.40, 0.50]
+    mejores = []
+
+    def evaluar_pesos(w_deuda, w_freq, w_mk, w_patron):
+        suma = w_deuda + w_freq + w_mk + w_patron
+        acum = list(animales_train)
+        f = Counter(animales_train)
+        tf = total_f
+        mc = _dd(lambda: _dd(int))
+        for i in range(1, len(animales_train)):
+            mc[animales_train[i-1]][animales_train[i]] += 1
+        uv = dict(ultima_vez)
+        top3_ok = 0
+        for idx_t, real in enumerate(test_animales):
+            prev = acum[-1]
+            all_a = set(list(f.keys()) + [real])
+            scores = {}
+            for a in all_a:
+                gap = (total_f + idx_t) - uv.get(a, 0)
+                iv  = tf / max(f.get(a,1),1)
+                d_s = min(gap/max(iv,1), 3.0)/3.0
+                f_s = f.get(a,0.5/tf)/tf
+                mt  = sum(mc[prev].values())
+                m_s = mc[prev].get(a,0)/max(mt,1)
+                scores[a] = (d_s*w_deuda + f_s*w_freq + m_s*w_mk + (1/38)*w_patron)/suma
+            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
+            if real in top3: top3_ok += 1
+            acum.append(real); f[real]=f.get(real,0)+1; tf+=1
+            mc[prev][real]+=1; uv[real]=total_f+idx_t
+        return round(top3_ok/len(test_animales)*100, 2)
+
+    # Reducir el grid a 125 combos relevantes
+    combos_testados = 0
+    for w1, w2, w3 in itertools.product(VALS, VALS, VALS):
+        w4 = round(1.0 - w1 - w2 - w3, 2)
+        if w4 < 0.05 or w4 > 0.60: continue
+        ef = evaluar_pesos(w1, w2, w3, w4)
+        mejores.append({"w_deuda":w1,"w_freq":w2,"w_mk":w3,"w_patron":w4,"ef_top3":ef})
+        combos_testados += 1
+        if combos_testados >= 100: break  # límite por tiempo
+
+    mejores.sort(key=lambda x: -x["ef_top3"])
+    top5 = mejores[:5]
+
+    # Guardar el mejor en motor_pesos_hora
+    if top5:
+        mejor = top5[0]
+        try:
+            await db.execute(text("""
+                INSERT INTO motor_pesos_hora
+                    (hora, peso_decay, peso_markov, peso_gap, peso_reciente, efectividad, generacion)
+                VALUES (:hora, :pd, :pm, :pg, :pr, :ef, NOW())
+                ON CONFLICT (hora) DO UPDATE SET
+                    peso_decay    = EXCLUDED.peso_decay,
+                    peso_markov   = EXCLUDED.peso_markov,
+                    peso_gap      = EXCLUDED.peso_gap,
+                    peso_reciente = EXCLUDED.peso_reciente,
+                    efectividad   = EXCLUDED.efectividad,
+                    generacion    = NOW()
+            """), {
+                "hora": hora,
+                "pd": mejor["w_deuda"],  "pm": mejor["w_mk"],
+                "pg": mejor["w_freq"],   "pr": mejor["w_patron"],
+                "ef": mejor["ef_top3"],
+            })
+            await db.commit()
+        except Exception as e_p:
+            await db.rollback()
+
+    return {
+        "status": "success",
+        "hora": hora,
+        "combos_testados": combos_testados,
+        "azar_top3": round(3/38*100, 2),
+        "top5_pesos": top5,
+        "mejor_ef_top3": top5[0]["ef_top3"] if top5 else 0,
+        "tiempo_s": round((datetime.now() - t0).total_seconds(), 1),
+    }
+
+
 @app.get("/markov")
 async def markov_animal(
     hora:   str = Query(...),
