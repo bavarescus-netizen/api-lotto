@@ -230,6 +230,10 @@ tbody tr:last-child td{border-bottom:none}
     <div>
       <div class="sh">Buscar transiciones</div>
       <div class="alert ai" style="margin-bottom:12px">🔗 <b id="markovCount">13,342</b> transiciones · Si hoy salió X → ¿mañana?</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+        <button class="btn" style="font-size:10px;background:rgba(255,194,51,.1);border-color:rgba(255,194,51,.3);color:var(--y)" onclick="fixMarkovDirecto()" id="btnFixDirecto">⚡ CORREGIR PROB. CORRUPTAS</button>
+        <span id="fixDirectoStatus" style="font-size:10px;font-family:var(--mono);color:var(--muted)"></span>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <select class="inp" id="selMH" onchange="cargarMarkov()">
           <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
@@ -943,6 +947,33 @@ async function fixMarkovDirecto(){
     }catch(e){
       btn.textContent='❌ Error';
       setTimeout(()=>{ btn.textContent='🔩 FIX PROB DIRECTO'; btn.disabled=false; },3000);
+    }
+  }
+
+async function fixMarkovDirecto(){
+    const btn=document.getElementById('btnFixDirecto');
+    const st=document.getElementById('fixDirectoStatus');
+    btn.disabled=true; btn.textContent='⏳ Corrigiendo...';
+    st.textContent='';
+    try{
+      const r=await fetch('/fix-markov-directo');
+      const d=await r.json();
+      if(d.status==='success'){
+        st.style.color='var(--g)';
+        st.textContent=`✅ ${d.corruptas_antes} corregidas | Max: ${d.prob_max_ahora}%`;
+        setTimeout(()=>cargarMarkovTop(),1000);
+      } else if(d.status==='ya_limpio'){
+        st.style.color='var(--g)';
+        st.textContent=`✅ Ya limpio | ${d.total} filas`;
+      } else {
+        st.style.color='var(--r)';
+        st.textContent='❌ '+d.message;
+      }
+    }catch(e){
+      st.style.color='var(--r)';
+      st.textContent='❌ Error: '+e.message;
+    }finally{
+      btn.disabled=false; btn.textContent='⚡ CORREGIR PROB. CORRUPTAS';
     }
   }
 
