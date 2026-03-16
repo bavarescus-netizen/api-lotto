@@ -525,6 +525,67 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
 # ═══════════════════════════════════════════════════════════
 # MARKOV — Top transiciones globales
 # ═══════════════════════════════════════════════════════════
+@app.get("/historial")
+async def get_historial(
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+    fecha: str = Query(default=None),
+    resultado: str = Query(default=None),
+    animal: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Historial paginado de predicciones con filtros."""
+    try:
+        conditions = []
+        params: dict = {"limit": limit, "offset": offset}
+
+        if fecha:
+            conditions.append("a.fecha = :fecha")
+            params["fecha"] = fecha
+        if resultado == "true":
+            conditions.append("a.acierto = TRUE")
+        elif resultado == "false":
+            conditions.append("a.acierto = FALSE")
+        if animal:
+            an = animal.lower().strip()
+            conditions.append(
+                "(LOWER(a.prediccion_1)=:an OR LOWER(a.prediccion_2)=:an "
+                "OR LOWER(a.prediccion_3)=:an OR LOWER(a.resultado_real)=:an)"
+            )
+            params["an"] = an
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+        rows = (await db.execute(text(f"""
+            SELECT a.fecha, a.hora, a.prediccion_1, a.prediccion_2, a.prediccion_3,
+                   a.resultado_real, a.acierto, a.confianza_pct
+            FROM auditoria_ia a
+            {where}
+            ORDER BY a.fecha DESC, a.hora DESC
+            LIMIT :limit OFFSET :offset
+        """), params)).fetchall()
+
+        return {
+            "registros": [
+                {
+                    "fecha":         str(r[0]),
+                    "hora":          r[1],
+                    "prediccion_1":  r[2] or "",
+                    "prediccion_2":  r[3] or "",
+                    "prediccion_3":  r[4] or "",
+                    "resultado_real": r[5] or "PENDIENTE",
+                    "acierto":       r[6],
+                    "confianza_pct": int(r[7] or 0),
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+            "offset": offset,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/markov/top")
 async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(get_db)):
     try:
@@ -547,6 +608,43 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
                 "hora": r[0], "animal_previo": r[1], "animal_sig": r[2],
                 "frecuencia": int(r[3]),
                 "probabilidad_pct": float(r[4]) if r[4] else 0,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/markov")
+async def markov_buscar(
+    hora: str = Query(default="08:00 AM"),
+    animal: str = Query(default=""),
+    db: AsyncSession = Depends(get_db)
+):
+    """Busca transiciones Markov para un animal+hora específicos."""
+    try:
+        animal_norm = animal.lower().strip()
+        if not animal_norm:
+            return []
+        rows = (await db.execute(text("""
+            SELECT animal_previo, animal_sig, frecuencia,
+                   CASE
+                     WHEN probabilidad > 100
+                     THEN ROUND((frecuencia::FLOAT /
+                          NULLIF(SUM(frecuencia) OVER (PARTITION BY hora, animal_previo), 0)
+                          * 100)::numeric, 2)
+                     ELSE ROUND(probabilidad::numeric, 2)
+                   END AS prob
+            FROM markov_transiciones
+            WHERE hora = :hora
+              AND LOWER(animal_previo) = :animal
+            ORDER BY frecuencia DESC
+            LIMIT 15
+        """), {"hora": hora, "animal": animal_norm})).fetchall()
+        return [
+            {
+                "animal_previo": r[0], "animal_sig": r[1],
+                "frecuencia": int(r[2]), "probabilidad_pct": float(r[3]) if r[3] else 0,
             }
             for r in rows
         ]
@@ -718,58 +816,6 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
         await db.rollback()
         return {"status": "error", "mensaje": str(e)}
 
-
-@app.get("/fix-markov-directo")
-async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
-    """
-    Normaliza probabilidades corruptas DIRECTAMENTE con UPDATE.
-    No borra ni reconstruye — recalcula solo las filas donde prob > 100.
-    Más seguro que TRUNCATE en Render gratuito.
-    """
-    try:
-        # Contar corruptos antes
-        n_antes = (await db.execute(text(
-            "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
-        ))).scalar() or 0
-
-        if n_antes == 0:
-            total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
-            return {"status": "ya_limpio", "total": total,
-                    "message": f"✅ Markov ya estaba limpio — {total:,} filas, 0 corruptas"}
-
-        # UPDATE: recalcular probabilidad usando frecuencias reales
-        await db.execute(text("""
-            UPDATE markov_transiciones m
-            SET probabilidad = ROUND(
-                (m.frecuencia::FLOAT /
-                 NULLIF((
-                     SELECT SUM(frecuencia)
-                     FROM markov_transiciones m2
-                     WHERE m2.hora = m.hora
-                       AND m2.animal_previo = m.animal_previo
-                 ), 0) * 100)::numeric, 2)
-            WHERE probabilidad > 100
-        """))
-        await db.commit()
-
-        # Verificar después
-        n_despues = (await db.execute(text(
-            "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
-        ))).scalar() or 0
-        total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
-        r_max = (await db.execute(text("SELECT MAX(probabilidad) FROM markov_transiciones"))).scalar()
-
-        return {
-            "status": "success",
-            "corruptas_antes": n_antes,
-            "corruptas_despues": n_despues,
-            "total": total,
-            "prob_max_ahora": float(r_max) if r_max else 0,
-            "message": f"✅ Corregidas {n_antes} filas | Quedan corruptas: {n_despues} | Max prob: {r_max}%"
-        }
-    except Exception as e:
-        await db.rollback()
-        return {"status": "error", "message": str(e)}
 
 
 @app.get("/fix-markov")
