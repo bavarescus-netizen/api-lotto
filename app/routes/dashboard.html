@@ -147,7 +147,14 @@ tbody tr:last-child td{border-bottom:none}
                  color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;
                  letter-spacing:1px;font-family:monospace;margin-right:6px">
           🔧 REPARAR MARKOV
-        </button><button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
+        </button>
+        <button onclick="fixMarkovDirecto()" id="btnFixDirecto"
+          style="background:rgba(56,182,255,.15);border:1px solid var(--b);
+                 color:var(--b);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;
+                 letter-spacing:1px;font-family:monospace;margin-right:6px">
+          🔩 FIX PROB DIRECTO
+        </button>
+        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
       </div>
     </div>
     <div>
@@ -608,34 +615,47 @@ async function cargarHoras(){
   try{
     const d=await fetch('/rentabilidad').then(r=>r.json());
     const horas=Array.isArray(d)?d:(d.detalle||d.horas||d.data||[]);
-    document.getElementById('horaGrid').innerHTML=horas.map(h=>{
-      const ef=parseFloat(h.efectividad_top3||0);
-      const color=ef>=10?'var(--g)':ef>=8.5?'var(--y)':'var(--r)';
-      return `<div class="hc ${ef>=10?'rent':''}">
+    if(!horas.length){
+      document.getElementById('horaGrid').innerHTML='<div style="color:var(--muted);font-family:var(--mono);font-size:12px;padding:20px">Sin datos — presiona ⚡ ENTRENAR COMPLETO primero.</div>';
+      return;
+    }
+    // Normalizar campos (soporta ambos formatos)
+    const norm=horas.map(h=>({
+      hora:     h.hora,
+      total:    h.total||h.total_sorteos||0,
+      ac1:      h.aciertos_top1||0,
+      ac3:      h.aciertos_top3||0,
+      ef1:      parseFloat(h.ef_top1||h.efectividad_top1||0),
+      ef3:      parseFloat(h.ef_top3||h.efectividad_top3||0),
+      rentable: h.es_rentable||false,
+      vs_azar:  parseFloat(h.vs_azar||0),
+    }));
+    document.getElementById('horaGrid').innerHTML=norm.map(h=>{
+      const color=h.ef3>=10?'var(--g)':h.ef3>=8?'var(--y)':'var(--r)';
+      return `<div class="hc ${h.rentable?'rent':''}">
         <h4>${h.hora}</h4>
-        <div class="ef">TOP3: <span style="color:${color}">${ef.toFixed(2)}%</span></div>
-        <div class="ef" style="font-size:11px;color:var(--muted)">TOP1: ${parseFloat(h.efectividad_top1||0).toFixed(2)}%</div>
+        <div class="ef">TOP3: <span style="color:${color}">${h.ef3.toFixed(2)}%</span></div>
+        <div class="ef" style="font-size:11px;color:var(--muted)">TOP1: ${h.ef1.toFixed(2)}%</div>
         <div style="height:3px;background:var(--border);border-radius:2px;margin-top:8px">
-          <div style="width:${Math.min(ef/15*100,100)}%;height:100%;background:${color};border-radius:2px"></div>
+          <div style="width:${Math.min(h.ef3/15*100,100)}%;height:100%;background:${color};border-radius:2px"></div>
         </div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:5px">${h.total_sorteos||0} sorteos</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:5px">${h.total} sorteos</div>
       </div>`;
     }).join('');
-    document.getElementById('horaTbody').innerHTML=horas.map(h=>{
-      const ef3=parseFloat(h.efectividad_top3||0);
-      const diff=(ef3-8.33).toFixed(2);
+    document.getElementById('horaTbody').innerHTML=norm.map(h=>{
+      const vs=h.vs_azar;
       return `<tr>
         <td style="font-family:var(--mono);font-weight:700">${h.hora}</td>
-        <td style="font-family:var(--mono);color:var(--muted)">${h.total_sorteos||0}</td>
-        <td style="font-family:var(--mono)">${h.aciertos_top1||0}</td>
-        <td style="font-family:var(--mono)">${parseFloat(h.efectividad_top1||0).toFixed(2)}%</td>
-        <td style="font-family:var(--mono)">${h.aciertos_top3||0}</td>
-        <td style="font-family:var(--mono);font-weight:700;color:${ef3>=10?'var(--g)':ef3>=8.5?'var(--y)':'var(--r)'}">${ef3.toFixed(2)}%</td>
-        <td style="font-family:var(--mono);color:${parseFloat(diff)>=0?'var(--g)':'var(--r)'}">${parseFloat(diff)>=0?'+':''}${diff}%</td>
-        <td>${ef3>=10?'<span class="badge bg">✅ OPERAR</span>':ef3>=8?'<span class="badge by">⚠️ MARGINAL</span>':'<span class="badge br">❌ NO</span>'}</td>
+        <td style="font-family:var(--mono);color:var(--muted)">${h.total}</td>
+        <td style="font-family:var(--mono)">${h.ac1}</td>
+        <td style="font-family:var(--mono)">${h.ef1.toFixed(2)}%</td>
+        <td style="font-family:var(--mono)">${h.ac3}</td>
+        <td style="font-family:var(--mono);font-weight:700;color:${h.ef3>=10?'var(--g)':h.ef3>=8?'var(--y)':'var(--r)'}">${h.ef3.toFixed(2)}%</td>
+        <td style="font-family:var(--mono);color:${vs>=0?'var(--g)':'var(--r)'}">${vs>=0?'+':''}${vs.toFixed(2)}%</td>
+        <td>${h.rentable?'<span class="badge bg">✅ OPERAR</span>':h.ef3>=8?'<span class="badge by">⚠️ MARGINAL</span>':'<span class="badge br">❌ NO</span>'}</td>
       </tr>`;
     }).join('');
-  }catch(e){document.getElementById('horaGrid').innerHTML=`<div class="alert ab">${e.message}</div>`;}
+  }catch(e){document.getElementById('horaGrid').innerHTML=`<div style="color:var(--r);font-family:var(--mono);font-size:12px;padding:20px">Error: ${e.message}</div>`;}
 }
 
 // MARKOV
@@ -908,6 +928,24 @@ async function correrBacktest(){
       btn.textContent='▶ CORRER BACKTEST'; btn.disabled=false;
     }
   }
+async function fixMarkovDirecto(){
+    const btn=document.getElementById('btnFixDirecto');
+    btn.disabled=true; btn.textContent='⏳ Normalizando...';
+    try{
+      const r=await fetch('/fix-markov-directo');
+      const d=await r.json();
+      if(d.corruptas_antes===0){
+        btn.textContent=`✅ Ya limpio (max: ${d.prob_max?.toFixed(1)||'?'}%)`;
+      } else {
+        btn.textContent=`✅ ${d.corruptas_antes} corregidas → max: ${d.prob_max_ahora?.toFixed(1)||'?'}%`;
+      }
+      setTimeout(()=>{ btn.textContent='🔩 FIX PROB DIRECTO'; btn.disabled=false; cargarMarkovTop(); },4000);
+    }catch(e){
+      btn.textContent='❌ Error';
+      setTimeout(()=>{ btn.textContent='🔩 FIX PROB DIRECTO'; btn.disabled=false; },3000);
+    }
+  }
+
   async function fixMarkov(){
     const btn=document.getElementById('btnFixMarkov');
     if(!btn) return;
