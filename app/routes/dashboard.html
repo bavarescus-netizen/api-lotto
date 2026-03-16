@@ -401,6 +401,7 @@ tbody tr:last-child td{border-bottom:none}
     </select>
     <button id="btnScoreSeñales" class="btn bg2" onclick="cargarScoreSeñales(+document.getElementById('selDiasSeñales').value)">🔍 ANALIZAR SEÑALES</button>
     <button id="btnRetro2018" class="btn" style="background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.35);color:var(--g);font-size:10px" onclick="lanzarRetroactivo2018()">⏳ CARGAR 2018→HOY</button>
+    <button id="btnAutoPesos" class="btn" style="background:rgba(56,182,255,.1);border-color:rgba(56,182,255,.35);color:var(--b);font-size:10px" onclick="aplicarAutoPesos()">⚡ AUTO-PESOS</button>
     <button id="btnMigrarSig" class="btn" style="background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.4);color:var(--p);font-size:10px" onclick="migrarTablaSeñales()">⚙ MIGRAR TABLA</button>
   </div>
   <div id="retroStatus" style="display:none;margin-bottom:14px;padding:10px;background:rgba(255,194,51,.07);border:1px solid rgba(255,194,51,.25);border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--y)"></div>
@@ -958,16 +959,17 @@ async function fixMarkovDirecto(){
     try{
       const r=await fetch('/fix-markov-directo');
       const d=await r.json();
+      const msg=d.message||d.mensaje||'';
       if(d.status==='success'){
         st.style.color='var(--g)';
-        st.textContent=`✅ ${d.corruptas_antes} corregidas | Max: ${d.prob_max_ahora}%`;
+        st.textContent=`✅ ${d.corruptas_antes||0} corregidas | Max: ${d.prob_max_ahora||d.prob_max||0}%`;
         setTimeout(()=>cargarMarkovTop(),1000);
-      } else if(d.status==='ya_limpio'){
+      } else if(d.status==='ok'||d.status==='ya_limpio'){
         st.style.color='var(--g)';
-        st.textContent=`✅ Ya limpio | ${d.total} filas`;
+        st.textContent=`✅ Ya limpio | ${d.total||d.total_transiciones||0} filas`;
       } else {
         st.style.color='var(--r)';
-        st.textContent='❌ '+d.message;
+        st.textContent='❌ '+(msg||JSON.stringify(d));
       }
     }catch(e){
       st.style.color='var(--r)';
@@ -1208,6 +1210,67 @@ async function cargarScoreSeñales(dias=90){
     if(btn){btn.disabled=false;btn.textContent='🔍 ANALIZAR SEÑALES';}
   }
 }
+
+async function aplicarAutoPesos(){
+    const btn=document.getElementById('btnAutoPesos');
+    const out=document.getElementById('scoreSeñalesOut');
+    btn.disabled=true; btn.textContent='⏳ Calculando...';
+    try{
+      const r=await fetch('/auto-pesos');
+      const d=await r.json();
+      if(d.status==='success'){
+        const p=d.pesos_nuevos;
+        const ant=d.pesos_anteriores;
+        const nombres={reciente:'RECIENTE',deuda:'DEUDA',anti:'ANTI',patron:'PATRÓN',secuencia:'MARKOV'};
+        let html=`<div style="background:rgba(0,232,122,.07);border:1px solid rgba(0,232,122,.25);border-radius:4px;padding:14px;font-family:var(--mono);font-size:12px;margin-bottom:14px">
+          <div style="color:var(--g);margin-bottom:10px;font-size:13px">✅ ${d.message}</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px">`;
+        for(const[k,v] of Object.entries(p)){
+          const diff=((v-(ant[k]||0))*100).toFixed(1);
+          const color=parseFloat(diff)>0?'var(--g)':parseFloat(diff)<0?'var(--r)':'var(--muted)';
+          html+=`<div style="text-align:center;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:8px">
+            <div style="font-size:9px;color:var(--muted);margin-bottom:4px">${nombres[k]||k}</div>
+            <div style="font-size:18px;font-weight:700">${(v*100).toFixed(1)}%</div>
+            <div style="font-size:9px;color:${color}">${parseFloat(diff)>0?'+':''}${diff}%</div>
+          </div>`;
+        }
+        html+=`</div><div style="margin-top:12px;font-size:11px;color:var(--muted)">
+            Basado en ${d.registros_analizados.toLocaleString()} predicciones | 
+            EF.TOP3 global: ${d.ef_top3_global}% | Generación ${d.generacion}
+          </div></div>`;
+        html+=`<div style="font-size:11px;letter-spacing:1px;color:var(--muted);margin-bottom:8px">DETALLE POR SEÑAL</div>
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px"><thead>
+          <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:10px">
+            <th style="text-align:left;padding:6px">SEÑAL</th>
+            <th style="text-align:right;padding:6px">PREDIC.</th>
+            <th style="text-align:right;padding:6px">EF.TOP3</th>
+            <th style="text-align:right;padding:6px">VS AZAR</th>
+            <th style="text-align:right;padding:6px">PESO NUEVO</th>
+          </tr></thead><tbody>`;
+        for(const[s,det] of Object.entries(d.detalle_señales)){
+          const ef=det.ef_pct||0;
+          const c=ef>=10?'var(--g)':ef>=7.89?'var(--y)':'var(--r)';
+          html+=`<tr style="border-bottom:1px solid rgba(255,255,255,.04)">
+            <td style="padding:6px">${nombres[s]||s}</td>
+            <td style="text-align:right;padding:6px;color:var(--muted)">${(det.total||0).toLocaleString()}</td>
+            <td style="text-align:right;padding:6px;color:${c};font-weight:700">${ef}%</td>
+            <td style="text-align:right;padding:6px;color:${(det.vs_azar||0)>=1?'var(--g)':'var(--r)'}">${det.vs_azar||0}×</td>
+            <td style="text-align:right;padding:6px;font-weight:700">${((p[s]||0)*100).toFixed(1)}%</td>
+          </tr>`;
+        }
+        html+=`</tbody></table>`;
+        out.innerHTML=html;
+      } else if(d.status==='insuficiente'){
+        out.innerHTML=`<div style="color:var(--y);font-family:var(--mono);font-size:12px;padding:14px;border:1px solid rgba(255,194,51,.25);border-radius:4px">⚠️ ${d.message}</div>`;
+      } else {
+        out.innerHTML=`<div style="color:var(--r);font-family:var(--mono);font-size:12px">❌ ${d.message||JSON.stringify(d)}</div>`;
+      }
+    }catch(e){
+      out.innerHTML=`<div style="color:var(--r);font-family:var(--mono);font-size:12px">❌ Error: ${e.message}</div>`;
+    }finally{
+      btn.disabled=false; btn.textContent='⚡ AUTO-PESOS';
+    }
+  }
 
 async function migrarTablaSeñales(){
   const btn=document.getElementById('btnMigrarSig');
