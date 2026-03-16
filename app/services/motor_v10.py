@@ -1830,35 +1830,59 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                     await db.rollback()
                     ya_existe_sig = False  # Tabla no existe, procesar igual
 
-                # Si ambas tablas ya tienen el registro, saltar
-                if ya_existe_ia and ya_existe_sig:
+                # Solo saltar si ya tiene desglose de señales
+                # (auditoria_ia puede existir sin señales — ese caso hay que procesar)
+                if ya_existe_sig:
                     omitidos += 1
                     continue
 
-                # Calcular todas las señales con datos ANTERIORES a la fecha del sorteo
-                d   = await calcular_deuda(db, hora_s, fecha_s)
-                r   = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
-                p   = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
-                a   = await calcular_anti_racha(db, hora_s, fecha_s)
-                m   = await calcular_markov_hora(db, hora_s, fecha_s)
-                ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
-                pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
-                ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
-                pfe = await calcular_patron_fecha_exacta(db, hora_s, dia_s, mes_s, fecha_s)
+                # Si ya existe en auditoria_ia, leer predicciones de ahí
+                # (evita recalcular todo el motor para 27,000 registros)
+                if ya_existe_ia:
+                    res_pred = await db.execute(text("""
+                        SELECT prediccion_1, prediccion_2, prediccion_3,
+                               acierto, confianza_pct
+                        FROM auditoria_ia
+                        WHERE fecha=:f AND hora=:h LIMIT 1
+                    """), {"f": fecha_s, "h": hora_s})
+                    row_ia = res_pred.fetchone()
+                    if not row_ia or not row_ia[0]:
+                        omitidos += 1
+                        continue
+                    pred1 = _normalizar(row_ia[0])
+                    pred2 = _normalizar(row_ia[1]) if row_ia[1] else None
+                    pred3 = _normalizar(row_ia[2]) if row_ia[2] else None
+                    acerto1 = bool(row_ia[3])
+                    acerto3 = real_n in [x for x in [pred1, pred2, pred3] if x]
+                    confianza_idx = int(row_ia[4] or 0)
+                    # Scores mínimos para señales (no recalculamos el motor completo)
+                    d = {}; r = {}; p = {}; a = {}; m = {}; ce = {}; pfe = {}
+                    sc = {pred1: 1.0}
+                else:
+                    # Calcular motor completo solo si no existe en auditoria_ia
+                    d   = await calcular_deuda(db, hora_s, fecha_s)
+                    r   = await calcular_frecuencia_reciente(db, hora_s, fecha_s)
+                    p   = await calcular_patron_dia(db, hora_s, dia_s, fecha_s)
+                    a   = await calcular_anti_racha(db, hora_s, fecha_s)
+                    m   = await calcular_markov_hora(db, hora_s, fecha_s)
+                    ce  = await calcular_ciclo_exacto(db, hora_s, fecha_s)
+                    pr  = await calcular_penalizacion_reciente(db, hora_s, fecha_s)
+                    ps  = await calcular_penalizacion_sobreprediccion(db, hora_s, fecha_s)
+                    pfe = await calcular_patron_fecha_exacta(db, hora_s, dia_s, mes_s, fecha_s)
 
-                sc = combinar_señales_v10(d, r, p, a, m, ce, pr, ps, hora_s, pesos,
-                                          patron_fecha=pfe)
-                if not sc:
-                    continue
+                    sc = combinar_señales_v10(d, r, p, a, m, ce, pr, ps, hora_s, pesos,
+                                              patron_fecha=pfe)
+                    if not sc:
+                        continue
 
-                confianza_idx, _, _ = calcular_indice_confianza_v10(sc)
-                ranking = sorted(sc.items(), key=lambda x: x[1], reverse=True)
-                pred1 = _normalizar(ranking[0][0]) if len(ranking) > 0 else None
-                pred2 = _normalizar(ranking[1][0]) if len(ranking) > 1 else None
-                pred3 = _normalizar(ranking[2][0]) if len(ranking) > 2 else None
+                    confianza_idx, _, _ = calcular_indice_confianza_v10(sc)
+                    ranking = sorted(sc.items(), key=lambda x: x[1], reverse=True)
+                    pred1 = _normalizar(ranking[0][0]) if len(ranking) > 0 else None
+                    pred2 = _normalizar(ranking[1][0]) if len(ranking) > 1 else None
+                    pred3 = _normalizar(ranking[2][0]) if len(ranking) > 2 else None
 
-                acerto1 = (pred1 == real_n)
-                acerto3 = real_n in [x for x in [pred1, pred2, pred3] if x]
+                    acerto1 = (pred1 == real_n)
+                    acerto3 = real_n in [x for x in [pred1, pred2, pred3] if x]
 
                 # ── INSERT auditoria_ia ──
                 if not ya_existe_ia:
@@ -1958,8 +1982,8 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                 continue
 
         await db.commit()
-        ef1 = round(aciertos1 / insertados * 100, 1) if insertados > 0 else 0
-        ef3 = round(aciertos3 / insertados * 100, 1) if insertados > 0 else 0
+        ef1 = round(aciertos1 / max(insertados, 1) * 100, 1) if insertados > 0 else 0
+        ef3 = round(aciertos3 / max(insertados, 1) * 100, 1) if insertados > 0 else 0
 
         return {
             "status": "success",
@@ -1972,8 +1996,9 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
             "efectividad_top3":        ef3,
             "message": (
                 f"✅ Retroactivo {fecha_desde}→{fecha_hasta}: "
-                f"{insertados} predicciones | {señales_insertadas} desgloses de señales. "
-                f"Top1: {ef1}% | Top3: {ef3}%"
+                f"{insertados} nuevas en auditoria_ia | "
+                f"{señales_insertadas} desgloses de señales insertados | "
+                f"{omitidos} omitidos (ya tenían señales)"
             ),
         }
     except Exception as e:
