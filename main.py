@@ -531,10 +531,15 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
         rows = (await db.execute(text("""
             SELECT hora, animal_previo, animal_sig,
                    frecuencia,
-                   ROUND(probabilidad::numeric, 2) AS probabilidad_pct
+                   CASE
+                     WHEN probabilidad > 100
+                     THEN ROUND((frecuencia::FLOAT /
+                          NULLIF(SUM(frecuencia) OVER (PARTITION BY hora, animal_previo), 0)
+                          * 100)::numeric, 2)
+                     ELSE ROUND(probabilidad::numeric, 2)
+                   END AS probabilidad_pct
             FROM markov_transiciones
-            WHERE probabilidad <= 100
-            ORDER BY probabilidad DESC
+            ORDER BY probabilidad_pct DESC
             LIMIT :limit
         """), {"limit": limit})).fetchall()
         return [
@@ -712,6 +717,59 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         await db.rollback()
         return {"status": "error", "mensaje": str(e)}
+
+
+@app.get("/fix-markov-directo")
+async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
+    """
+    Normaliza probabilidades corruptas DIRECTAMENTE con UPDATE.
+    No borra ni reconstruye — recalcula solo las filas donde prob > 100.
+    Más seguro que TRUNCATE en Render gratuito.
+    """
+    try:
+        # Contar corruptos antes
+        n_antes = (await db.execute(text(
+            "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
+        ))).scalar() or 0
+
+        if n_antes == 0:
+            total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+            return {"status": "ya_limpio", "total": total,
+                    "message": f"✅ Markov ya estaba limpio — {total:,} filas, 0 corruptas"}
+
+        # UPDATE: recalcular probabilidad usando frecuencias reales
+        await db.execute(text("""
+            UPDATE markov_transiciones m
+            SET probabilidad = ROUND(
+                (m.frecuencia::FLOAT /
+                 NULLIF((
+                     SELECT SUM(frecuencia)
+                     FROM markov_transiciones m2
+                     WHERE m2.hora = m.hora
+                       AND m2.animal_previo = m.animal_previo
+                 ), 0) * 100)::numeric, 2)
+            WHERE probabilidad > 100
+        """))
+        await db.commit()
+
+        # Verificar después
+        n_despues = (await db.execute(text(
+            "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
+        ))).scalar() or 0
+        total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+        r_max = (await db.execute(text("SELECT MAX(probabilidad) FROM markov_transiciones"))).scalar()
+
+        return {
+            "status": "success",
+            "corruptas_antes": n_antes,
+            "corruptas_despues": n_despues,
+            "total": total,
+            "prob_max_ahora": float(r_max) if r_max else 0,
+            "message": f"✅ Corregidas {n_antes} filas | Quedan corruptas: {n_despues} | Max prob: {r_max}%"
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/fix-markov")
