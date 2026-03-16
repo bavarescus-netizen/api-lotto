@@ -1205,6 +1205,161 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": await obtener_estadisticas(db), "bitacora_hoy": await obtener_bitacora(db)}
 
 
+@app.get("/auto-pesos")
+async def auto_pesos(db: AsyncSession = Depends(get_db)):
+    """
+    Calcula pesos óptimos desde auditoria_señales y los guarda en motor_pesos.
+    Basado en efectividad real de cada señal cuando fue dominante.
+    Requiere mínimo 500 registros en auditoria_señales para ser confiable.
+    """
+    try:
+        # Verificar muestra disponible
+        n = (await db.execute(text(
+            "SELECT COUNT(*) FROM auditoria_señales WHERE acierto_top3 IS NOT NULL"
+        ))).scalar() or 0
+
+        if n < 200:
+            return {
+                "status": "insuficiente",
+                "registros": n,
+                "message": f"Solo {n} registros con resultado. Necesita mínimo 200. Corre CARGAR 2018→HOY primero."
+            }
+
+        # Calcular efectividad por señal dominante
+        res = await db.execute(text("""
+            SELECT
+                CASE
+                    WHEN score_deuda >= GREATEST(score_reciente, score_patron_dia,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'deuda'
+                    WHEN score_reciente >= GREATEST(score_deuda, score_patron_dia,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'reciente'
+                    WHEN score_patron_dia >= GREATEST(score_deuda, score_reciente,
+                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'patron'
+                    WHEN score_markov >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'secuencia'
+                    WHEN score_anti_racha >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_markov, score_ciclo_exacto, score_patron_fecha)
+                    THEN 'anti'
+                    ELSE 'reciente'
+                END AS señal,
+                COUNT(*) AS total,
+                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) AS aciertos
+            FROM auditoria_señales
+            WHERE acierto_top3 IS NOT NULL
+            GROUP BY señal
+        """))
+        rows = res.fetchall()
+
+        # Calcular efectividad por señal
+        ef_señal = {}
+        total_general = 0
+        for r in rows:
+            señal = r[0]
+            total = int(r[1])
+            ac = int(r[2])
+            ef = ac / total if total > 0 else 0
+            ef_señal[señal] = {"ef": ef, "total": total, "aciertos": ac}
+            total_general += total
+
+        azar = 3 / 38  # 7.89%
+
+        # Convertir efectividad a pesos proporcionales
+        # Señal que rinde más que azar → más peso, menos → menos peso
+        señales_motor = ["reciente", "deuda", "anti", "patron", "secuencia"]
+        pesos_raw = {}
+        for s in señales_motor:
+            if s in ef_señal:
+                # Peso proporcional a qué tan por encima del azar está
+                ratio = ef_señal[s]["ef"] / azar
+                pesos_raw[s] = max(ratio, 0.5)  # mínimo 0.5× para no eliminar señales
+            else:
+                pesos_raw[s] = 1.0  # sin datos → peso neutro
+
+        # Normalizar para que sumen ~1.0
+        total_raw = sum(pesos_raw.values())
+        pesos_norm = {s: round(v / total_raw, 4) for s, v in pesos_raw.items()}
+
+        # Calcular EF global actual
+        total_ac = sum(d["aciertos"] for d in ef_señal.values())
+        total_tot = sum(d["total"] for d in ef_señal.values())
+        ef_global = round(total_ac / total_tot * 100, 2) if total_tot > 0 else 0
+
+        # Guardar en motor_pesos
+        res_gen = await db.execute(text("SELECT COALESCE(MAX(generacion),0) FROM motor_pesos"))
+        gen = (res_gen.scalar() or 0) + 1
+
+        await db.execute(text("""
+            INSERT INTO motor_pesos
+                (peso_reciente, peso_deuda, peso_anti, peso_patron, peso_secuencia,
+                 efectividad, total_evaluados, aciertos, generacion)
+            VALUES (:r, :d, :a, :p, :s, :ef, :tot, :ac, :gen)
+        """), {
+            "r":   pesos_norm["reciente"],
+            "d":   pesos_norm["deuda"],
+            "a":   pesos_norm["anti"],
+            "p":   pesos_norm["patron"],
+            "s":   pesos_norm["secuencia"],
+            "ef":  ef_global,
+            "tot": total_tot,
+            "ac":  total_ac,
+            "gen": gen,
+        })
+
+        # Actualizar también motor_pesos_hora con los mismos pesos base
+        for hora in ["08:00 AM","09:00 AM","10:00 AM","11:00 AM",
+                     "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
+                     "04:00 PM","05:00 PM","06:00 PM","07:00 PM"]:
+            try:
+                await db.execute(text("""
+                    INSERT INTO motor_pesos_hora
+                        (hora, generacion, peso_decay, peso_markov, peso_gap, peso_reciente,
+                         efectividad, total_evaluados, aciertos_top3)
+                    VALUES (:hora, :gen, :anti, :markov, :deuda, :rec, :ef, :tot, :ac)
+                    ON CONFLICT (hora, generacion) DO UPDATE SET
+                        peso_decay=EXCLUDED.peso_decay,
+                        peso_markov=EXCLUDED.peso_markov,
+                        peso_gap=EXCLUDED.peso_gap,
+                        peso_reciente=EXCLUDED.peso_reciente,
+                        efectividad=EXCLUDED.efectividad
+                """), {
+                    "hora": hora, "gen": gen,
+                    "anti":   pesos_norm["anti"],
+                    "markov": pesos_norm["secuencia"],
+                    "deuda":  pesos_norm["deuda"],
+                    "rec":    pesos_norm["reciente"],
+                    "ef": ef_global, "tot": total_tot, "ac": total_ac,
+                })
+            except Exception:
+                pass
+
+        await db.commit()
+
+        return {
+            "status": "success",
+            "registros_analizados": n,
+            "ef_top3_global": ef_global,
+            "pesos_anteriores": {"reciente": 0.25, "deuda": 0.28, "anti": 0.22, "patron": 0.15, "secuencia": 0.10},
+            "pesos_nuevos": pesos_norm,
+            "detalle_señales": {
+                s: {
+                    "ef_pct": round(ef_señal[s]["ef"] * 100, 1) if s in ef_señal else None,
+                    "total": ef_señal[s]["total"] if s in ef_señal else 0,
+                    "vs_azar": round(ef_señal[s]["ef"] / azar, 2) if s in ef_señal else None,
+                }
+                for s in señales_motor
+            },
+            "generacion": gen,
+            "message": f"✅ Pesos actualizados en generación {gen} | EF.TOP3: {ef_global}% | {n:,} predicciones analizadas",
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": str(e)}
+
+
 
 @app.get("/aprender-sql")
 async def aprender_sql(db: AsyncSession = Depends(get_db)):
