@@ -531,8 +531,9 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
         rows = (await db.execute(text("""
             SELECT hora, animal_previo, animal_sig,
                    frecuencia,
-                   ROUND(probabilidad::numeric * 100, 2) AS probabilidad_pct
+                   ROUND(probabilidad::numeric, 2) AS probabilidad_pct
             FROM markov_transiciones
+            WHERE probabilidad <= 100
             ORDER BY probabilidad DESC
             LIMIT :limit
         """), {"limit": limit})).fetchall()
@@ -641,6 +642,76 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
         resultado["error"] = str(e)
 
     return resultado
+
+
+@app.get("/fix-markov-directo")
+async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
+    """
+    Normaliza probabilidades corruptas DIRECTAMENTE con UPDATE.
+    No borra ni reconstruye — solo divide las probs > 100 para dejarlas en rango correcto.
+    Más rápido y seguro que el fix completo.
+    """
+    try:
+        # Ver cuántas están corruptas antes
+        antes = (await db.execute(text(
+            "SELECT COUNT(*), MAX(probabilidad) FROM markov_transiciones WHERE probabilidad > 100"
+        ))).fetchone()
+        n_corruptas = int(antes[0] or 0)
+        prob_max_antes = float(antes[1] or 0)
+
+        if n_corruptas == 0:
+            total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+            return {
+                "status": "ok",
+                "mensaje": f"✅ Ya estaba limpio. {total:,} transiciones, todas válidas.",
+                "corruptas_antes": 0,
+                "prob_max": prob_max_antes,
+            }
+
+        # Recalcular probabilidades correctas directamente
+        await db.execute(text("""
+            UPDATE markov_transiciones m
+            SET probabilidad = ROUND(
+                (m.frecuencia::FLOAT /
+                 NULLIF(sub.total_prev, 0) * 100)::numeric, 2
+            )
+            FROM (
+                SELECT hora, animal_previo,
+                       SUM(frecuencia) AS total_prev
+                FROM markov_transiciones
+                GROUP BY hora, animal_previo
+            ) sub
+            WHERE m.hora = sub.hora
+              AND m.animal_previo = sub.animal_previo
+        """))
+        await db.commit()
+
+        # Verificar resultado
+        despues = (await db.execute(text(
+            "SELECT COUNT(*), MAX(probabilidad), AVG(probabilidad) FROM markov_transiciones WHERE probabilidad > 100"
+        ))).fetchone()
+        n_restantes = int(despues[0] or 0)
+
+        # Si aún quedan, eliminarlos
+        if n_restantes > 0:
+            await db.execute(text("DELETE FROM markov_transiciones WHERE probabilidad > 100"))
+            await db.commit()
+
+        total = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
+        prob_max = (await db.execute(text("SELECT MAX(probabilidad) FROM markov_transiciones"))).scalar() or 0
+
+        return {
+            "status": "success",
+            "corruptas_antes": n_corruptas,
+            "prob_max_antes": prob_max_antes,
+            "corruptas_restantes": n_restantes,
+            "prob_max_ahora": float(prob_max),
+            "total_transiciones": total,
+            "mensaje": f"✅ Corregidas {n_corruptas} filas. Prob máx ahora: {float(prob_max):.2f}%",
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "mensaje": str(e)}
 
 
 @app.get("/fix-markov")
@@ -1410,3 +1481,69 @@ async def endpoint_retroactivo_bloque(
     return await llenar_auditoria_retroactiva(
         db, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta
     )
+
+
+# ══════════════════════════════════════════════════════
+# RENTABILIDAD POR HORA — Tab "Rentabilidad Horas"
+# Lee de rentabilidad_hora + calcula en vivo desde auditoria_ia
+# ══════════════════════════════════════════════════════
+@app.get("/rentabilidad")
+async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
+    try:
+        # Leer tabla rentabilidad_hora (actualizada por /entrenar)
+        rows = (await db.execute(text("""
+            SELECT hora, total_sorteos, aciertos_top1, aciertos_top3,
+                   efectividad_top1, efectividad_top3, es_rentable
+            FROM rentabilidad_hora
+            ORDER BY efectividad_top3 DESC
+        """))).fetchall()
+
+        if rows:
+            return [
+                {
+                    "hora":            r[0],
+                    "total":           int(r[1] or 0),
+                    "aciertos_top1":   int(r[2] or 0),
+                    "aciertos_top3":   int(r[3] or 0),
+                    "ef_top1":         round(float(r[4] or 0), 2),
+                    "ef_top3":         round(float(r[5] or 0), 2),
+                    "es_rentable":     bool(r[6]),
+                    "vs_azar":         round(float(r[5] or 0) - 7.89, 2),
+                }
+                for r in rows
+            ]
+
+        # Fallback: calcular en vivo desde auditoria_ia si la tabla está vacía
+        rows2 = (await db.execute(text("""
+            SELECT a.hora,
+                COUNT(*) AS total,
+                COUNT(CASE WHEN a.acierto=TRUE THEN 1 END) AS ac1,
+                COUNT(CASE WHEN
+                    LOWER(TRIM(h.animalito)) IN (
+                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                    ) THEN 1 END) AS ac3
+            FROM auditoria_ia a
+            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora
+                AND h.loteria='Lotto Activo'
+            WHERE a.acierto IS NOT NULL
+            GROUP BY a.hora
+            ORDER BY ac3::float/NULLIF(COUNT(*),0) DESC
+        """))).fetchall()
+
+        return [
+            {
+                "hora":          r[0],
+                "total":         int(r[1]),
+                "aciertos_top1": int(r[2]),
+                "aciertos_top3": int(r[3]),
+                "ef_top1":       round(int(r[2])/int(r[1])*100, 2) if r[1] else 0,
+                "ef_top3":       round(int(r[3])/int(r[1])*100, 2) if r[1] else 0,
+                "es_rentable":   (int(r[3])/int(r[1])*100 >= 10.0) if r[1] else False,
+                "vs_azar":       round(int(r[3])/int(r[1])*100 - 7.89, 2) if r[1] else -7.89,
+            }
+            for r in rows2
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
