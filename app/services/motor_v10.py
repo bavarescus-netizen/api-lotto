@@ -1818,12 +1818,17 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                 ), {"f": fecha_s, "h": hora_s})
                 ya_existe_ia = res_e.fetchone() is not None
 
-                # Verificar si ya existe en auditoria_señales
-                res_sig = await db.execute(text(
-                    "SELECT 1 FROM auditoria_señales "
-                    "WHERE fecha=:f AND hora=:h LIMIT 1"
-                ), {"f": fecha_s, "h": hora_s})
-                ya_existe_sig = res_sig.fetchone() is not None
+                # Verificar si ya existe en auditoria_señales (tabla puede no existir)
+                ya_existe_sig = False
+                try:
+                    res_sig = await db.execute(text(
+                        "SELECT 1 FROM auditoria_señales "
+                        "WHERE fecha=:f AND hora=:h LIMIT 1"
+                    ), {"f": fecha_s, "h": hora_s})
+                    ya_existe_sig = res_sig.fetchone() is not None
+                except Exception:
+                    await db.rollback()
+                    ya_existe_sig = False  # Tabla no existe, procesar igual
 
                 # Si ambas tablas ya tienen el registro, saltar
                 if ya_existe_ia and ya_existe_sig:
@@ -1881,66 +1886,75 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
                     if acerto3: aciertos3 += 1
 
                 # ── INSERT auditoria_señales (desglose por señal) ──
+                # En try separado — si la tabla no existe, no bloquea auditoria_ia
                 if not ya_existe_sig and pred1:
-                    await db.execute(text("""
-                        INSERT INTO auditoria_señales (
-                            fecha, hora, animal_predicho, resultado_real,
-                            acierto_top1, acierto_top3, confianza,
-                            score_deuda, score_reciente, score_patron_dia,
-                            score_anti_racha, score_markov, score_ciclo_exacto,
-                            score_patron_fecha, score_final,
-                            peso_deuda, peso_reciente, peso_patron,
-                            peso_anti, peso_markov
-                        ) VALUES (
-                            :f, :h, :animal, :real,
-                            :ac1, :ac3, :conf,
-                            :s_deuda, :s_rec, :s_patron,
-                            :s_anti, :s_markov, :s_ciclo,
-                            :s_fecha, :s_final,
-                            :p_deuda, :p_rec, :p_patron,
-                            :p_anti, :p_markov
-                        )
-                        ON CONFLICT (fecha, hora) DO UPDATE SET
-                            resultado_real     = EXCLUDED.resultado_real,
-                            acierto_top1       = EXCLUDED.acierto_top1,
-                            acierto_top3       = EXCLUDED.acierto_top3,
-                            score_deuda        = EXCLUDED.score_deuda,
-                            score_reciente     = EXCLUDED.score_reciente,
-                            score_patron_dia   = EXCLUDED.score_patron_dia,
-                            score_anti_racha   = EXCLUDED.score_anti_racha,
-                            score_markov       = EXCLUDED.score_markov,
-                            score_ciclo_exacto = EXCLUDED.score_ciclo_exacto,
-                            score_patron_fecha = EXCLUDED.score_patron_fecha,
-                            score_final        = EXCLUDED.score_final
-                    """), {
-                        "f":       fecha_s,
-                        "h":       hora_s,
-                        "animal":  pred1,
-                        "real":    real_n,
-                        "ac1":     acerto1,
-                        "ac3":     acerto3,
-                        "conf":    int(confianza_idx),
-                        "s_deuda":  round(d.get(pred1, {}).get("score", 0) * pesos["deuda"], 4),
-                        "s_rec":    round(r.get(pred1, {}).get("score", 0) * pesos["reciente"], 4),
-                        "s_patron": round(p.get(pred1, {}).get("score", 0) * pesos["patron"], 4),
-                        "s_anti":   round(a.get(pred1, {}).get("score", 0) * pesos["anti"], 4),
-                        "s_markov": round(m.get(pred1, {}).get("score", 0) * pesos["secuencia"], 4),
-                        "s_ciclo":  round(ce.get(pred1, {}).get("score", 0) * 0.15, 4),
-                        "s_fecha":  round(pfe.get(pred1, {}).get("score", 0) * 0.12, 4),
-                        "s_final":  round(sc.get(pred1, 0), 6),
-                        "p_deuda":  pesos["deuda"],
-                        "p_rec":    pesos["reciente"],
-                        "p_patron": pesos["patron"],
-                        "p_anti":   pesos["anti"],
-                        "p_markov": pesos["secuencia"],
-                    })
-                    señales_insertadas += 1
+                    try:
+                        await db.execute(text("""
+                            INSERT INTO auditoria_señales (
+                                fecha, hora, animal_predicho, resultado_real,
+                                acierto_top1, acierto_top3, confianza,
+                                score_deuda, score_reciente, score_patron_dia,
+                                score_anti_racha, score_markov, score_ciclo_exacto,
+                                score_patron_fecha, score_final,
+                                peso_deuda, peso_reciente, peso_patron,
+                                peso_anti, peso_markov
+                            ) VALUES (
+                                :f, :h, :animal, :real,
+                                :ac1, :ac3, :conf,
+                                :s_deuda, :s_rec, :s_patron,
+                                :s_anti, :s_markov, :s_ciclo,
+                                :s_fecha, :s_final,
+                                :p_deuda, :p_rec, :p_patron,
+                                :p_anti, :p_markov
+                            )
+                            ON CONFLICT (fecha, hora) DO UPDATE SET
+                                resultado_real     = EXCLUDED.resultado_real,
+                                acierto_top1       = EXCLUDED.acierto_top1,
+                                acierto_top3       = EXCLUDED.acierto_top3,
+                                score_deuda        = EXCLUDED.score_deuda,
+                                score_reciente     = EXCLUDED.score_reciente,
+                                score_patron_dia   = EXCLUDED.score_patron_dia,
+                                score_anti_racha   = EXCLUDED.score_anti_racha,
+                                score_markov       = EXCLUDED.score_markov,
+                                score_ciclo_exacto = EXCLUDED.score_ciclo_exacto,
+                                score_patron_fecha = EXCLUDED.score_patron_fecha,
+                                score_final        = EXCLUDED.score_final
+                        """), {
+                            "f":       fecha_s,
+                            "h":       hora_s,
+                            "animal":  pred1,
+                            "real":    real_n,
+                            "ac1":     acerto1,
+                            "ac3":     acerto3,
+                            "conf":    int(confianza_idx),
+                            "s_deuda":  round(d.get(pred1, {}).get("score", 0) * pesos["deuda"], 4),
+                            "s_rec":    round(r.get(pred1, {}).get("score", 0) * pesos["reciente"], 4),
+                            "s_patron": round(p.get(pred1, {}).get("score", 0) * pesos["patron"], 4),
+                            "s_anti":   round(a.get(pred1, {}).get("score", 0) * pesos["anti"], 4),
+                            "s_markov": round(m.get(pred1, {}).get("score", 0) * pesos["secuencia"], 4),
+                            "s_ciclo":  round(ce.get(pred1, {}).get("score", 0) * 0.15, 4),
+                            "s_fecha":  round(pfe.get(pred1, {}).get("score", 0) * 0.12, 4),
+                            "s_final":  round(sc.get(pred1, 0), 6),
+                            "p_deuda":  pesos["deuda"],
+                            "p_rec":    pesos["reciente"],
+                            "p_patron": pesos["patron"],
+                            "p_anti":   pesos["anti"],
+                            "p_markov": pesos["secuencia"],
+                        })
+                        señales_insertadas += 1
+                    except Exception:
+                        await db.rollback()  # Solo rollback del señales, no del ia
 
                 # Commit cada 200 registros para no saturar memoria en Render
                 if (insertados + señales_insertadas) % 200 == 0:
                     await db.commit()
 
-            except Exception:
+            except Exception as _err:
+                # Loggear el primer error para diagnóstico
+                if insertados == 0 and omitidos == 0 and señales_insertadas == 0:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Retroactivo error en {fecha_s} {hora_s}: {_err}")
+                await db.rollback()
                 continue
 
         await db.commit()
