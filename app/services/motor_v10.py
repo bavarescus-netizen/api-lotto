@@ -246,3 +246,18 @@ def obtener_estadisticas(historial):
         "total_sorteos": total,
         "top_animales": top
     }
+    # --------------------------------
+# COMPATIBILIDAD (NO ROMPER API)
+# --------------------------------
+
+def entrenar_modelo(historial):
+    """
+    Mantiene compatibilidad con versiones anteriores.
+    Ahora el entrenamiento es automático en generar_prediccion.
+    """
+    try:
+        if modelo_rf:
+            modelo_rf.entrenar(historial)
+        return {"status": "modelo entrenado"}
+    except Exception as e:
+        return {"error": str(e)}
