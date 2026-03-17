@@ -18,4 +18,5 @@ apscheduler
 python-multipart
 beautifulsoup4
 requests
-
+scikit-learn
+numpy
