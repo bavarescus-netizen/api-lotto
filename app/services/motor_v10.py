@@ -5,194 +5,196 @@ ANIMALES = list(range(1, 39))
 
 
 # --------------------------------
-# NORMALIZACIÓN DE DEUDA
+# DEUDA (CORREGIDA)
 # --------------------------------
 
-def score_deuda(dias_ausente, ciclo_promedio):
-
-    if ciclo_promedio <= 0:
-        return 0
-
-    ratio = dias_ausente / ciclo_promedio
-
-    return math.log1p(ratio)
-
-
-# --------------------------------
-# FRECUENCIA VS AZAR
-# --------------------------------
-
-def score_frecuencia(freq, total):
-
-    if total == 0:
-        return 0
-
-    prob_real = freq / total
-    prob_azar = 1 / 38
-
-    ratio = prob_real / prob_azar
-
-    return math.log1p(ratio)
-
-
-# --------------------------------
-# MARKOV SIMPLE
-# --------------------------------
-
-def calcular_markov(historial):
-
-    transiciones = defaultdict(Counter)
-
-    for i in range(1, len(historial)):
-
-        anterior = historial[i - 1]
-        actual = historial[i]
-
-        transiciones[anterior][actual] += 1
-
-    return transiciones
-
-
-def prob_markov(historial):
-
-    if len(historial) < 2:
-        return {}
-
-    anterior = historial[-1]
-
-    transiciones = calcular_markov(historial)
-
-    if anterior not in transiciones:
-        return {}
-
-    total = sum(transiciones[anterior].values())
-
-    probs = {}
-
-    for animal, count in transiciones[anterior].items():
-
-        probs[animal] = count / total
-
-    return probs
-
-
-# --------------------------------
-# PENALIZACIÓN DIVERSIDAD
-# --------------------------------
-
-def penalizacion_diversidad(veces):
-
-    return math.exp(-0.2 * veces)
-
-
-# --------------------------------
-# CALCULAR GAP
-# --------------------------------
-
-def calcular_gap(historial):
+def calcular_deuda(historial):
 
     gap = {}
-
-    for animal in ANIMALES:
-
-        gap[animal] = 0
-
-        for i in range(len(historial) - 1, -1, -1):
-
-            if historial[i] == animal:
-                break
-
-            gap[animal] += 1
-
-    return gap
-
-
-# --------------------------------
-# CICLO PROMEDIO
-# --------------------------------
-
-def ciclo_promedio(historial):
-
     ciclos = {a: [] for a in ANIMALES}
-
     ultima = {}
 
     for i, animal in enumerate(historial):
 
         if animal in ultima:
-
-            ciclo = i - ultima[animal]
-            ciclos[animal].append(ciclo)
+            ciclos[animal].append(i - ultima[animal])
 
         ultima[animal] = i
 
-    promedio = {}
+    for animal in ANIMALES:
 
-    for a in ANIMALES:
+        dias = 0
 
-        if len(ciclos[a]) == 0:
-            promedio[a] = 10
+        for i in range(len(historial)-1, -1, -1):
+            if historial[i] == animal:
+                break
+            dias += 1
+
+        if len(ciclos[animal]) == 0:
+            ciclo_prom = 10
         else:
-            promedio[a] = sum(ciclos[a]) / len(ciclos[a])
+            ciclo_prom = sum(ciclos[animal]) / len(ciclos[animal])
 
-    return promedio
+        ratio = dias / ciclo_prom if ciclo_prom > 0 else 0
+
+        # 🔥 CORRECCIÓN
+        gap[animal] = math.log1p(ratio)
+
+    return gap
 
 
 # --------------------------------
-# SCORE PRINCIPAL
+# FRECUENCIA (CORREGIDA)
 # --------------------------------
 
-def calcular_scores(historial, historial_predicciones=None):
+def calcular_frecuencia_reciente(historial):
 
     total = len(historial)
-
     freq = Counter(historial)
-
-    gap = calcular_gap(historial)
-
-    ciclos = ciclo_promedio(historial)
-
-    markov = prob_markov(historial)
 
     scores = {}
 
-    for animal in ANIMALES:
+    for a in ANIMALES:
 
-        s_deuda = score_deuda(gap[animal], ciclos[animal])
+        prob_real = freq[a] / total if total > 0 else 0
+        prob_azar = 1 / 38
 
-        s_freq = score_frecuencia(freq[animal], total)
-
-        s_markov = markov.get(animal, 0)
-
-        score = (
-            0.35 * s_deuda +
-            0.35 * s_freq +
-            0.30 * s_markov
-        )
-
-        if historial_predicciones:
-
-            veces = historial_predicciones.count(animal)
-            score *= penalizacion_diversidad(veces)
-
-        scores[animal] = score
+        # 🔥 CORRECCIÓN
+        scores[a] = math.log1p(prob_real / prob_azar)
 
     return scores
 
 
 # --------------------------------
-# TOP PREDICCIÓN
+# ANTI RACHA (CORREGIDA)
+# --------------------------------
+
+def calcular_anti_racha(historial):
+
+    dias = {}
+
+    for a in ANIMALES:
+        dias[a] = 0
+
+        for i in range(len(historial)-1, -1, -1):
+            if historial[i] == a:
+                break
+            dias[a] += 1
+
+        # 🔥 CORRECCIÓN (menos agresivo)
+        dias[a] = math.exp(-dias[a] * 0.3)
+
+    return dias
+
+
+# --------------------------------
+# MARKOV POR HORA (ESTABLE)
+# --------------------------------
+
+def calcular_markov_hora(historial):
+
+    transiciones = defaultdict(Counter)
+
+    for i in range(1, len(historial)):
+        prev = historial[i-1]
+        curr = historial[i]
+        transiciones[prev][curr] += 1
+
+    probs = {}
+
+    if len(historial) < 2:
+        return probs
+
+    ultimo = historial[-1]
+
+    if ultimo not in transiciones:
+        return probs
+
+    total = sum(transiciones[ultimo].values())
+
+    for a, c in transiciones[ultimo].items():
+        probs[a] = c / total
+
+    return probs
+
+
+# --------------------------------
+# PATRÓN DÍA (SE MANTIENE SIMPLE)
+# --------------------------------
+
+def calcular_patron_dia(historial):
+
+    freq = Counter(historial)
+
+    total = len(historial)
+
+    return {a: freq[a] / total if total > 0 else 0 for a in ANIMALES}
+
+
+# --------------------------------
+# COMBINAR SEÑALES (CORREGIDO)
+# --------------------------------
+
+def combinar_señales(
+    deuda,
+    frecuencia,
+    patron,
+    anti,
+    markov,
+    historial_predicciones=None
+):
+
+    scores = {}
+
+    for a in ANIMALES:
+
+        s_deuda = deuda.get(a, 0)
+        s_freq = frecuencia.get(a, 0)
+        s_patron = patron.get(a, 0)
+        s_anti = anti.get(a, 0)
+        s_markov = markov.get(a, 0)
+
+        # 🔥 CORRECCIÓN DE PESOS
+        score = (
+            0.30 * s_deuda +
+            0.30 * s_freq +
+            0.15 * s_patron +
+            0.10 * s_anti +
+            0.15 * s_markov
+        )
+
+        # 🔥 PENALIZACIÓN SUAVE
+        if historial_predicciones:
+            veces = historial_predicciones.count(a)
+            score *= math.exp(-0.15 * veces)
+
+        scores[a] = score
+
+    return scores
+
+
+# --------------------------------
+# GENERAR PREDICCIÓN (NO CAMBIA)
 # --------------------------------
 
 def generar_prediccion(historial, historial_predicciones=None):
 
-    scores = calcular_scores(historial, historial_predicciones)
+    deuda = calcular_deuda(historial)
+    frecuencia = calcular_frecuencia_reciente(historial)
+    patron = calcular_patron_dia(historial)
+    anti = calcular_anti_racha(historial)
+    markov = calcular_markov_hora(historial)
 
-    ordenados = sorted(
-        scores.items(),
-        key=lambda x: x[1],
-        reverse=True
+    scores = combinar_señales(
+        deuda,
+        frecuencia,
+        patron,
+        anti,
+        markov,
+        historial_predicciones
     )
+
+    ordenados = sorted(scores.items(), key=lambda x: x[1], reverse=True)
 
     top5 = [a for a, _ in ordenados[:5]]
 
@@ -201,4 +203,22 @@ def generar_prediccion(historial, historial_predicciones=None):
         "top3": top5[:3],
         "top5": top5,
         "scores": scores
+    }
+
+
+# --------------------------------
+# ESTADÍSTICAS (SE MANTIENE)
+# --------------------------------
+
+def obtener_estadisticas(historial):
+
+    total = len(historial)
+
+    freq = Counter(historial)
+
+    top = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    return {
+        "total_sorteos": total,
+        "top_animales": top
     }
