@@ -1,17 +1,42 @@
 import math
 from collections import Counter, defaultdict
 
-# 🔥 IMPORTANTE (modelo híbrido)
+# --------------------------------
+# IA (Random Forest)
+# --------------------------------
 try:
     from app.services.modelo_rf import ModeloRF
     modelo_rf = ModeloRF()
 except:
     modelo_rf = None
 
+# --------------------------------
+# APRENDIZAJE AUTOMÁTICO
+# --------------------------------
+try:
+    from app.services.aprendizaje import obtener_pesos, actualizar_pesos
+except:
+    def obtener_pesos():
+        return {
+            "deuda": 0.25,
+            "frecuencia": 0.25,
+            "patron": 0.15,
+            "anti": 0.10,
+            "markov": 0.10,
+            "rf": 0.15
+        }
+
+    def actualizar_pesos(bitacora):
+        return obtener_pesos()
+
+# --------------------------------
+# CONFIG
+# --------------------------------
+
 ANIMALES = list(range(1, 39))
 
 # --------------------------------
-# BITÁCORA (SOLUCIÓN ERROR)
+# BITÁCORA
 # --------------------------------
 
 bitacora_global = []
@@ -30,7 +55,7 @@ def guardar_en_bitacora(prediccion, resultado_real=None):
         bitacora_global.pop(0)
 
 # --------------------------------
-# DEUDA
+# SEÑALES
 # --------------------------------
 
 def calcular_deuda(historial):
@@ -57,9 +82,6 @@ def calcular_deuda(historial):
 
     return gap
 
-# --------------------------------
-# FRECUENCIA
-# --------------------------------
 
 def calcular_frecuencia_reciente(historial):
     total = len(historial)
@@ -74,9 +96,6 @@ def calcular_frecuencia_reciente(historial):
 
     return scores
 
-# --------------------------------
-# ANTI RACHA
-# --------------------------------
 
 def calcular_anti_racha(historial):
     dias = {}
@@ -93,9 +112,6 @@ def calcular_anti_racha(historial):
 
     return dias
 
-# --------------------------------
-# MARKOV
-# --------------------------------
 
 def calcular_markov_hora(historial):
     transiciones = defaultdict(Counter)
@@ -115,9 +131,6 @@ def calcular_markov_hora(historial):
 
     return {a: c / total for a, c in transiciones[ultimo].items()}
 
-# --------------------------------
-# PATRÓN
-# --------------------------------
 
 def calcular_patron_dia(historial):
     freq = Counter(historial)
@@ -126,7 +139,7 @@ def calcular_patron_dia(historial):
     return {a: freq[a] / total if total > 0 else 0 for a in ANIMALES}
 
 # --------------------------------
-# COMBINADOR (HÍBRIDO)
+# COMBINADOR (CON APRENDIZAJE)
 # --------------------------------
 
 def combinar_señales(
@@ -139,6 +152,7 @@ def combinar_señales(
     rf_probs=None
 ):
 
+    pesos = obtener_pesos()
     scores = {}
 
     for a in ANIMALES:
@@ -151,14 +165,15 @@ def combinar_señales(
         s_rf = rf_probs.get(a, 0) if rf_probs else 0
 
         score = (
-            0.25 * s_deuda +
-            0.25 * s_freq +
-            0.15 * s_patron +
-            0.10 * s_anti +
-            0.10 * s_markov +
-            0.15 * s_rf
+            pesos["deuda"] * s_deuda +
+            pesos["frecuencia"] * s_freq +
+            pesos["patron"] * s_patron +
+            pesos["anti"] * s_anti +
+            pesos["markov"] * s_markov +
+            pesos["rf"] * s_rf
         )
 
+        # Penalizar repetición
         if historial_predicciones:
             veces = historial_predicciones.count(a)
             score *= math.exp(-0.15 * veces)
@@ -173,8 +188,8 @@ def combinar_señales(
 
 def generar_prediccion(historial, historial_predicciones=None):
 
-    # 🔥 IA (si está disponible)
     rf_probs = {}
+
     if modelo_rf:
         try:
             modelo_rf.entrenar(historial)
@@ -203,6 +218,12 @@ def generar_prediccion(historial, historial_predicciones=None):
 
     # 🔥 guardar en bitácora
     guardar_en_bitacora(top5)
+
+    # 🔥 aprendizaje automático
+    try:
+        actualizar_pesos(bitacora_global)
+    except:
+        pass
 
     return {
         "top1": top5[0],
