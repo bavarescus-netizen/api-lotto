@@ -261,3 +261,44 @@ def entrenar_modelo(historial):
         return {"status": "modelo entrenado"}
     except Exception as e:
         return {"error": str(e)}
+# --------------------------------
+# BACKTEST (COMPATIBILIDAD + ANÁLISIS)
+# --------------------------------
+
+def backtest(historial, ventana=100):
+
+    if len(historial) < ventana + 10:
+        return {
+            "error": "No hay suficientes datos para backtest"
+        }
+
+    aciertos_top1 = 0
+    aciertos_top3 = 0
+    aciertos_top5 = 0
+
+    total = 0
+
+    for i in range(ventana, len(historial)):
+
+        datos_pasados = historial[:i]
+        resultado_real = historial[i]
+
+        pred = generar_prediccion(datos_pasados)
+
+        total += 1
+
+        if resultado_real == pred["top1"]:
+            aciertos_top1 += 1
+
+        if resultado_real in pred["top3"]:
+            aciertos_top3 += 1
+
+        if resultado_real in pred["top5"]:
+            aciertos_top5 += 1
+
+    return {
+        "total_pruebas": total,
+        "top1_accuracy": aciertos_top1 / total if total else 0,
+        "top3_accuracy": aciertos_top3 / total if total else 0,
+        "top5_accuracy": aciertos_top5 / total if total else 0
+    }
