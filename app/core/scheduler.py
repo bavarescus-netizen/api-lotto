@@ -12,7 +12,7 @@ from datetime import datetime
 import pytz
 import httpx
 from sqlalchemy import text
-from motor_v10 import MAPA_ANIMALES # Importamos el mismo mapa para no fallar
+from app.services.motor_v10 import MAPA_ANIMALES
 
 logger = logging.getLogger(__name__)
 TIMEZONE_VE = pytz.timezone('America/Caracas')
