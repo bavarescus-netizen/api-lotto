@@ -6,7 +6,7 @@ import pytz
 import httpx
 from sqlalchemy import text
 
-# IMPORTACIONES ORIGINALES
+# TUS RUTAS ORIGINALES
 from db import AsyncSessionLocal
 from app.services.motor_v10 import MAPA_ANIMALES
 
@@ -36,9 +36,9 @@ async def capturar_y_procesar(db):
     ahora = datetime.now(TIMEZONE_VE)
     fecha_hoy = ahora.date()
     
-    # SOLUCIÓN AL 403: User-Agent real
+    # SOLUCIÓN AL 403: Cabeceras para simular navegador real
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "es-ES,es;q=0.9",
         "Referer": "https://www.google.com/"
@@ -49,11 +49,13 @@ async def capturar_y_procesar(db):
             r = await client.get(BASE_URL)
             if r.status_code == 200:
                 html = r.text
+                # Regex corregido para ser más flexible con espacios
                 patron = r"(\d{2}):00.*?(\d{1,2})\s*[-–]\s*([a-zA-Záéíóúñ]+)"
                 matches = re.findall(patron, html, re.DOTALL)
                 
                 for hora_str, num, nombre in matches:
                     hora_int = int(hora_str)
+                    # Sincronización con motor_v10
                     nombre_normalizado = NUM_A_ANIMAL.get(str(int(num)), nombre.lower().strip())
                     
                     await db.execute(text("""
@@ -65,12 +67,12 @@ async def capturar_y_procesar(db):
                     await actualizar_auditoria_post_sorteo(db, fecha_hoy, hora_int, nombre_normalizado)
                 await db.commit()
             else:
-                logger.warning(f"⚠️ Status {r.status_code} en {BASE_URL}")
+                logger.warning(f"⚠️ Web bloqueada o caída (Status {r.status_code})")
     except Exception as e:
-        logger.error(f"❌ Error scraping: {e}")
+        logger.error(f"❌ Error en capturar_y_procesar: {e}")
 
 async def ciclo_infinito():
-    logger.info("🚀 [LottoAI PRO] Scraper V6.1 Activo")
+    logger.info("🚀 [LottoAI PRO] Scraper V6.1 en ejecución")
     while True:
         try:
             ahora = datetime.now(TIMEZONE_VE)
