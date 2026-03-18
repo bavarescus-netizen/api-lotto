@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import logging
 
-# RUTAS ORIGINALES - SIN CAMBIOS
+# TUS RUTAS ORIGINALES - SIN CAMBIOS
 from db import get_db, AsyncSessionLocal
 from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
 from app.core.scheduler import ciclo_infinito
@@ -20,6 +20,7 @@ from app.services.motor_v10 import (
 )
 
 logger = logging.getLogger(__name__)
+
 app = FastAPI(title="LottoAI PRO V6.1")
 
 app.add_middleware(
@@ -29,15 +30,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# --- CORRECCIÓN PARA EL ERROR DE DIRECTORIO ---
+# Solo monta 'static' si la carpeta existe para evitar que el server explote
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+else:
+    logger.warning("⚠️ Carpeta 'static' no encontrada. Saltando montaje.")
 
-_tarea = {"nombre": None, "estado": "idle", "progreso": "", "resultado": None, "iniciado": None}
+# Solo monta 'templates' si la carpeta existe
+if os.path.exists("templates"):
+    templates = Jinja2Templates(directory="templates")
+else:
+    # Esto evitará el error, aunque la web no cargará el HTML si no hay plantillas
+    templates = None
+    logger.error("❌ Carpeta 'templates' NO ENCONTRADA.")
+# ----------------------------------------------
+
+_tarea = {
+    "nombre": None,
+    "estado": "idle",
+    "progreso": "",
+    "resultado": None,
+    "iniciado": None,
+}
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # Volvemos a usar 'animalito' como estaba en tu DB original
+        # Mantenemos 'animalito' y toda tu lógica original
         res_h = await db.execute(text("""
             SELECT fecha, hora, animalito, animal 
             FROM historico 
@@ -46,7 +66,6 @@ async def index(request: Request, db: AsyncSession = Depends(get_db)):
         """))
         ultimos = res_h.fetchall()
 
-        # Estadísticas usando 'animalito' para el JOIN
         query_stats = text("""
             SELECT a.hora,
                 COUNT(*) AS total,
@@ -80,18 +99,19 @@ async def index(request: Request, db: AsyncSession = Depends(get_db)):
                     "ef_top3": round((int(r[3])/total)*100, 2)
                 })
 
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "ultimos": ultimos,
-            "stats": stats_final,
-            "tarea": _tarea
-        })
+        if templates:
+            return templates.TemplateResponse("index.html", {
+                "request": request,
+                "ultimos": ultimos,
+                "stats": stats_final,
+                "tarea": _tarea
+            })
+        else:
+            return HTMLResponse("Faltan archivos de plantillas (templates/index.html)")
+
     except Exception as e:
-        logger.error(f"Error en Index: {e}")
-        return templates.TemplateResponse("index.html", {
-            "request": request, "ultimos": [], "stats": [], "tarea": _tarea,
-            "error_msg": "Sincronizando datos..."
-        })
+        logger.error(f"Error: {e}")
+        return HTMLResponse(f"Error en el servidor: {str(e)}")
 
 @app.get("/health")
 async def health():
