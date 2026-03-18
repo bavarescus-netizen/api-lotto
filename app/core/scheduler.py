@@ -2,7 +2,7 @@
 SCHEDULER V6.1 — LOTTOAI PRO
 =============================
 FIXES:
-  1. NUM_A_ANIMAL: Sincronizado al 100% con motor_v10.
+  1. NUM_A_ANIMAL: Sincronizado al 100% con motor_v10. 
   2. REINTENTOS: Optimizado para no perder sorteos en Render.
 """
 
