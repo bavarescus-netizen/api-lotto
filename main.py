@@ -958,42 +958,73 @@ async def backtest_motor(
         animales_train = [r[0] for r in train_rows]
         n_train = len(animales_train)
 
-        # ── Señales iniciales sobre TRAIN ──
-        freq = Counter(animales_train)
-        total_f = max(n_train, 1)
-        markov_c = _dd(lambda: _dd(int))
-        for i in range(1, len(animales_train)):
-            markov_c[animales_train[i-1]][animales_train[i]] += 1
-        ultima_vez = {a: i for i, a in enumerate(animales_train)}
+        # ── TEST: usar predicciones ya guardadas en auditoria_ia ──
+        # Esto refleja el motor V10 REAL con todas sus señales
+        # Walk-forward real: cada predicción fue hecha con datos hasta ese día
+        res_audit = (await db.execute(text("""
+            SELECT
+                a.fecha,
+                LOWER(TRIM(a.prediccion_1)) AS pred1,
+                LOWER(TRIM(a.prediccion_2)) AS pred2,
+                LOWER(TRIM(a.prediccion_3)) AS pred3,
+                LOWER(TRIM(h.animalito))    AS real,
+                a.confianza_pct
+            FROM auditoria_ia a
+            JOIN historico h
+                ON h.fecha = a.fecha
+                AND h.hora = a.hora
+                AND h.loteria = 'Lotto Activo'
+            WHERE a.hora = :hora
+              AND a.fecha >= :corte
+              AND a.fecha <  :fin
+              AND a.prediccion_1 IS NOT NULL
+              AND h.animalito IS NOT NULL
+            ORDER BY a.fecha ASC
+        """), {"hora": hora, "corte": fecha_corte, "fin": fecha_fin})).fetchall()
 
-        acum = list(animales_train)
-        top1_ok = top3_ok = n_test = 0
+        if len(res_audit) < 10:
+            # Fallback: motor simplificado si no hay datos en auditoria_ia
+            acum = list(animales_train)
+            top1_ok = top3_ok = n_test = 0
+            freq = Counter(animales_train)
+            total_f = max(n_train, 1)
+            markov_c = _dd(lambda: _dd(int))
+            for i in range(1, len(animales_train)):
+                markov_c[animales_train[i-1]][animales_train[i]] += 1
+            ultima_vez = {a: i for i, a in enumerate(animales_train)}
 
-        for idx_t, (fecha_t, real) in enumerate(test_rows):
-            prev = acum[-1]
-            # Scores: deuda + frecuencia + markov
-            all_a = set(list(freq.keys()) + [real])
-            scores = {}
-            for a in all_a:
-                gap = (n_train + idx_t) - ultima_vez.get(a, 0)
-                intervalo_esp = total_f / max(freq.get(a, 1), 1)
-                deuda_s = min(gap / max(intervalo_esp, 1), 3.0) / 3.0
-                freq_s  = freq.get(a, 0.5 / total_f) / total_f
-                mk_total = sum(markov_c[prev].values())
-                mk_s    = markov_c[prev].get(a, 0) / max(mk_total, 1)
-                scores[a] = deuda_s*0.28 + freq_s*0.25 + mk_s*0.25 + (1/38)*0.22
-
-            top3 = sorted(scores, key=scores.get, reverse=True)[:3]
-            if top3[0] == real: top1_ok += 1
-            if real in top3:    top3_ok += 1
-            n_test += 1
-
-            # Walk-forward: actualizar con el resultado real
-            acum.append(real)
-            freq[real] = freq.get(real, 0) + 1
-            total_f += 1
-            markov_c[prev][real] += 1
-            ultima_vez[real] = n_train + idx_t
+            for idx_t, (fecha_t, real) in enumerate(test_rows):
+                prev = acum[-1]
+                all_a = set(list(freq.keys()) + [real])
+                scores = {}
+                for a in all_a:
+                    gap = (n_train + idx_t) - ultima_vez.get(a, 0)
+                    intervalo_esp = total_f / max(freq.get(a, 1), 1)
+                    deuda_s = min(gap / max(intervalo_esp, 1), 3.0) / 3.0
+                    freq_s  = freq.get(a, 0.5 / total_f) / total_f
+                    mk_total = sum(markov_c[prev].values())
+                    mk_s    = markov_c[prev].get(a, 0) / max(mk_total, 1)
+                    scores[a] = deuda_s*0.28 + freq_s*0.25 + mk_s*0.25 + (1/38)*0.22
+                top3 = sorted(scores, key=scores.get, reverse=True)[:3]
+                if top3[0] == real: top1_ok += 1
+                if real in top3:    top3_ok += 1
+                n_test += 1
+                acum.append(real)
+                freq[real] = freq.get(real, 0) + 1
+                total_f += 1
+                markov_c[prev][real] += 1
+                ultima_vez[real] = n_train + idx_t
+        else:
+            # Motor V10 REAL — predicciones reales guardadas
+            top1_ok = top3_ok = n_test = 0
+            for row in res_audit:
+                fecha_t, pred1, pred2, pred3, real, conf = row
+                if not real or not pred1:
+                    continue
+                top3 = [x for x in [pred1, pred2, pred3] if x]
+                if top3 and top3[0] == real: top1_ok += 1
+                if real in top3:             top3_ok += 1
+                n_test += 1
 
         ef_t3 = round(top3_ok / n_test * 100, 2) if n_test else 0
         ef_t1 = round(top1_ok / n_test * 100, 2) if n_test else 0
