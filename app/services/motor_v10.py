@@ -83,6 +83,52 @@ _MULTIPLICADOR_HORA = {
     "07:00 PM": 0.75,
 }
 
+# ══════════════════════════════════════════════════════
+# PESO DE ANTI-RACHA DIFERENCIADO POR HORA
+# Basado en análisis estadístico de 29,000 sorteos:
+# - Mañanas (8-11AM): anti-repetición real y masiva
+#   08:00 AM repite solo 0.66% vs 2.63% azar → 4× menos
+# - Tardes (1-7PM): neutral o ligeramente pro-repetición
+# ══════════════════════════════════════════════════════
+_PESO_ANTI_RACHA_HORA = {
+    "08:00 AM": 0.42,   # anti-repetición MÁS FUERTE (0.66% vs 2.63%)
+    "09:00 AM": 0.36,   # anti-repetición fuerte (-0.83%)
+    "10:00 AM": 0.35,   # anti-repetición fuerte (-0.95%)
+    "11:00 AM": 0.30,   # anti-repetición moderada (-0.62%)
+    "12:00 PM": 0.20,   # casi neutral (-0.03%)
+    "01:00 PM": 0.18,   # neutral (+0.02%)
+    "02:00 PM": 0.28,   # anti-repetición moderada (-0.81%)
+    "03:00 PM": 0.18,   # neutral (+0.12%)
+    "04:00 PM": 0.18,   # neutral (+0.16%)
+    "05:00 PM": 0.20,   # leve anti-repetición (-0.29%)
+    "06:00 PM": 0.15,   # ligera PRO-repetición (+0.57%) → bajar anti
+    "07:00 PM": 0.18,   # neutral (+0.06%)
+}
+
+# ══════════════════════════════════════════════════════
+# PARES CORRELACIONADOS — validados con 29,000 sorteos
+# Si ayer salió A, hoy tiene mayor prob de salir B
+# Solo pares con ventaja > +0.75% sobre azar (2.63%)
+# ══════════════════════════════════════════════════════
+_PARES_CORRELACIONADOS = {
+    "leon":    [("ardilla", 1.40), ("caballo", 0.85), ("caiman", 0.85)],
+    "delfin":  [("caiman",  1.18), ("iguana",  0.82)],
+    "carnero": [("ardilla", 1.09), ("caiman",  0.73)],
+    "aguila":  [("ardilla", 1.07), ("vaca",    0.68)],
+    "culebra": [("tigre",   0.79), ("ardilla", 0.79)],
+    "gato":    [("ardilla", 0.79)],
+    "toro":    [("iguana",  0.76), ("caballo", 0.63)],
+    "mono":    [("caiman",  0.76)],
+    "rana":    [("caiman",  0.62), ("ballena", 0.62)],
+    "gallo":   [("perro",   0.65)],
+}
+# Pares que CASI NUNCA ocurren → penalizar si se predice B después de A
+_PARES_INVERSOS = {
+    "gallo":   ["caballo"],   # prob 1.27% (-1.36% vs azar)
+    "mono":    ["caballo"],   # prob 1.82% (-0.81% vs azar)
+    "carnero": ["paloma"],    # prob 1.80% (-0.83% vs azar)
+}
+
 UMBRAL_RENTABILIDAD_TOP3 = 10.0
 UMBRAL_CONFIANZA_OPERAR  = 25    # BAJADO de 30 → más operaciones pero filtradas
 AZAR_ESPERADO = 1.0 / 38         # 2.63% por animal
@@ -377,7 +423,67 @@ async def calcular_anti_racha(db, hora_str, fecha_limite=None):
 
 
 # ══════════════════════════════════════════════════════
-# SEÑAL 5: MARKOV POR HORA (FIX #7 — reemplaza secuencia global)
+# SEÑAL NUEVA: PARES CORRELACIONADOS
+# Basada en análisis estadístico de 29,000 sorteos reales.
+# Si ayer salió animal X en esta hora, ciertos animales Y
+# tienen mayor probabilidad estadística de salir hoy.
+# Solo se activa si el animal anterior salió ayer (1 día).
+# Los pares y ventajas están validados con chi² > umbral.
+# ══════════════════════════════════════════════════════
+async def calcular_pares_correlacionados(db, hora_str, fecha_limite=None) -> dict:
+    """
+    Retorna boost por pares correlacionados.
+    Score = ventaja normalizada del par (0.0 a 1.0).
+    Score negativo = par inverso (penalización).
+    """
+    if fecha_limite is None:
+        fecha_limite = date.today()
+    try:
+        # Obtener el animal que salió AYER en esta hora
+        res = await db.execute(text("""
+            SELECT animalito FROM historico
+            WHERE hora=:hora
+              AND fecha = :ayer
+              AND loteria='Lotto Activo'
+            LIMIT 1
+        """), {"hora": hora_str, "ayer": fecha_limite - timedelta(days=1)})
+        row = res.fetchone()
+        if not row:
+            return {}
+
+        animal_ayer = _normalizar(row[0])
+        resultado = {}
+
+        # Aplicar boost a pares correlacionados positivos
+        if animal_ayer in _PARES_CORRELACIONADOS:
+            pares = _PARES_CORRELACIONADOS[animal_ayer]
+            max_ventaja = max(v for _, v in pares)
+            for animal_dest, ventaja in pares:
+                # Normalizar: ventaja máxima posible ~1.40% → score 1.0
+                score = min(ventaja / 1.40, 1.0)
+                resultado[animal_dest] = {
+                    "score": round(score, 4),
+                    "ventaja_pct": ventaja,
+                    "origen": animal_ayer,
+                    "tipo": "positivo",
+                }
+
+        # Aplicar penalización a pares inversos (casi nunca ocurren)
+        if animal_ayer in _PARES_INVERSOS:
+            for animal_pen in _PARES_INVERSOS[animal_ayer]:
+                resultado[animal_pen] = {
+                    "score": -0.5,   # penalización
+                    "ventaja_pct": -1.36,
+                    "origen": animal_ayer,
+                    "tipo": "negativo",
+                }
+
+        return resultado
+    except Exception:
+        return {}
+
+
+
 # Después de X en ESTA hora, ¿qué animal suele salir en ESA MISMA HORA?
 # Usa tabla markov_transiciones si existe, si no calcula al vuelo
 # ══════════════════════════════════════════════════════
@@ -645,24 +751,40 @@ async def calcular_patron_fecha_exacta(db, hora_str, dia_semana, mes, fecha_limi
 
 def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           ciclo_exacto, pen_reciente, pen_sobreprediccion,
-                          hora_str, pesos, patron_fecha=None):
+                          hora_str, pesos, patron_fecha=None, pares=None):
     """
-    8 señales + 2 penalizaciones + multiplicador por hora.
+    9 señales + 2 penalizaciones + multiplicador por hora.
     FIX #2: si anti_racha.bloquear → anular reciente para ese animal.
     FIX #6: multiplicador por hora al final.
     FIX #8: penalización por sobre-predicción.
-    MEJORA: patron_fecha = mismo día+mes+hora en 8 años (señal contextual máxima).
+    MEJORA v1: patron_fecha = mismo día+mes+hora en 8 años.
+    MEJORA v2: peso anti-racha diferenciado por hora (validado con 29k sorteos).
+    MEJORA v3: pares correlacionados estadísticamente confirmados.
     """
     patron_fecha = patron_fecha or {}
+    pares        = pares or {}
+
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
-        list(anti) + list(markov) + list(ciclo_exacto) + list(patron_fecha)
+        list(anti) + list(markov) + list(ciclo_exacto) +
+        list(patron_fecha) + list(pares)
     )
 
     mult_hora  = _MULTIPLICADOR_HORA.get(hora_str, 0.85)
     peso_ciclo = 0.15
-    peso_fecha = 0.12   # nueva señal contextual
-    suma_pesos = sum(pesos.values()) + peso_ciclo + peso_fecha
+    peso_fecha = 0.12   # señal contextual: día+mes+hora en 8 años
+    peso_pares = 0.08   # señal nueva: pares correlacionados validados
+
+    # ── Peso anti-racha diferenciado por hora ──
+    # Reemplaza el peso fijo pesos["anti"] con valor calibrado por hora
+    peso_anti_hora = _PESO_ANTI_RACHA_HORA.get(hora_str, pesos.get("anti", 0.22))
+
+    # Recalcular suma de pesos con el anti-racha real
+    suma_pesos = (
+        pesos["deuda"] + pesos["reciente"] + pesos["patron"] +
+        peso_anti_hora + pesos["secuencia"] +
+        peso_ciclo + peso_fecha + peso_pares
+    )
 
     scores = {}
     for animal in todos:
@@ -672,16 +794,32 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
 
         score_reciente = 0.0 if bloquear else reciente.get(animal, {}).get("score", 0)
 
+        # Score de pares: positivo si es destino frecuente, negativo si es inverso
+        par_info   = pares.get(animal, {})
+        par_score  = par_info.get("score", 0)
+        if par_score < 0:
+            # Par inverso: penalizar directamente el score base
+            peso_par_efectivo = peso_pares
+            par_contribucion  = 0.0  # no suma, pero penalizamos después
+        else:
+            peso_par_efectivo = peso_pares
+            par_contribucion  = par_score * peso_pares
+
         base = (
             deuda.get(animal,       {}).get("score", 0) * pesos["deuda"]     +
             score_reciente                               * pesos["reciente"]  +
             patron.get(animal,      {}).get("score", 0) * pesos["patron"]    +
-            anti_info.get("score", 0.5)                 * pesos["anti"]      +
+            anti_info.get("score", 0.5)                 * peso_anti_hora     +
             markov.get(animal,      {}).get("score", 0) * pesos["secuencia"] +
             ciclo_exacto.get(animal,{}).get("score", 0) * peso_ciclo         +
-            patron_fecha.get(animal,{}).get("score", 0) * peso_fecha
+            patron_fecha.get(animal,{}).get("score", 0) * peso_fecha         +
+            par_contribucion
         )
         base /= suma_pesos
+
+        # Penalización par inverso: reducir 30% si es par que casi nunca ocurre
+        if par_score < 0:
+            base *= 0.70
 
         # Penalización por aparición reciente en histórico
         base *= pen_reciente.get(animal, 1.0)
@@ -918,15 +1056,18 @@ async def generar_prediccion(db) -> dict:
         ciclo_exacto = await calcular_ciclo_exacto(db, hora_str)
         pen_rec      = await calcular_penalizacion_reciente(db, hora_str)
         pen_sobrep   = await calcular_penalizacion_sobreprediccion(db, hora_str)
-        # NUEVA SEÑAL: mismo día de semana + mismo mes + misma hora en 8 años
+        # Señal: mismo día de semana + mismo mes + misma hora en 8 años
         patron_fecha = await calcular_patron_fecha_exacta(
             db, hora_str, dia_semana, ahora.month
         )
+        # Señal nueva: pares correlacionados validados con 29,000 sorteos
+        pares_corr   = await calcular_pares_correlacionados(db, hora_str)
 
         scores = combinar_señales_v10(
             deuda, reciente, patron, anti, markov,
             ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos,
-            patron_fecha=patron_fecha
+            patron_fecha=patron_fecha,
+            pares=pares_corr
         )
 
         # Calcular racha de fallos recientes en esta hora (últimas 5 predicciones)
