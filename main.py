@@ -1205,6 +1205,75 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": await obtener_estadisticas(db), "bitacora_hoy": await obtener_bitacora(db)}
 
 
+@app.get("/diagnostico-animales")
+async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
+    """
+    Compara animales en la BD (historico) vs catálogo del motor.
+    Detecta inconsistencias que causan predicciones perdidas.
+    """
+    # Catálogo oficial del motor
+    MOTOR = {
+        "1":"carnero",  "2":"toro",     "3":"ciempies", "4":"alacran",
+        "5":"leon",     "6":"rana",     "7":"perico",   "8":"raton",
+        "9":"aguila",   "10":"tigre",   "11":"gato",    "12":"caballo",
+        "13":"mono",    "14":"paloma",  "15":"zorro",   "16":"oso",
+        "17":"pavo",    "18":"burro",   "19":"chivo",   "20":"cochino",
+        "21":"gallo",   "22":"camello", "23":"cebra",   "24":"iguana",
+        "25":"gallina", "26":"vaca",    "27":"perro",   "28":"zamuro",
+        "29":"elefante","30":"caiman",  "31":"lapa",    "32":"ardilla",
+        "33":"pescado", "34":"venado",  "35":"jirafa",  "36":"culebra",
+        "0":"delfin",   "00":"ballena",
+    }
+    animales_motor = set(MOTOR.values())
+
+    try:
+        # Animales únicos en historico
+        res = await db.execute(text("""
+            SELECT LOWER(TRIM(animalito)) as animal, COUNT(*) as veces
+            FROM historico
+            WHERE loteria='Lotto Activo'
+            GROUP BY LOWER(TRIM(animalito))
+            ORDER BY veces DESC
+        """))
+        rows = res.fetchall()
+        animales_bd = {r[0]: int(r[1]) for r in rows}
+
+        # Comparar
+        en_bd_no_motor = {a: v for a, v in animales_bd.items() if a not in animales_motor}
+        en_motor_no_bd = {a for a in animales_motor if a not in animales_bd}
+
+        # Animales en auditoria_ia
+        res2 = await db.execute(text("""
+            SELECT LOWER(TRIM(resultado_real)) as animal, COUNT(*) as veces
+            FROM auditoria_ia
+            WHERE resultado_real IS NOT NULL
+              AND resultado_real != 'PENDIENTE'
+            GROUP BY LOWER(TRIM(resultado_real))
+            ORDER BY veces DESC
+        """))
+        rows2 = res2.fetchall()
+        animales_auditoria = {r[0]: int(r[1]) for r in rows2}
+        en_auditoria_no_motor = {a: v for a, v in animales_auditoria.items()
+                                  if a not in animales_motor}
+
+        return {
+            "motor_total": len(animales_motor),
+            "bd_total": len(animales_bd),
+            "animales_motor": sorted(animales_motor),
+            "animales_bd": animales_bd,
+            "BUG_en_bd_no_en_motor": en_bd_no_motor,
+            "en_motor_no_en_bd": sorted(en_motor_no_bd),
+            "BUG_en_auditoria_no_en_motor": en_auditoria_no_motor,
+            "diagnostico": (
+                "✅ Catálogos coinciden" if not en_bd_no_motor and not en_motor_no_bd
+                else f"❌ {len(en_bd_no_motor)} animales en BD no reconocidos por motor | "
+                     f"{len(en_motor_no_bd)} en motor no encontrados en BD"
+            )
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/auto-pesos")
 async def auto_pesos(db: AsyncSession = Depends(get_db)):
     """
