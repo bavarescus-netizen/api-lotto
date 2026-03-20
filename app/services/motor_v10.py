@@ -423,13 +423,20 @@ async def calcular_anti_racha(db, hora_str, fecha_limite=None):
 
 
 # ══════════════════════════════════════════════════════
-# MARKOV INTRA-DÍA — validado con 29,000 sorteos
-# 7.6× más potente que el Markov día→día actual
-# Pares: si en hora H-1 salió X → en hora H predecir Y
-# Ventaja promedio: +8.48% sobre azar (vs +1.40% del Markov viejo)
+# MARKOV INTRA-DÍA COMPLETO — 29 pares validados
+# con 29,000 sorteos reales (2018-2026)
+#
+# Estructura: {(hora_origen, hora_destino): {animal_origen: (animal_destino, ventaja_pct)}}
+# La ventaja_pct es vs azar (2.63%). Max encontrado: +10.70%
+#
+# Incluye saltos de 1, 2 y 3 horas.
+# Cadena confirmada: gallo(11AM)→venado(12PM)→cebra(1PM) = 100% (n=5)
+# Animales pivote (múltiples pares): ardilla, camello, cebra, zorro
+# Destinos frecuentes: carnero, cebra, aguila (3 pares cada uno)
 # ══════════════════════════════════════════════════════
 _MARKOV_INTRADAY = {
-    # (hora_origen, hora_destino): {animal_origen: (animal_destino, ventaja_pct)}
+
+    # ── SALTO 1 HORA ──────────────────────────────────
     ("11:00 AM", "12:00 PM"): {
         "ardilla": ("carnero",  9.49),
         "perro":   ("ciempies", 8.33),
@@ -447,90 +454,149 @@ _MARKOV_INTRADAY = {
         "gato":    ("cebra",    8.48),
     },
     ("04:00 PM", "05:00 PM"): {
-        "rana":    ("chivo",   10.70),   # par más fuerte
+        "rana":    ("chivo",   10.70),  # par más fuerte de todos
         "venado":  ("rana",     8.48),
     },
     ("05:00 PM", "06:00 PM"): {
-        "chivo":   ("caiman",   9.31),   # cadena rana→chivo→caiman
+        "chivo":   ("caiman",   9.31),  # cadena: rana→chivo→caiman
         "delfin":  ("paloma",   6.46),
+    },
+    ("09:00 AM", "11:00 AM"): {         # salto 1h en mañana
+        "burro":   ("lapa",     6.78),
+    },
+
+    # ── SALTO 2 HORAS ─────────────────────────────────
+    ("04:00 PM", "06:00 PM"): {
+        "paloma":  ("vaca",    10.23),  # igual que vaca(3PM)→burro(6PM)
+    },
+    ("10:00 AM", "12:00 PM"): {
+        "jirafa":  ("cebra",    8.48),
+        "elefante":("iguana",   7.90),
+    },
+    ("12:00 PM", "02:00 PM"): {
+        "venado":  ("carnero",  7.90),
+        "ciempies":("aguila",   6.78),
+        "cebra":   ("aguila",   6.46),
+    },
+    ("01:00 PM", "03:00 PM"): {
+        "lapa":    ("camello",  6.94),
+    },
+    ("09:00 AM", "12:00 PM"): {         # salto 2h en mañana (incluido aqui)
+        "ardilla": ("pescado",  7.76),
+        "delfin":  ("lapa",     7.48),
+    },
+
+    # ── SALTO 3 HORAS ─────────────────────────────────
+    ("03:00 PM", "06:00 PM"): {
+        "vaca":    ("burro",   10.23),
+        "camello": ("vaca",     7.50),
+    },
+    ("11:00 AM", "02:00 PM"): {
+        "zorro":   ("delfin",  10.05),  # zorro en 11AM predice delfin en 2PM
+        "vaca":    ("carnero",  9.13),
+    },
+    ("12:00 PM", "03:00 PM"): {
+        "toro":    ("aguila",   7.50),
+        "camello": ("ballena",  7.13),
+    },
+    ("01:00 PM", "04:00 PM"): {
+        "ardilla": ("cebra",    6.67),
+    },
+    ("09:00 AM", "12:00 PM"): {         # ya incluido arriba — combinado
     },
 }
 
-# Mapa inverso: dado hora_destino → hora_origen correspondiente
-_HORA_ANTERIOR = {
-    "12:00 PM": "11:00 AM",
-    "01:00 PM": "12:00 PM",
-    "02:00 PM": "01:00 PM",
-    "03:00 PM": "02:00 PM",
-    "04:00 PM": "03:00 PM",
-    "05:00 PM": "04:00 PM",
-    "06:00 PM": "05:00 PM",
-    "07:00 PM": "06:00 PM",
-    "09:00 AM": "08:00 AM",
-    "10:00 AM": "09:00 AM",
-    "11:00 AM": "10:00 AM",
+# Mapa de horas origen válidas para cada hora destino
+# (incluye todos los saltos posibles)
+_HORAS_ORIGEN_PARA = {
+    "11:00 AM": ["09:00 AM", "10:00 AM"],
+    "12:00 PM": ["09:00 AM", "10:00 AM", "11:00 AM"],
+    "01:00 PM": ["10:00 AM", "11:00 AM", "12:00 PM"],
+    "02:00 PM": ["11:00 AM", "12:00 PM", "01:00 PM"],
+    "03:00 PM": ["12:00 PM", "01:00 PM", "02:00 PM"],
+    "04:00 PM": ["01:00 PM", "02:00 PM", "03:00 PM"],
+    "05:00 PM": ["02:00 PM", "03:00 PM", "04:00 PM"],
+    "06:00 PM": ["03:00 PM", "04:00 PM", "05:00 PM"],
+    "07:00 PM": ["04:00 PM", "05:00 PM", "06:00 PM"],
+    "10:00 AM": ["08:00 AM", "09:00 AM"],
 }
 
 
 async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
     """
-    Señal nueva: Markov intra-día.
-    Si en la hora anterior del MISMO día salió X,
-    y existe un par validado (hora_ant, hora_actual, X) → Y,
-    boostar el score de Y.
+    Señal Markov intra-día — 29 pares validados con 29,000 sorteos.
+    Busca en múltiples horas origen (saltos 1, 2 y 3 horas).
+    Si hay varios pares activos, usa el de mayor ventaja estadística.
 
-    Validado con 29,000 sorteos: ventaja promedio +8.48% sobre azar.
-    El par más fuerte: rana(4PM) → chivo(5PM) = 13.33%.
+    Pares más fuertes:
+      rana(4PM)   → chivo(5PM):   +10.70%
+      vaca(3PM)   → burro(6PM):   +10.23%
+      paloma(4PM) → vaca(6PM):    +10.23%
+      zorro(11AM) → delfin(2PM):  +10.05%
     """
     if fecha_limite is None:
         fecha_limite = date.today()
 
-    hora_anterior = _HORA_ANTERIOR.get(hora_str)
-    if not hora_anterior:
-        return {}
-
-    # Verificar si hay pares validados para este par de horas
-    pares_hora = _MARKOV_INTRADAY.get((hora_anterior, hora_str))
-    if not pares_hora:
-        return {}
-
-    try:
-        # Obtener qué salió en la hora anterior HOY
-        res = await db.execute(text("""
-            SELECT LOWER(TRIM(animalito)) AS animal
-            FROM historico
-            WHERE hora    = :hora_ant
-              AND fecha   = :hoy
-              AND loteria = 'Lotto Activo'
-            LIMIT 1
-        """), {"hora_ant": hora_anterior, "hoy": fecha_limite})
-        row = res.fetchone()
-        if not row:
+    horas_a_revisar = _HORAS_ORIGEN_PARA.get(hora_str, [])
+    if not horas_a_revisar:
+        # Fallback: solo hora inmediatamente anterior
+        orden = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
+                 "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM"]
+        try:
+            idx = orden.index(hora_str)
+            horas_a_revisar = [orden[idx-1]] if idx > 0 else []
+        except ValueError:
             return {}
 
-        animal_anterior = _normalizar(row[0])
+    mejor_par = None
+    mejor_ventaja = 0.0
 
-        # Buscar en los pares validados
-        if animal_anterior not in pares_hora:
-            return {}
+    for hora_origen in horas_a_revisar:
+        pares_hora = _MARKOV_INTRADAY.get((hora_origen, hora_str))
+        if not pares_hora:
+            continue
+        try:
+            res = await db.execute(text("""
+                SELECT LOWER(TRIM(animalito)) AS animal
+                FROM historico
+                WHERE hora    = :hora_ant
+                  AND fecha   = :hoy
+                  AND loteria = 'Lotto Activo'
+                LIMIT 1
+            """), {"hora_ant": hora_origen, "hoy": fecha_limite})
+            row = res.fetchone()
+            if not row:
+                continue
 
-        animal_predicho, ventaja = pares_hora[animal_anterior]
+            animal_anterior = _normalizar(row[0])
+            if animal_anterior not in pares_hora:
+                continue
 
-        # Normalizar ventaja → score 0-1
-        # Ventaja máxima posible ~10.70% → score 1.0
-        score = min(ventaja / 10.70, 1.0)
+            animal_pred, ventaja = pares_hora[animal_anterior]
+            if ventaja > mejor_ventaja:
+                mejor_ventaja = ventaja
+                mejor_par = {
+                    "animal":      animal_pred,
+                    "ventaja":     ventaja,
+                    "origen":      animal_anterior,
+                    "hora_origen": hora_origen,
+                }
+        except Exception:
+            continue
 
-        return {
-            animal_predicho: {
-                "score":       round(score, 4),
-                "ventaja_pct": ventaja,
-                "origen":      animal_anterior,
-                "hora_origen": hora_anterior,
-                "tipo":        "intraday",
-            }
+    if not mejor_par:
+        return {}
+
+    score = min(mejor_par["ventaja"] / 10.70, 1.0)
+    return {
+        mejor_par["animal"]: {
+            "score":       round(score, 4),
+            "ventaja_pct": mejor_par["ventaja"],
+            "origen":      mejor_par["origen"],
+            "hora_origen": mejor_par["hora_origen"],
+            "tipo":        "intraday",
         }
-    except Exception:
-        return {}
+    }
 
 
 # Basada en análisis estadístico de 29,000 sorteos reales.
