@@ -14,6 +14,7 @@ from app.services.motor_v10 import (
     entrenar_modelo, backtest, calibrar_predicciones,
     llenar_auditoria_retroactiva, aprender_desde_historico,
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
+    obtener_contexto_diario,
 )
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
@@ -1275,7 +1276,6 @@ async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
     resultados de hoy, pares intra-día activos, cadenas, animales no vistos.
     """
     try:
-        from motor_v10 import obtener_contexto_diario
         import pytz, datetime as _dt
         tz    = pytz.timezone('America/Caracas')
         ahora = _dt.datetime.now(tz)
