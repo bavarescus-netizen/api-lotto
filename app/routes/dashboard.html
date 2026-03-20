@@ -1441,7 +1441,7 @@ async function cargarScoreSeñales(dias=90){
         </div>
       </div>
 
-      <div style="font-size:11px;letter-spacing:1px;color:var(--muted,#4a4f6e);margin-bottom:8px">EFECTIVIDAD POR SEÑAL DOMINANTE</div>
+      <div style="font-size:11px;letter-spacing:1px;color:var(--muted,#4a4f6e);margin-bottom:8px">EFECTIVIDAD POR SEÑAL — TODAS LAS SEÑALES DEL MOTOR V10</div>
       <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:12px">
         <thead>
           <tr style="border-bottom:1px solid var(--border,#1a1d2e);color:var(--muted,#4a4f6e);font-size:10px;letter-spacing:1px">
@@ -1450,35 +1450,32 @@ async function cargarScoreSeñales(dias=90){
             <th style="text-align:right;padding:6px 8px">ACIERTOS</th>
             <th style="text-align:right;padding:6px 8px">EF.TOP3</th>
             <th style="text-align:right;padding:6px 8px">VS AZAR</th>
+            <th style="text-align:right;padding:6px 8px">CONTRIB%</th>
             <th style="text-align:right;padding:6px 8px">ACCIÓN</th>
           </tr>
         </thead>
         <tbody>`;
-    for(const s of (d.por_señal||[])){
+    for(const s of (d.señales||d.por_señal||[])){
       const c=s.ef_top3>=10?'var(--g)':s.ef_top3>=7.89?'var(--y)':'var(--r)';
       const ratio=s.vs_azar||0;
-      const nombres={
-        'deuda':'📉 Deuda (días ausente)',
-        'reciente':'🔥 Frecuencia Reciente',
-        'patron_dia':'📅 Patrón Día Semana',
-        'anti_racha':'🛑 Anti-racha',
-        'markov':'🔗 Markov',
-        'ciclo_exacto':'⏱ Ciclo Exacto',
-        'patron_fecha':'🗓 Patrón Fecha Exacta',
-      };
-      html+=`<tr style="border-bottom:1px solid rgba(255,255,255,.04)">
-        <td style="padding:8px">${nombres[s.señal]||s.señal}</td>
-        <td style="text-align:right;padding:8px">${s.total}</td>
-        <td style="text-align:right;padding:8px">${s.aciertos}</td>
-        <td style="text-align:right;padding:8px;color:${c};font-weight:700">${s.ef_top3}%</td>
+      const contrib=s.contribucion_pct||0;
+      // Nombre ya viene del backend como string completo
+      const nombre = s.señal||'—';
+      const sinDatos = s.total < 5;
+      html+=`<tr style="border-bottom:1px solid rgba(255,255,255,.04);${sinDatos?'opacity:0.5':''}">
+        <td style="padding:8px">${nombre}</td>
+        <td style="text-align:right;padding:8px;color:var(--muted)">${s.total||0}</td>
+        <td style="text-align:right;padding:8px">${s.aciertos||0}</td>
+        <td style="text-align:right;padding:8px;color:${c};font-weight:700">${s.ef_top3||0}%</td>
         <td style="text-align:right;padding:8px;color:${ratio>=1.2?'var(--g)':ratio>=0.9?'var(--y)':'var(--r)'}">${ratio}×</td>
+        <td style="text-align:right;padding:8px;color:var(--b)">${contrib>0?contrib+'%':'—'}</td>
         <td style="text-align:right;padding:8px;font-size:10px">${s.recomendacion}</td>
       </tr>`;
     }
     html+=`</tbody></table>
       <div style="margin-top:14px;padding:10px;background:rgba(0,232,122,.05);border:1px solid rgba(0,232,122,.15);border-radius:4px;font-family:monospace;font-size:10px;color:var(--muted,#4a4f6e)">
-        ℹ️ "Señal dominante" = la que más aportó al score final de esa predicción. 
-        VS AZAR > 1.0 = esa señal agrega valor. EF>10% = candidata a mayor peso en Sprint 2.
+        ℹ️ EF.TOP3 = efectividad cuando esa señal fue dominante. CONTRIB% = % del score final que aporta en promedio.
+        VS AZAR > 1.0 = señal con valor real. 📊 SIN DATOS = señal nueva, acumular más predicciones.
       </div>`;
     out.innerHTML=html;
   }catch(e){
