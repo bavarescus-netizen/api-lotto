@@ -1236,6 +1236,28 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     return {"stats": await obtener_estadisticas(db), "bitacora_hoy": await obtener_bitacora(db)}
 
 
+@app.get("/contexto-dia")
+async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
+    """
+    Retorna la memoria completa del día actual:
+    - Todos los resultados de hoy hora por hora
+    - Pares intra-día activos (pendientes de cumplirse)
+    - Pares ya cumplidos y fallados
+    - Cadenas de 3 eslabones activas
+    - Animales que no han salido hoy
+    """
+    from motor_v10 import obtener_contexto_diario, HORAS_SORTEO_STR
+    import pytz, datetime as _dt
+    tz   = pytz.timezone('America/Caracas')
+    ahora = _dt.datetime.now(tz)
+    _lbls = {8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
+             12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
+             16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
+    hora_actual = _lbls.get(ahora.hour, '08:00 AM')
+    ctx = await obtener_contexto_diario(db, hora_actual)
+    return ctx
+
+
 @app.get("/diagnostico-animales")
 async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
     """
