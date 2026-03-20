@@ -1227,10 +1227,35 @@ document.addEventListener('DOMContentLoaded',async()=>{
   await cargarAudit();
   cargarHistorial();
   setInterval(async()=>{await cargarEstado();await cargarAudit();},5*60*1000);
+
+  // ── AUTO-REFRESH cada 5 min: predicción + contexto del día ──
+  setInterval(async()=>{
+    // Solo refrescar si el tab activo es prediccion o dashboard
+    const tabActivo = document.querySelector('.page[style*="block"]');
+    if(tabActivo){
+      const id = tabActivo.id;
+      if(id==='page-prediccion'){
+        await cargarPredHora();
+        await cargarContextoDia();
+      }
+      if(id==='page-dashboard') await cargarEstado();
+      if(id==='page-horas') await cargarHoras();
+    }
+  }, 5*60*1000);
+
+  // ── AUTO-REFRESH contexto diario cada 2 min si estamos en prediccion ──
+  setInterval(async()=>{
+    const tabActivo = document.querySelector('.page[style*="block"]');
+    if(tabActivo && tabActivo.id==='page-prediccion'){
+      await cargarContextoDia();
+    }
+  }, 2*60*1000);
+
   // Keep-alive: ping a /health cada 4 min para evitar sleep de Render
   setInterval(async()=>{
     try{ await fetch('/health'); }catch(e){}
   }, 4*60*1000);
+
   // Setear selector Markov a hora venezolana actual
   (function(){
     const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
@@ -1244,6 +1269,21 @@ document.addEventListener('DOMContentLoaded',async()=>{
     const sel=document.getElementById('selMH');
     if(sel){for(const o of sel.options){if(o.textContent.trim()===label){o.selected=true;break;}}}
   })();
+
+  // ── Actualizar selector de hora automáticamente cada minuto ──
+  setInterval(()=>{
+    const selH = document.getElementById('selHora');
+    if(selH && selH.value === 'auto'){
+      // Forzar recarga si la hora cambió
+      const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
+      const m=now.getMinutes();
+      // Al cambiar de hora (minuto 1-3) → recargar predicción automáticamente
+      if(m >= 1 && m <= 3){
+        cargarPredHora();
+        cargarContextoDia();
+      }
+    }
+  }, 60*1000);
 });
 
 // ══════════════════════════════════════════════
