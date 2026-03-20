@@ -1288,6 +1288,164 @@ async def obtener_rentabilidad_hora(db, hora_str) -> dict:
 # ══════════════════════════════════════════════════════
 # PREDICCIÓN V10 — NÚCLEO PRINCIPAL
 # ══════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════
+# CONTEXTO DIARIO — Memoria del día actual
+# El motor necesita saber TODO lo que pasó hoy
+# para retroalimentarse con cada sorteo nuevo.
+#
+# Estructura retornada:
+# {
+#   "resultados_hoy": {"08:00 AM": "leon", "09:00 AM": "ardilla", ...},
+#   "pares_activos":  [{"hora_origen": "11:00 AM", "hora_destino": "12:00 PM",
+#                       "animal_origen": "ardilla", "animal_destino": "carnero",
+#                       "ventaja": 9.49}, ...],
+#   "cadenas_activas": [...],
+#   "animales_vistos": ["leon", "ardilla", ...],
+#   "animales_no_vistos": ["toro", "gato", ...],
+#   "hora_actual": "12:00 PM",
+#   "total_sorteos_hoy": 3,
+# }
+# ══════════════════════════════════════════════════════
+async def obtener_contexto_diario(db, hora_actual_str, fecha=None) -> dict:
+    """
+    Lee todos los resultados del día actual hasta la hora actual.
+    Calcula qué pares intra-día están activos y cuáles se cumplieron.
+    """
+    if fecha is None:
+        from datetime import date as _date
+        fecha = _date.today()
+
+    # Asegurar que fecha es string para Neon
+    fecha_str = str(fecha)
+
+    contexto = {
+        "resultados_hoy":     {},
+        "pares_activos":      [],
+        "pares_cumplidos":    [],
+        "pares_fallados":     [],
+        "animales_vistos":    [],
+        "animales_no_vistos": [],
+        "hora_actual":        hora_actual_str,
+        "total_sorteos_hoy":  0,
+        "patron_dia":         [],
+        "cadenas_activas":    [],
+        "error":              None,
+    }
+
+    try:
+        orden_horas = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM",
+                       "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
+                       "04:00 PM","05:00 PM","06:00 PM","07:00 PM"]
+
+        # 1. Resultados del día actual
+        res = await db.execute(text("""
+            SELECT TRIM(hora) AS hora, LOWER(TRIM(animalito)) AS animal
+            FROM historico
+            WHERE CAST(fecha AS TEXT) = :hoy
+              AND loteria = 'Lotto Activo'
+            ORDER BY hora ASC
+        """), {"hoy": fecha_str})
+        rows = res.fetchall()
+
+        for hora, animal in rows:
+            animal_norm = _normalizar(animal)
+            contexto["resultados_hoy"][hora] = animal_norm
+            contexto["animales_vistos"].append(animal_norm)
+
+        contexto["total_sorteos_hoy"] = len(contexto["resultados_hoy"])
+        contexto["patron_dia"] = [
+            contexto["resultados_hoy"].get(h)
+            for h in orden_horas
+            if contexto["resultados_hoy"].get(h)
+        ]
+
+        # 2. Animales no vistos hoy
+        todos = set(TODOS_LOS_ANIMALES)
+        contexto["animales_no_vistos"] = sorted(
+            todos - set(contexto["animales_vistos"])
+        )
+
+        # 3. Horas futuras desde hora actual
+        try:
+            idx_actual = orden_horas.index(hora_actual_str)
+            horas_futuras = set(orden_horas[idx_actual:])
+        except ValueError:
+            horas_futuras = set(orden_horas)
+
+        # 4. Pares intra-día activos/cumplidos/fallados
+        for (h_orig, h_dest), pares in _MARKOV_INTRADAY.items():
+            if not pares:
+                continue
+            animal_en_origen = contexto["resultados_hoy"].get(h_orig)
+            if not animal_en_origen:
+                continue
+            if animal_en_origen not in pares:
+                continue
+
+            animal_pred, ventaja = pares[animal_en_origen]
+            par_info = {
+                "hora_origen":    h_orig,
+                "hora_destino":   h_dest,
+                "animal_origen":  animal_en_origen,
+                "animal_destino": animal_pred,
+                "ventaja":        ventaja,
+            }
+
+            if h_dest in contexto["resultados_hoy"]:
+                real = contexto["resultados_hoy"][h_dest]
+                if real == animal_pred:
+                    par_info["resultado"] = "✅ CUMPLIDO"
+                    contexto["pares_cumplidos"].append(par_info)
+                else:
+                    par_info["resultado"] = f"❌ salió {real}"
+                    contexto["pares_fallados"].append(par_info)
+            elif h_dest in horas_futuras:
+                par_info["resultado"] = "⏳ pendiente"
+                contexto["pares_activos"].append(par_info)
+
+        contexto["pares_activos"].sort(key=lambda x: x["ventaja"], reverse=True)
+
+        # 5. Cadenas de 3 eslabones
+        cadenas_def = [
+            [("11:00 AM","gallo"),  ("12:00 PM","venado"), ("01:00 PM","cebra")],
+            [("04:00 PM","rana"),   ("05:00 PM","chivo"),  ("06:00 PM","caiman")],
+            [("11:00 AM","ardilla"),("12:00 PM","carnero"),("01:00 PM",None)],
+        ]
+        cadenas_activas = []
+        for cadena in cadenas_def:
+            eslabones_cumplidos = 0
+            eslabones_info = []
+            rota = False
+            for hora_c, animal_c in cadena:
+                real = contexto["resultados_hoy"].get(hora_c)
+                if animal_c is None:
+                    estado = "⏳"
+                elif real == animal_c:
+                    estado = "✅"
+                    eslabones_cumplidos += 1
+                elif real is not None:
+                    estado = f"❌({real})"
+                    rota = True
+                else:
+                    estado = "⏳"
+                eslabones_info.append({
+                    "hora": hora_c, "animal": animal_c or "?", "estado": estado
+                })
+            if eslabones_cumplidos >= 1 and not rota:
+                cadenas_activas.append({
+                    "eslabones": eslabones_info,
+                    "cumplidos":  eslabones_cumplidos,
+                    "total":      len(cadena),
+                })
+        contexto["cadenas_activas"] = cadenas_activas
+
+    except Exception as e:
+        contexto["error"] = str(e)
+
+    return contexto
+
+
 async def generar_prediccion(db) -> dict:
     try:
         tz      = pytz.timezone('America/Caracas')
@@ -1332,6 +1490,8 @@ async def generar_prediccion(db) -> dict:
         pares_corr   = await calcular_pares_correlacionados(db, hora_str)
         # Señal nueva: Markov intra-día (7.6× más potente que Markov día→día)
         intraday     = await calcular_markov_intraday(db, hora_str)
+        # Contexto diario: memoria de todo lo que pasó hoy
+        ctx_dia      = await obtener_contexto_diario(db, hora_str, hoy)
 
         scores = combinar_señales_v10(
             deuda, reciente, patron, anti, markov,
@@ -1529,10 +1689,24 @@ async def generar_prediccion(db) -> dict:
             "wilson_lower":            rent_hora.get("wilson_lower_top3", 0),
             "proxima_hora":            proxima_hora,
             "pesos_actuales":          pesos,
+            # ── Contexto diario: memoria y retroalimentación ──
+            "contexto_dia": {
+                "resultados_hoy":   ctx_dia.get("resultados_hoy", {}),
+                "patron_dia":       ctx_dia.get("patron_dia", []),
+                "total_sorteos":    ctx_dia.get("total_sorteos_hoy", 0),
+                "pares_activos":    ctx_dia.get("pares_activos", []),
+                "pares_cumplidos":  ctx_dia.get("pares_cumplidos", []),
+                "pares_fallados":   ctx_dia.get("pares_fallados", []),
+                "cadenas_activas":  ctx_dia.get("cadenas_activas", []),
+                "animales_no_vistos": ctx_dia.get("animales_no_vistos", []),
+                "intraday_activo":  intraday,
+            },
             "analisis": (
                 f"Motor V10 | {hora_str} | Conf: {confianza_idx}/100 | "
                 f"Ef.Hora(top3): {rent_hora.get('efectividad_top3',0)}% | "
-                f"{'✅ OPERAR' if operar else '🚫 NO OPERAR'}"
+                f"{'✅ OPERAR' if operar else '🚫 NO OPERAR'} | "
+                f"Sorteos hoy: {ctx_dia.get('total_sorteos_hoy',0)} | "
+                f"Pares activos: {len(ctx_dia.get('pares_activos',[]))}"
             )
         }
     except Exception as e:
