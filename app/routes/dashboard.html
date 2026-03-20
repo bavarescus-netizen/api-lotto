@@ -138,23 +138,33 @@ tbody tr:last-child td{border-bottom:none}
     <div>
       <div class="sh">Próxima predicción</div>
       <div id="dashPred"><div class="loader"><div class="spin"></div></div></div>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn bg2" onclick="actualizarTodo()">↺ ACTUALIZAR</button>
-        <button class="btn bb2" onclick="procesarAhora()">▶ PROCESAR</button>
-        <button class="btn by2" onclick="cargarUltimo()">⬇ CARGAR ÚLTIMO</button>
-        <button onclick="fixMarkov()" id="btnFixMarkov"
-          style="background:linear-gradient(135deg,#ff4444,#900);border:1px solid #ff4444;
-                 color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;
-                 letter-spacing:1px;font-family:monospace;margin-right:6px">
-          🔧 REPARAR MARKOV
-        </button>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn bg2" onclick="actualizarTodo()" title="Refresca predicción y métricas">↺ ACTUALIZAR</button>
+        <button class="btn bb2" onclick="procesarAhora()" title="Genera predicción para la próxima hora y la guarda en BD">▶ PROCESAR</button>
+        <button class="btn by2" onclick="cargarUltimo()" title="Descarga el último resultado del scraper y actualiza auditoria_ia">⬇ CARGAR ÚLTIMO</button>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button onclick="fixMarkovDirecto()" id="btnFixDirecto"
-          style="background:rgba(56,182,255,.15);border:1px solid var(--b);
-                 color:var(--b);padding:6px 14px;border-radius:4px;cursor:pointer;font-size:11px;
-                 letter-spacing:1px;font-family:monospace;margin-right:6px">
-          🔩 FIX PROB DIRECTO
+          style="background:rgba(56,182,255,.12);border:1px solid rgba(56,182,255,.4);
+                 color:var(--b);padding:5px 12px;border-radius:4px;cursor:pointer;font-size:10px;
+                 letter-spacing:1px;font-family:monospace"
+          title="Recalcula probabilidades corruptas en markov_transiciones (usar si los % se ven raros)">
+          🔩 FIX MARKOV PROB
         </button>
-        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()">⚡ ENTRENAR COMPLETO</button>
+        <button onclick="fixMarkov()" id="btnFixMarkov"
+          style="background:rgba(255,68,68,.12);border:1px solid rgba(255,68,68,.4);
+                 color:#ff6b6b;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:10px;
+                 letter-spacing:1px;font-family:monospace"
+          title="Reconstruye la tabla markov_transiciones desde cero (usar si hay muchos errores)">
+          🔧 RECONSTRUIR MARKOV
+        </button>
+        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()"
+          title="Ejecuta retroactivo completo 2018→hoy + auto-pesos. Tarda ~20 min. Usar los lunes.">
+          ⚡ ENTRENAR COMPLETO
+        </button>
+      </div>
+      <div style="margin-top:6px;font-size:10px;color:var(--muted);font-family:monospace">
+        💡 Rutina semanal: ENTRENAR COMPLETO (lunes) → luego AUTO-PESOS en tab Señales
       </div>
     </div>
     <div>
