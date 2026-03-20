@@ -598,18 +598,28 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
                           NULLIF(SUM(frecuencia) OVER (PARTITION BY hora, animal_previo), 0)
                           * 100)::numeric, 2)
                      ELSE ROUND(probabilidad::numeric, 2)
-                   END AS probabilidad_pct
+                   END AS probabilidad_pct,
+                   SUM(frecuencia) OVER (PARTITION BY hora, animal_previo) AS total_desde_previo
             FROM markov_transiciones
-            ORDER BY probabilidad_pct DESC
-            LIMIT :limit
-        """), {"limit": limit})).fetchall()
+            WHERE frecuencia >= 5
+        """))).fetchall()
+
+        # Filtrar: solo pares con muestra suficiente (>= 20 ocurrencias del animal previo)
+        # Esto evita que pares con n=2 muestren 50% inflado
+        filtrados = [r for r in rows if (r[5] or 0) >= 20]
+
+        # Ordenar por probabilidad y tomar top N
+        filtrados.sort(key=lambda r: float(r[4] or 0), reverse=True)
+        filtrados = filtrados[:limit]
+
         return [
             {
                 "hora": r[0], "animal_previo": r[1], "animal_sig": r[2],
                 "frecuencia": int(r[3]),
                 "probabilidad_pct": float(r[4]) if r[4] else 0,
+                "total_desde_previo": int(r[5] or 0),
             }
-            for r in rows
+            for r in filtrados
         ]
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
