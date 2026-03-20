@@ -1626,7 +1626,8 @@ async def generar_prediccion(db) -> dict:
                             fecha, hora, animal_predicho, resultado_real,
                             score_deuda, score_reciente, score_patron_dia,
                             score_anti_racha, score_markov, score_ciclo_exacto,
-                            score_patron_fecha, score_final,
+                            score_patron_fecha, score_intraday, score_pares,
+                            score_final,
                             peso_deuda, peso_reciente, peso_patron,
                             peso_anti, peso_markov,
                             confianza
@@ -1634,7 +1635,8 @@ async def generar_prediccion(db) -> dict:
                             :f, :h, :animal, 'PENDIENTE',
                             :s_deuda, :s_rec, :s_patron,
                             :s_anti, :s_markov, :s_ciclo,
-                            :s_fecha, :s_final,
+                            :s_fecha, :s_intra, :s_pares,
+                            :s_final,
                             :p_deuda, :p_rec, :p_patron,
                             :p_anti, :p_markov,
                             :conf
@@ -1648,6 +1650,8 @@ async def generar_prediccion(db) -> dict:
                             score_markov       = EXCLUDED.score_markov,
                             score_ciclo_exacto = EXCLUDED.score_ciclo_exacto,
                             score_patron_fecha = EXCLUDED.score_patron_fecha,
+                            score_intraday     = EXCLUDED.score_intraday,
+                            score_pares        = EXCLUDED.score_pares,
                             score_final        = EXCLUDED.score_final,
                             confianza          = EXCLUDED.confianza
                     """), {
@@ -1661,6 +1665,8 @@ async def generar_prediccion(db) -> dict:
                         "s_markov": round(markov.get(animal_top1, {}).get("score", 0) * pesos["secuencia"], 4),
                         "s_ciclo":  round(ciclo_exacto.get(animal_top1, {}).get("score", 0) * 0.15, 4),
                         "s_fecha":  round(patron_fecha.get(animal_top1, {}).get("score", 0) * 0.12, 4),
+                        "s_intra":  round(intraday.get(animal_top1, {}).get("score", 0) * 0.14, 4),
+                        "s_pares":  round(pares_corr.get(animal_top1, {}).get("score", 0) * 0.08, 4),
                         "s_final":  round(sc_t, 6),
                         "p_deuda":  pesos["deuda"],
                         "p_rec":    pesos["reciente"],
@@ -2036,27 +2042,54 @@ async def actualizar_resultados_señales(db) -> dict:
 # ══════════════════════════════════════════════════════
 async def obtener_score_señales(db, dias=90) -> dict:
     """
-    Analiza auditoria_señales para determinar qué señal tiene valor real.
-    Retorna efectividad por señal cuando ella es la 'dominante' en la predicción.
+    Analiza auditoria_señales mostrando TODAS las señales del motor V10,
+    no solo la dominante. Incluye contribución promedio al score y EF cuando domina.
     """
     try:
         fecha_ini = date.today() - timedelta(days=dias)
+
+        # Migrar columnas nuevas si no existen
+        for col in ['score_intraday', 'score_pares']:
+            try:
+                await db.execute(text(
+                    f"ALTER TABLE auditoria_señales ADD COLUMN IF NOT EXISTS {col} FLOAT DEFAULT 0"
+                ))
+                await db.commit()
+            except Exception:
+                await db.rollback()
+
+        # Señal dominante (para compatibilidad con vista anterior)
         res = await db.execute(text("""
             SELECT
-                -- Señal dominante (la que más aportó)
                 CASE
                     WHEN score_deuda >= GREATEST(score_reciente, score_patron_dia,
-                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                         score_anti_racha, score_markov, score_ciclo_exacto,
+                         score_patron_fecha,
+                         COALESCE(score_intraday,0), COALESCE(score_pares,0))
                     THEN 'deuda'
                     WHEN score_reciente >= GREATEST(score_deuda, score_patron_dia,
-                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                         score_anti_racha, score_markov, score_ciclo_exacto,
+                         score_patron_fecha,
+                         COALESCE(score_intraday,0), COALESCE(score_pares,0))
                     THEN 'reciente'
                     WHEN score_patron_dia >= GREATEST(score_deuda, score_reciente,
-                         score_anti_racha, score_markov, score_ciclo_exacto, score_patron_fecha)
+                         score_anti_racha, score_markov, score_ciclo_exacto,
+                         score_patron_fecha,
+                         COALESCE(score_intraday,0), COALESCE(score_pares,0))
                     THEN 'patron_dia'
                     WHEN score_markov >= GREATEST(score_deuda, score_reciente,
-                         score_patron_dia, score_anti_racha, score_ciclo_exacto, score_patron_fecha)
+                         score_patron_dia, score_anti_racha, score_ciclo_exacto,
+                         score_patron_fecha,
+                         COALESCE(score_intraday,0), COALESCE(score_pares,0))
                     THEN 'markov'
+                    WHEN COALESCE(score_intraday,0) >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_markov,
+                         score_ciclo_exacto, score_patron_fecha, COALESCE(score_pares,0))
+                    THEN 'intraday'
+                    WHEN COALESCE(score_pares,0) >= GREATEST(score_deuda, score_reciente,
+                         score_patron_dia, score_anti_racha, score_markov,
+                         score_ciclo_exacto, score_patron_fecha)
+                    THEN 'pares'
                     WHEN score_ciclo_exacto >= GREATEST(score_deuda, score_reciente,
                          score_patron_dia, score_anti_racha, score_markov, score_patron_fecha)
                     THEN 'ciclo_exacto'
@@ -2065,75 +2098,85 @@ async def obtener_score_señales(db, dias=90) -> dict:
                     THEN 'patron_fecha'
                     ELSE 'anti_racha'
                 END AS señal_dominante,
-                COUNT(*)                                        AS total,
-                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END)  AS aciertos,
-                ROUND(AVG(score_deuda)::numeric, 4)             AS avg_score_deuda,
-                ROUND(AVG(score_reciente)::numeric, 4)          AS avg_score_reciente,
-                ROUND(AVG(score_markov)::numeric, 4)            AS avg_score_markov,
-                ROUND(AVG(score_patron_fecha)::numeric, 4)      AS avg_score_fecha
+                COUNT(*)                                       AS total,
+                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) AS aciertos
             FROM auditoria_señales
-            WHERE fecha >= :desde
-              AND acierto_top3 IS NOT NULL
+            WHERE fecha >= :desde AND acierto_top3 IS NOT NULL
             GROUP BY señal_dominante
             ORDER BY total DESC
         """), {"desde": fecha_ini})
-        rows = res.fetchall()
+        rows_dom = {r[0]: (int(r[1]), int(r[2])) for r in res.fetchall()}
 
-        señales = []
-        for r in rows:
-            total = int(r[1])
-            ac    = int(r[2])
-            ef    = round(ac / total * 100, 1) if total > 0 else 0
-            señales.append({
-                "señal":      r[0],
-                "total":      total,
-                "aciertos":   ac,
-                "ef_top3":    ef,
-                "vs_azar":    round(ef / 7.89, 2),   # 7.89% = azar top3 (3/38)
-                "recomendacion": (
-                    "✅ MANTENER" if ef >= 9.0 else
-                    "⚠️ REVISAR"  if ef >= 7.0 else
-                    "🔴 REDUCIR PESO"
-                ),
-            })
-
-        # Stats globales
-        res_global = await db.execute(text("""
+        # Contribución promedio de CADA señal al score final
+        res2 = await db.execute(text("""
             SELECT
-                COUNT(*),
-                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END),
-                ROUND(AVG(score_deuda)::numeric, 4),
-                ROUND(AVG(score_reciente)::numeric, 4),
-                ROUND(AVG(score_markov)::numeric, 4),
-                ROUND(AVG(score_patron_fecha)::numeric, 4),
-                ROUND(AVG(confianza)::numeric, 1)
+                COUNT(*)                                              AS total,
+                SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END)        AS aciertos,
+                ROUND(AVG(score_deuda)::numeric, 4)                   AS avg_deuda,
+                ROUND(AVG(score_reciente)::numeric, 4)                AS avg_reciente,
+                ROUND(AVG(score_patron_dia)::numeric, 4)              AS avg_patron_dia,
+                ROUND(AVG(score_anti_racha)::numeric, 4)              AS avg_anti,
+                ROUND(AVG(score_markov)::numeric, 4)                  AS avg_markov,
+                ROUND(AVG(score_ciclo_exacto)::numeric, 4)            AS avg_ciclo,
+                ROUND(AVG(score_patron_fecha)::numeric, 4)            AS avg_fecha,
+                ROUND(AVG(COALESCE(score_intraday,0))::numeric, 4)    AS avg_intra,
+                ROUND(AVG(COALESCE(score_pares,0))::numeric, 4)       AS avg_pares,
+                ROUND(AVG(score_final)::numeric, 6)                   AS avg_final,
+                ROUND(AVG(confianza)::numeric, 1)                     AS avg_conf
             FROM auditoria_señales
             WHERE fecha >= :desde AND acierto_top3 IS NOT NULL
         """), {"desde": fecha_ini})
-        g = res_global.fetchone()
+        g = res2.fetchone()
         total_g = int(g[0] or 0)
         ac_g    = int(g[1] or 0)
+        ef_g    = round(ac_g / total_g * 100, 1) if total_g > 0 else 0
+
+        # Construir lista de TODAS las señales
+        def _señal_info(nombre, score_col_idx, col_label):
+            dom = rows_dom.get(nombre, (0, 0))
+            dom_total, dom_ac = dom
+            dom_ef = round(dom_ac / dom_total * 100, 1) if dom_total > 0 else 0
+            contrib = float(g[score_col_idx] or 0)
+            contrib_pct = round(contrib / float(g[11] or 1) * 100, 1) if g[11] else 0
+            return {
+                "señal":         col_label,
+                "total":         dom_total,
+                "aciertos":      dom_ac,
+                "ef_top3":       dom_ef,
+                "vs_azar":       round(dom_ef / 7.89, 2),
+                "contribucion_avg": contrib,
+                "contribucion_pct": contrib_pct,
+                "recomendacion": (
+                    "✅ MANTENER"     if dom_ef >= 9.0 else
+                    "⚠️ REVISAR"      if dom_ef >= 7.0 and dom_total >= 20 else
+                    "🔴 REDUCIR PESO" if dom_total >= 10 else
+                    "📊 SIN DATOS"
+                ),
+            }
+
+        señales = [
+            _señal_info("deuda",         2, "Deuda (días ausente)"),
+            _señal_info("reciente",       3, "Frecuencia Reciente"),
+            _señal_info("anti_racha",     5, "Anti-racha"),
+            _señal_info("markov",         6, "Markov"),
+            _señal_info("intraday",       9, "Markov Intra-día"),
+            _señal_info("pares",         10, "Pares Correlacionados"),
+            _señal_info("patron_dia",     4, "Patrón Día Semana"),
+            _señal_info("ciclo_exacto",   7, "Ciclo Exacto"),
+            _señal_info("patron_fecha",   8, "Patrón Fecha Exacta"),
+        ]
+        # Ordenar por dominancia
+        señales.sort(key=lambda x: x["total"], reverse=True)
 
         return {
-            "dias_analizados":   dias,
+            "dias_analizados":    dias,
             "total_predicciones": total_g,
-            "ef_top3_global":    round(ac_g / total_g * 100, 1) if total_g > 0 else 0,
-            "por_señal":         señales,
-            "avg_scores": {
-                "deuda":        float(g[2] or 0),
-                "reciente":     float(g[3] or 0),
-                "markov":       float(g[4] or 0),
-                "patron_fecha": float(g[5] or 0),
-            },
-            "confianza_promedio": float(g[6] or 0),
-            "mensaje": (
-                f"{'✅' if total_g >= 50 else '⚠️'} "
-                f"{total_g} predicciones analizadas | "
-                f"{'Muestra suficiente' if total_g >= 50 else 'Muestra pequeña — acumular más datos'}"
-            ),
+            "ef_top3_global":     ef_g,
+            "confianza_promedio": float(g[12] or 0),
+            "señales":            señales,
         }
     except Exception as e:
-        return {"error": str(e), "por_señal": []}
+        return {"error": str(e), "señales": [], "total_predicciones": 0}
 
 
 # ══════════════════════════════════════════════════════
