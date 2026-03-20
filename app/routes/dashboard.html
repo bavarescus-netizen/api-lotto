@@ -1285,45 +1285,45 @@ async function cargarUltimo(){
 }
 
 function horaActual(){
-  // Hora venezolana (UTC-4) — calcula el sorteo que CORRESPONDE ahora
+  // Hora venezolana (UTC-4) — calcula el sorteo PRÓXIMO o ACTUAL
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
   const h=now.getHours(), mn=now.getMinutes();
-  const slots=[8,9,10,11,12,13,14,15,16,17,18,19];
   const lbls={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
               12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
               16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
+  const slots=[8,9,10,11,12,13,14,15,16,17,18,19];
 
-  // Lógica: si ya pasaron más de 2 minutos de la hora → predecir SIGUIENTE
-  // Si estamos antes de las 8AM → predecir 08:00 AM
-  // Si estamos después de las 7PM → predecir 08:00 AM (mañana)
-  if(h < 8) return lbls[8];
-  if(h >= 20) return lbls[8];
+  // Antes de los sorteos del día
+  if(h < 8) return '08:00 AM';
+  // Después del último sorteo del día
+  if(h > 19 || (h===19 && mn > 5)) return '08:00 AM';
 
-  // Estamos en horario de sorteos (8AM-7PM)
-  if(slots.includes(h)){
-    if(mn <= 2){
-      return lbls[h]; // Ventana de 2 min: mostrar este sorteo
-    } else {
-      // Ya pasó → próximo sorteo
+  // En horario de sorteos
+  if(lbls[h]){
+    // Si pasaron más de 2 minutos de esta hora → siguiente sorteo
+    if(mn > 2){
       const idx = slots.indexOf(h);
-      if(idx < slots.length-1) return lbls[slots[idx+1]];
-      return lbls[8]; // después del último → mañana
+      if(idx >= 0 && idx < slots.length - 1){
+        return lbls[slots[idx+1]];
+      }
+      return '08:00 AM'; // último sorteo pasó
     }
+    return lbls[h]; // Dentro de la ventana de 2 min
   }
-  // Hora no exacta (no debería ocurrir con los sorteos en punto)
+
+  // Hora no es múltiplo de sorteo — buscar el próximo
   for(const s of slots){
     if(s > h) return lbls[s];
   }
-  return lbls[8];
+  return '08:00 AM';
 }
 
 // Guarda la última hora calculada para detectar cambios
 let _ultimaHoraCalculada = horaActual();
 
 function horaActualVzla(){
-  // Retorna la hora venezolana actual como string para comparación
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
-  return `${now.getHours()}:${now.getMinutes()}`;
+  return `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}`;
 }
 
 // INIT
