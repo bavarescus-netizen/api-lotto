@@ -1,7 +1,7 @@
 """
 MOTOR V10 — LOTTOAI PRO
 ========================
-FIXES vs V9:
+FIXES vs V9: 
   1. FIX SESGO: frecuencia_reciente normalizada vs azar (ratio > 1.0 = caliente)
   2. FIX SESGO: anti_racha anula frecuencia_reciente si animal salió ayer
   3. FIX MAPA: catálogo completo + normalización robusta (camello, gato, zorro, etc.)
