@@ -848,12 +848,40 @@ def wilson_lower(aciertos: int, total: int, z: float = 1.645) -> float:
     return max((centro - margen) / denom, 0.0)
 
 
+# ══════════════════════════════════════════════════════
+# HORAS PRIORITARIAS — basadas en backtest 2026 real
+# Consistentes en 2025 Y 2026: 02PM, 04PM, 08AM
+# Nuevas ganadoras 2026: 11AM, 12PM, 01PM, 03PM
+# Evitar: 07PM, 05PM
+# ══════════════════════════════════════════════════════
+_HORAS_PRIORITARIAS = {
+    "11:00 AM": 1.30,   # 20.55% en 2026 — mejor hora del año
+    "08:00 AM": 1.25,   # 17.57% — anti-racha funciona muy bien
+    "12:00 PM": 1.15,   # 13.70% — consistente
+    "04:00 PM": 1.12,   # 12.86% — consistente 2025+2026
+    "03:00 PM": 1.10,   # 12.68% — nueva ganadora 2026
+    "01:00 PM": 1.08,   # 12.50% — nueva ganadora 2026
+    "02:00 PM": 1.05,   # 11.43% — consistente 2025+2026
+    "06:00 PM": 0.95,   # 8.57%  — marginal
+    "09:00 AM": 0.95,   # 8.33%  — marginal
+    "10:00 AM": 0.90,   # 8.22%  — perdió en 2026
+    "05:00 PM": 0.75,   # 7.14%  — bajo azar
+    "07:00 PM": 0.60,   # 4.62%  — la peor hora
+}
+
 def calcular_indice_confianza_v10(scores, efectividad_hora_top3=None,
                                    total_sorteos_hora=0, aciertos_top3_hora=0,
-                                   racha_fallos=0):
+                                   racha_fallos=0, hora_str=None,
+                                   ef_top3_reciente=None):
     """
-    Score de separación entre candidatos + calibración por Wilson.
-    Retorna: (indice 0-100, texto_señal, operar: bool)
+    Índice de confianza basado en:
+    1. Efectividad REAL de la hora (últimas 4 semanas) — peso principal
+    2. EF histórica de la hora (Wilson lower bound)
+    3. Prioridad de la hora según patrón 2026
+    4. Freno por racha de fallos consecutivos
+    5. Separación de scores (peso secundario, no principal)
+
+    Los datos muestran que separación de scores != probabilidad real.
     """
     if not scores:
         return 0, "🔴 SIN DATOS", False
@@ -862,48 +890,47 @@ def calcular_indice_confianza_v10(scores, efectividad_hora_top3=None,
     if len(valores) < 3:
         return 10, "🔴 DATOS INSUFICIENTES", False
 
-    top1, top2, top3 = valores[0], valores[1], valores[2]
-    promedio = sum(valores) / len(valores)
-
-    sep_rel   = (top1 - top2) / top1 if top1 > 0 else 0
-    dominio   = top1 / promedio if promedio > 0 else 1
-    brecha    = (top2 - top3) / top2 if top2 > 0 else 0
-
-    confianza = int(sep_rel * 55 + min(dominio - 1, 1) * 30 + brecha * 15)
-
-    # FILTRO DE ENTROPÍA: si top1 ≈ top2 el motor está adivinando → penalizar
-    if sep_rel < 0.10:
-        confianza = max(confianza - 20, 0)   # empate real → señal inútil
-    elif sep_rel < 0.20:
-        confianza = max(confianza - 8, 0)    # separación marginal
-
-    # Bonus/malus por efectividad histórica real de la hora (Wilson lower bound)
-    if total_sorteos_hora >= 30 and aciertos_top3_hora > 0:
+    # ── Base: efectividad real reciente de la hora ──
+    # Si tenemos EF reciente (últimas 4 semanas), usarla como base
+    if ef_top3_reciente is not None and ef_top3_reciente > 0:
+        # Normalizar: 7.89%=azar→20, 10%→40, 15%→70, 20%→100
+        base_reciente = min(int((ef_top3_reciente / 20.0) * 100), 80)
+    elif total_sorteos_hora >= 20 and aciertos_top3_hora > 0:
+        # Usar Wilson lower bound del histórico completo
         wilson = wilson_lower(aciertos_top3_hora, total_sorteos_hora)
-        if wilson > UMBRAL_RENTABILIDAD_TOP3 / 100:
-            bonus = int((wilson - UMBRAL_RENTABILIDAD_TOP3 / 100) * 200)
-            confianza = min(confianza + bonus, 100)
-        else:
-            malus = int((UMBRAL_RENTABILIDAD_TOP3 / 100 - wilson) * 150)
-            confianza = max(confianza - malus, 0)
+        base_reciente = min(int(wilson * 400), 60)
     elif efectividad_hora_top3 is not None:
-        if efectividad_hora_top3 > 12:
-            confianza = min(confianza + 10, 100)
-        elif efectividad_hora_top3 < 8:
-            confianza = max(confianza - 8, 0)
+        base_reciente = min(int((efectividad_hora_top3 / 20.0) * 100), 50)
+    else:
+        base_reciente = 20  # sin datos, valor neutro
 
-    # FRENO DE MANO: racha de fallos consecutivos en esa hora → bajar confianza
+    # ── Bonus por hora prioritaria 2026 ──
+    mult_hora = _HORAS_PRIORITARIAS.get(hora_str or "", 0.90)
+    bonus_hora = int((mult_hora - 0.90) * 100)   # 0 si neutral, hasta +40 para 11AM
+
+    # ── Separación de scores (señal secundaria) ──
+    top1, top2 = valores[0], valores[1]
+    sep_rel = (top1 - top2) / top1 if top1 > 0 else 0
+    # Peso reducido: máx +15 puntos (antes era el componente principal)
+    bonus_sep = min(int(sep_rel * 30), 15)
+    # Penalizar si empate total
+    if sep_rel < 0.05:
+        bonus_sep = -10
+
+    confianza = base_reciente + bonus_hora + bonus_sep
+
+    # ── Freno por racha de fallos ──
     if racha_fallos >= 5:
-        confianza = max(confianza - 18, 0)
+        confianza = max(confianza - 20, 0)
     elif racha_fallos >= 3:
-        confianza = max(confianza - 10, 0)
+        confianza = max(confianza - 12, 0)
     elif racha_fallos >= 2:
-        confianza = max(confianza - 5, 0)
+        confianza = max(confianza - 6, 0)
 
     confianza = min(100, max(0, confianza))
     operar    = confianza >= UMBRAL_CONFIANZA_OPERAR
 
-    if confianza >= 45:
+    if confianza >= 50:
         texto = "🟢 ALTA — OPERAR"
     elif confianza >= UMBRAL_CONFIANZA_OPERAR:
         texto = "🟡 MEDIA — OPERAR CON CAUTELA"
@@ -1072,6 +1099,7 @@ async def generar_prediccion(db) -> dict:
 
         # Calcular racha de fallos recientes en esta hora (últimas 5 predicciones)
         racha_fallos = 0
+        ef_top3_reciente = None
         try:
             res_racha = await db.execute(text("""
                 SELECT acierto FROM auditoria_ia
@@ -1087,12 +1115,38 @@ async def generar_prediccion(db) -> dict:
         except Exception:
             racha_fallos = 0
 
+        # EF.TOP3 real de esta hora en las últimas 4 semanas
+        # Esto es lo que realmente predice si vale la pena apostar
+        try:
+            res_ef = await db.execute(text("""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN LOWER(TRIM(h.animalito)) IN (
+                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                    ) THEN 1 ELSE 0 END) AS aciertos_top3
+                FROM auditoria_ia a
+                JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora
+                    AND h.loteria='Lotto Activo'
+                WHERE a.hora=:hora
+                  AND a.fecha >= CURRENT_DATE - INTERVAL '28 days'
+                  AND a.acierto IS NOT NULL
+            """), {"hora": hora_str})
+            row_ef = res_ef.fetchone()
+            if row_ef and int(row_ef[0] or 0) >= 10:
+                ef_top3_reciente = round(int(row_ef[1] or 0) / int(row_ef[0]) * 100, 1)
+        except Exception:
+            ef_top3_reciente = None
+
         confianza_idx, señal_texto, operar = calcular_indice_confianza_v10(
             scores,
             efectividad_hora_top3 = rent_hora.get("efectividad_top3"),
             total_sorteos_hora    = rent_hora.get("total_sorteos", 0),
             aciertos_top3_hora    = rent_hora.get("aciertos_top3", 0),
             racha_fallos          = racha_fallos,
+            hora_str              = hora_str,
+            ef_top3_reciente      = ef_top3_reciente,
         )
 
         ranking     = sorted(scores.items(), key=lambda x: x[1], reverse=True)
