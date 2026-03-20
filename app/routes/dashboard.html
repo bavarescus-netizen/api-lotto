@@ -273,8 +273,8 @@ tbody tr:last-child td{border-bottom:none}
 <div class="page" id="page-markov">
   <div class="g2">
     <div>
-      <div class="sh">Buscar transiciones</div>
-      <div class="alert ai" style="margin-bottom:12px">🔗 <b id="markovCount">13,342</b> transiciones · Si hoy salió X → ¿mañana?</div>
+      <div class="sh">Markov día→día</div>
+      <div class="alert ai" style="margin-bottom:12px">🔗 <b id="markovCount">13,342</b> transiciones · Si HOY salió X → ¿mañana en la misma hora?</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
         <button class="btn" style="font-size:10px;background:rgba(255,194,51,.1);border-color:rgba(255,194,51,.3);color:var(--y)" onclick="fixMarkovDirecto()" id="btnFixDirecto">⚡ CORREGIR PROB. CORRUPTAS</button>
         <span id="fixDirectoStatus" style="font-size:10px;font-family:var(--mono);color:var(--muted)"></span>
@@ -289,7 +289,7 @@ tbody tr:last-child td{border-bottom:none}
         <input class="inp" id="selMA" type="text" placeholder="animal de hoy..." oninput="cargarMarkov()" style="width:140px">
       </div>
       <div class="tbl card" style="padding:0">
-        <table><thead><tr><th>#</th><th>PREVIO</th><th>SIGUIENTE</th><th>VECES</th><th>PROB%</th></tr></thead>
+        <table><thead><tr><th>#</th><th>HOY</th><th>MAÑANA</th><th>VECES</th><th>PROB%</th></tr></thead>
           <tbody id="markovTbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Ingresa un animal</td></tr></tbody>
         </table>
       </div>
@@ -299,11 +299,22 @@ tbody tr:last-child td{border-bottom:none}
       </div>
     </div>
     <div>
-      <div class="sh">Top pares globales</div>
-      <div class="tbl card" style="padding:0">
+      <div class="sh">Top pares globales (día→día)</div>
+      <div class="tbl card" style="padding:0;margin-bottom:16px">
         <table><thead><tr><th>#</th><th>PAR</th><th>HORA</th><th>VECES</th><th>PROB%</th></tr></thead>
           <tbody id="markovTopTbody"><tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Cargando...</td></tr></tbody>
         </table>
+      </div>
+
+      <!-- PARES INTRA-DÍA -->
+      <div class="sh">Pares intra-día activos hoy</div>
+      <div class="alert ai" style="margin-bottom:8px;font-size:11px">
+        ⚡ Correlaciones dentro del mismo día — promedio +8.48% sobre azar
+      </div>
+      <div class="card" id="intraDiaMKV" style="padding:12px">
+        <div style="color:var(--muted);font-size:11px;font-family:var(--mono)">
+          Cargando pares del día...
+        </div>
       </div>
     </div>
   </div>
@@ -500,7 +511,7 @@ function showTab(id,el){
   el.classList.add('active');
   document.getElementById('page-'+id).classList.add('active');
   if(id==='horas')cargarHoras();
-  if(id==='markov')cargarMarkovTop();
+  if(id==='markov'){cargarMarkovTop();cargarIntraDiaMKV();}
   if(id==='prediccion'){cargarPredHora();cargarContextoDia();}
   if(id==='historial'&&!histRows.length)cargarHistorial();
   if(id==='senales')cargarScoreSeñales(90);
@@ -815,6 +826,65 @@ async function cargarMarkovTop(){
         <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||0).toFixed(2)}%</td>
       </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin datos</td></tr>';
   }catch(e){}
+}
+
+async function cargarIntraDiaMKV(){
+  // Muestra los pares intra-día activos y cumplidos del día de hoy
+  const el = document.getElementById('intraDiaMKV');
+  if(!el) return;
+  try{
+    const d = await fetch('/contexto-dia').then(r=>r.json());
+    if(d.error){
+      el.innerHTML=`<div style="color:var(--r);font-size:11px">Error: ${d.error}</div>`;
+      return;
+    }
+    const activos  = d.pares_activos  || [];
+    const cumplidos= d.pares_cumplidos|| [];
+    const fallados = d.pares_fallados || [];
+    const total    = d.total_sorteos_hoy || 0;
+
+    let html = `<div style="font-size:10px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">${total} de 12 sorteos completados hoy</div>`;
+
+    if(!activos.length && !cumplidos.length && !fallados.length){
+      html += '<div style="color:var(--muted);font-size:11px">No hay pares activos aún — los pares intra-día se activan durante el día según los resultados</div>';
+    }
+
+    if(activos.length){
+      html += `<div style="color:var(--y);font-size:10px;letter-spacing:1px;margin-bottom:6px">⏳ PENDIENTES (${activos.length})</div>`;
+      html += activos.map(p=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px;background:rgba(56,182,255,.06);border-radius:4px;border-left:3px solid var(--b)">
+          <div style="font-size:10px;color:var(--muted);min-width:100px">${p.hora_origen}→${p.hora_destino}</div>
+          <div style="color:var(--y);text-transform:uppercase;font-weight:700">${p.animal_origen}</div>
+          <div style="color:var(--muted)">→</div>
+          <div style="color:var(--c);text-transform:uppercase;font-weight:700">${p.animal_destino}</div>
+          <div style="color:var(--g);font-size:10px;margin-left:auto">+${p.ventaja.toFixed(1)}% sobre azar</div>
+        </div>`).join('');
+    }
+
+    if(cumplidos.length){
+      html += `<div style="color:var(--g);font-size:10px;letter-spacing:1px;margin:10px 0 6px">✅ CUMPLIDOS HOY (${cumplidos.length})</div>`;
+      html += cumplidos.map(p=>`
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;padding:6px 8px;background:rgba(0,255,136,.06);border-radius:4px">
+          <span style="color:var(--muted);font-size:10px">${p.hora_destino}</span>
+          <span style="color:var(--g);text-transform:uppercase;font-weight:700">${p.animal_origen} → ${p.animal_destino}</span>
+          <span style="color:var(--g);font-size:10px">✅ acertó</span>
+        </div>`).join('');
+    }
+
+    if(fallados.length){
+      html += `<div style="color:var(--r);font-size:10px;letter-spacing:1px;margin:10px 0 6px">❌ FALLADOS (${fallados.length})</div>`;
+      html += fallados.map(p=>`
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;padding:6px 8px;background:rgba(255,68,68,.06);border-radius:4px">
+          <span style="color:var(--muted);font-size:10px">${p.hora_destino}</span>
+          <span style="color:var(--muted);text-transform:uppercase">${p.animal_origen} → ${p.animal_destino}</span>
+          <span style="color:var(--r);font-size:10px">${p.resultado}</span>
+        </div>`).join('');
+    }
+
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML=`<div style="color:var(--r);font-size:11px">Error cargando pares del día</div>`;
+  }
 }
 
 async function cargarMarkov(){
@@ -1215,20 +1285,45 @@ async function cargarUltimo(){
 }
 
 function horaActual(){
-  // Hora venezolana (UTC-4) del próximo sorteo o sorteo actual
+  // Hora venezolana (UTC-4) — calcula el sorteo que CORRESPONDE ahora
   const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
   const h=now.getHours(), mn=now.getMinutes();
   const slots=[8,9,10,11,12,13,14,15,16,17,18,19];
   const lbls={8:'08:00 AM',9:'09:00 AM',10:'10:00 AM',11:'11:00 AM',
               12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
               16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'};
-  // Si estamos en la ventana 00-30 min de una hora de sorteo → esa hora
-  // Si ya pasaron 30 min → la siguiente hora de sorteo
-  for(const s of slots){
-    if(s===h && mn<=2) return lbls[s];         // ventana: 0-2 min → este sorteo
-    if(s > h) return lbls[s];                  // próximo sorteo
+
+  // Lógica: si ya pasaron más de 2 minutos de la hora → predecir SIGUIENTE
+  // Si estamos antes de las 8AM → predecir 08:00 AM
+  // Si estamos después de las 7PM → predecir 08:00 AM (mañana)
+  if(h < 8) return lbls[8];
+  if(h >= 20) return lbls[8];
+
+  // Estamos en horario de sorteos (8AM-7PM)
+  if(slots.includes(h)){
+    if(mn <= 2){
+      return lbls[h]; // Ventana de 2 min: mostrar este sorteo
+    } else {
+      // Ya pasó → próximo sorteo
+      const idx = slots.indexOf(h);
+      if(idx < slots.length-1) return lbls[slots[idx+1]];
+      return lbls[8]; // después del último → mañana
+    }
   }
-  return lbls[8]; // default mañana (después de 07:00 PM)
+  // Hora no exacta (no debería ocurrir con los sorteos en punto)
+  for(const s of slots){
+    if(s > h) return lbls[s];
+  }
+  return lbls[8];
+}
+
+// Guarda la última hora calculada para detectar cambios
+let _ultimaHoraCalculada = horaActual();
+
+function horaActualVzla(){
+  // Retorna la hora venezolana actual como string para comparación
+  const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
+  return `${now.getHours()}:${now.getMinutes()}`;
 }
 
 // INIT
@@ -1280,20 +1375,23 @@ document.addEventListener('DOMContentLoaded',async()=>{
     if(sel){for(const o of sel.options){if(o.textContent.trim()===label){o.selected=true;break;}}}
   })();
 
-  // ── Actualizar selector de hora automáticamente cada minuto ──
+  // ── Actualizar selector de hora automáticamente cada 30 segundos ──
   setInterval(()=>{
-    const selH = document.getElementById('selHora');
-    if(selH && selH.value === 'auto'){
-      // Forzar recarga si la hora cambió
-      const now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Caracas'}));
-      const m=now.getMinutes();
-      // Al cambiar de hora (minuto 1-3) → recargar predicción automáticamente
-      if(m >= 1 && m <= 3){
-        cargarPredHora();
-        cargarContextoDia();
+    const nuevaHora = horaActual();
+    if(nuevaHora !== _ultimaHoraCalculada){
+      // Cambió la hora del sorteo → actualizar predicción automáticamente
+      _ultimaHoraCalculada = nuevaHora;
+      console.log(`[LottoAI] Cambio de hora detectado → ${nuevaHora}`);
+      const tabActivo = document.querySelector('.page[style*="block"]');
+      if(tabActivo){
+        if(tabActivo.id==='page-prediccion'){
+          cargarPredHora();
+          cargarContextoDia();
+        }
+        if(tabActivo.id==='page-dashboard') actualizarTodo();
       }
     }
-  }, 60*1000);
+  }, 30*1000); // cada 30 segundos — rápido pero sin sobrecargar
 });
 
 // ══════════════════════════════════════════════
