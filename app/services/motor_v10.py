@@ -1342,10 +1342,10 @@ async def obtener_contexto_diario(db, hora_actual_str, fecha=None) -> dict:
         res = await db.execute(text("""
             SELECT TRIM(hora) AS hora, LOWER(TRIM(animalito)) AS animal
             FROM historico
-            WHERE CAST(fecha AS TEXT) = :hoy
+            WHERE fecha = :hoy
               AND loteria = 'Lotto Activo'
             ORDER BY hora ASC
-        """), {"hoy": fecha_str})
+        """), {"hoy": fecha})
         rows = res.fetchall()
 
         for hora, animal in rows:
