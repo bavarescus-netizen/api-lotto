@@ -170,47 +170,29 @@ async def iniciar_bot():
 
 
 # ═══════════════════════════════════════════════════════════
-# HOME — Dashboard Jinja2
+# HOME — Dashboard estático, datos cargados via JS async
 # ═══════════════════════════════════════════════════════════
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        res_ia     = await generar_prediccion(db)
-        stats_data = await obtener_estadisticas(db)
-        res_db = await db.execute(text("""
-            SELECT h.fecha, h.hora, h.animalito, a.acierto, a.animal_predicho,
-                   a.prediccion_1, a.prediccion_2, a.prediccion_3
-            FROM historico h
-            LEFT JOIN auditoria_ia a ON h.fecha=a.fecha AND h.hora=a.hora
-            WHERE h.loteria='Lotto Activo'
-            ORDER BY h.fecha DESC, h.hora DESC LIMIT 12
-        """))
-        ultimos_db = []
-        for r in res_db.fetchall():
-            nombre_animal = re.sub(r'[^a-z]','',r[2].lower())
-            predicho_raw  = re.sub(r'[^a-z]','',(r[4] or '').lower())
-            fecha_str     = r[0].strftime("%m-%d") if r[0] else "—"
-            ultimos_db.append({
-                "fecha": fecha_str, "hora": r[1], "animal": r[2],
-                "img": f"{nombre_animal}.png", "acierto": r[3],
-                "predicho": predicho_raw,
-                "prediccion_1": r[5], "prediccion_2": r[6], "prediccion_3": r[7],
-            })
+        # Solo servir el HTML — el dashboard carga todo via fetch() async
+        # Evita timeout de Render en primera carga
         return templates.TemplateResponse("dashboard.html", {
-            "request": request, "top3": res_ia.get("top3",[]),
-            "ultimos_db": ultimos_db,
-            "efectividad": stats_data.get("efectividad_global",0),
-            "efectividad_top3": stats_data.get("efectividad_top3",0),
-            "aciertos_hoy": stats_data.get("aciertos_hoy",0),
-            "sorteos_hoy": stats_data.get("sorteos_hoy",0),
-            "total_historico": stats_data.get("total_historico",0),
-            "horas_rentables": stats_data.get("horas_rentables",[]),
-            "ultimo_resultado": res_ia.get("ultimo_resultado","N/A"),
-            "analisis": res_ia.get("analisis",""),
-            "confianza_idx": res_ia.get("confianza_idx",0),
-            "señal_texto": res_ia.get("señal_texto",""),
-            "hora_premium": res_ia.get("hora_premium",False),
-            "ef_hora_top3": res_ia.get("efectividad_hora_top3",0),
+            "request": request,
+            "top3": [],
+            "ultimos_db": [],
+            "efectividad": 0,
+            "efectividad_top3": 0,
+            "aciertos_hoy": 0,
+            "sorteos_hoy": 0,
+            "total_historico": 0,
+            "horas_rentables": [],
+            "ultimo_resultado": "N/A",
+            "analisis": "",
+            "confianza_idx": 0,
+            "señal_texto": "",
+            "hora_premium": False,
+            "ef_hora_top3": 0,
         })
     except Exception as e:
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
@@ -260,33 +242,14 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "ORDER BY fecha DESC LIMIT 1"
         ), {"hoy": ahora.date(), "hora": _hora_prox})).fetchone()
 
-        # Si no hay predicción guardada para la próxima hora → generarla en vivo
+        # Si no hay predicción guardada → usar la última disponible sin generar nueva
         if not p:
-            try:
-                from app.core.motor_v10 import generar_prediccion
-                _pred_live = await generar_prediccion(db)
-                if _pred_live and _pred_live.get("prediccion_1"):
-                    # Construir tupla compatible
-                    p = (
-                        ahora.date(),
-                        _pred_live.get("hora", _hora_prox),
-                        _pred_live.get("prediccion_1"),
-                        _pred_live.get("confianza_pct", 0),
-                        None, None,
-                        _pred_live.get("prediccion_1"),
-                        _pred_live.get("prediccion_2"),
-                        _pred_live.get("prediccion_3"),
-                        _pred_live.get("confianza_hora", 0),
-                        _pred_live.get("es_hora_rentable", False),
-                    )
-            except Exception:
-                # Fallback: última predicción de la BD
-                p = (await db.execute(text(
-                    "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
-                    "prediccion_1,prediccion_2,prediccion_3,"
-                    "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
-                    "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
-                ))).fetchone()
+            p = (await db.execute(text(
+                "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
+                "prediccion_1,prediccion_2,prediccion_3,"
+                "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
+                "FROM auditoria_ia ORDER BY fecha DESC, hora DESC LIMIT 1"
+            ))).fetchone()
 
         # ── Métricas desde rentabilidad_hora (sin JOINs pesados) ──
         rh = (await db.execute(text("""
