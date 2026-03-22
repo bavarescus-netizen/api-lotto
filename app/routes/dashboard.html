@@ -215,6 +215,12 @@ tbody tr:last-child td{border-bottom:none}
           <div class="bar-row"><div class="bar-lbl">RECIENTE</div><div class="bar-track"><div class="bar-fill" id="bR" style="width:25%;background:var(--r)"></div></div><div class="bar-val" style="color:var(--r)" id="vR">0.25</div></div>
         </div>
       </div>
+      <div style="margin-top:14px">
+        <div class="sh">Config dinámica (desde BD)</div>
+        <div class="card" id="configDinamica">
+          <div style="color:var(--muted);font-size:11px;font-family:var(--mono)">Cargando...</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -309,12 +315,26 @@ tbody tr:last-child td{border-bottom:none}
       <!-- PARES INTRA-DÍA -->
       <div class="sh">Pares intra-día activos hoy</div>
       <div class="alert ai" style="margin-bottom:8px;font-size:11px">
-        ⚡ Correlaciones dentro del mismo día — promedio +8.48% sobre azar
+        ⚡ Correlaciones dentro del mismo día — dinámicas desde <b id="intradayCount">—</b> pares validados en BD
       </div>
       <div class="card" id="intraDiaMKV" style="padding:12px">
         <div style="color:var(--muted);font-size:11px;font-family:var(--mono)">
           Cargando pares del día...
         </div>
+      </div>
+
+      <!-- TOP PARES INTRA-DÍA GLOBALES -->
+      <div class="sh" style="margin-top:18px">Top pares intra-día globales (histórico)</div>
+      <div class="alert ai" style="margin-bottom:8px;font-size:11px">
+        📊 Mejores pares de todos los tiempos — se actualizan con cada ENTRENAR COMPLETO
+      </div>
+      <div class="tbl card" style="padding:0">
+        <table>
+          <thead><tr><th>#</th><th>ORIGEN → DESTINO</th><th>SALTO</th><th>VECES</th><th>VENTAJA</th></tr></thead>
+          <tbody id="intradayTopTbody">
+            <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Cargando...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -512,9 +532,61 @@ function showTab(id,el){
   document.getElementById('page-'+id).classList.add('active');
   if(id==='horas')cargarHoras();
   if(id==='markov'){cargarMarkovTop();cargarIntraDiaMKV();}
-  if(id==='prediccion'){cargarPredHora();cargarContextoDia();}
+  if(id==='prediccion'){cargarPredHora();cargarContextoDia();cargarConfigDinamica();}
   if(id==='historial'&&!histRows.length)cargarHistorial();
   if(id==='senales')cargarScoreSeñales(90);
+}
+
+// CONFIG DINÁMICA
+async function cargarConfigDinamica(){
+  const el = document.getElementById('configDinamica');
+  if(!el) return;
+  try{
+    const d = await fetch('/config-dinamica').then(r=>r.json());
+    if(d.error){ el.innerHTML=`<div style="color:var(--r);font-size:11px">Error: ${d.error}</div>`; return; }
+
+    const mult  = d.multiplicador_hora  || {};
+    const anti  = d.peso_anti_racha_hora || {};
+    const ef    = d.ef_top3_por_hora    || {};
+    const rent  = d.es_rentable_hora    || {};
+
+    const horas = ['08:00 AM','09:00 AM','10:00 AM','11:00 AM','12:00 PM',
+                   '01:00 PM','02:00 PM','03:00 PM','04:00 PM','05:00 PM','06:00 PM','07:00 PM'];
+
+    let html = `
+      <div style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-bottom:10px">
+        Umbral rentabilidad: <b style="color:var(--y)">${d.umbral_rentabilidad||10}%</b> &nbsp;|&nbsp;
+        Umbral confianza: <b style="color:var(--b)">${d.umbral_confianza||25}</b>
+      </div>
+      <table style="width:100%;font-size:10px;font-family:var(--mono);border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;color:var(--muted);padding:3px 6px">HORA</th>
+          <th style="text-align:right;color:var(--y);padding:3px 6px">MULT</th>
+          <th style="text-align:right;color:var(--b);padding:3px 6px">ANTI</th>
+          <th style="text-align:right;color:var(--g);padding:3px 6px">EF.TOP3</th>
+          <th style="text-align:center;padding:3px 6px">ESTADO</th>
+        </tr></thead><tbody>`;
+
+    horas.forEach(h=>{
+      const m   = mult[h]  || 0.9;
+      const a   = anti[h]  || 0.22;
+      const e   = ef[h]    || 0;
+      const r   = rent[h]  || false;
+      const mc  = m>=1.15?'var(--g)':m>=1.0?'var(--y)':m>=0.85?'var(--muted)':'var(--r)';
+      const estado = r ? `<span style="color:var(--g)">✅ RENTABLE</span>` : `<span style="color:var(--muted)">—</span>`;
+      html += `<tr style="border-top:1px solid rgba(255,255,255,.04)">
+        <td style="padding:3px 6px;color:var(--text)">${h}</td>
+        <td style="text-align:right;padding:3px 6px;color:${mc}">${m.toFixed(2)}x</td>
+        <td style="text-align:right;padding:3px 6px;color:var(--b)">${a.toFixed(2)}</td>
+        <td style="text-align:right;padding:3px 6px;color:${e>=10?'var(--g)':e>=7.89?'var(--y)':'var(--r)'}">${e.toFixed(1)}%</td>
+        <td style="text-align:center;padding:3px 6px">${estado}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML=`<div style="color:var(--r);font-size:11px">Error cargando config dinámica</div>`;
+  }
 }
 
 // ESTADO
@@ -545,6 +617,11 @@ async function cargarEstado(){
     // Actualizar contador de transiciones Markov
     if(d.motor&&d.motor.markov_transiciones){
       document.getElementById('markovCount').textContent=(d.motor.markov_transiciones).toLocaleString();
+    }
+    // Actualizar contador intra-día
+    if(d.motor&&d.motor.markov_intraday_pares){
+      const el=document.getElementById('intradayCount');
+      if(el) el.textContent=d.motor.markov_intraday_pares.toLocaleString();
     }
     document.getElementById('sig_gap').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
     document.getElementById('sig_hora').textContent=pred.confianza_hora?pred.confianza_hora+'%':'—';
@@ -826,9 +903,91 @@ async function cargarMarkovTop(){
         <td style="font-family:var(--mono);color:var(--b)">${parseFloat(t.probabilidad_pct||0).toFixed(2)}%</td>
       </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin datos</td></tr>';
   }catch(e){}
+  // Cargar también top intra-día global
+  try{
+    const rows=await fetch('/markov-intraday?limit=15').then(r=>r.json());
+    const list=Array.isArray(rows)?rows:[];
+    // Actualizar count
+    try{
+      const total=await fetch('/markov-intraday?limit=999').then(r=>r.json());
+      const n=Array.isArray(total)?total.length:0;
+      const el=document.getElementById('intradayCount');
+      if(el) el.textContent=n;
+    }catch(e){}
+    document.getElementById('intradayTopTbody').innerHTML=list.length?list.map((t,i)=>{
+      const salto=t.hora_origen&&t.hora_destino?`${t.hora_origen}→${t.hora_destino}`:'—';
+      const color=t.ventaja_vs_azar>=8?'var(--g)':t.ventaja_vs_azar>=5?'var(--y)':'var(--text)';
+      return `<tr>
+        <td style="font-family:var(--mono);color:var(--muted)">${i+1}</td>
+        <td style="font-weight:700">${(t.animal_origen||'').toUpperCase()} → ${(t.animal_destino||'').toUpperCase()}</td>
+        <td style="font-family:var(--mono);font-size:10px;color:var(--muted)">${salto}</td>
+        <td style="font-family:var(--mono)">${t.frecuencia||0}</td>
+        <td style="font-family:var(--mono);color:${color}">+${parseFloat(t.ventaja_vs_azar||0).toFixed(2)}%</td>
+      </tr>`;
+    }).join(''):'<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Sin datos — corre ENTRENAR COMPLETO primero</td></tr>';
+  }catch(e){
+    document.getElementById('intradayTopTbody').innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--r);padding:12px">Error cargando pares intra-día</td></tr>';
+  }
 }
 
 async function cargarIntraDiaMKV(){
+  // Muestra los pares intra-día activos y cumplidos del día de hoy
+  const el = document.getElementById('intraDiaMKV');
+  if(!el) return;
+  try{
+    const d = await fetch('/contexto-dia').then(r=>r.json());
+    if(d.error){
+      el.innerHTML=`<div style="color:var(--r);font-size:11px">Error: ${d.error}</div>`;
+      return;
+    }
+    const activos  = d.pares_activos  || [];
+    const cumplidos= d.pares_cumplidos|| [];
+    const fallados = d.pares_fallados || [];
+    const total    = d.total_sorteos_hoy || 0;
+
+    let html = `<div style="font-size:10px;color:var(--muted);margin-bottom:10px;font-family:var(--mono)">${total} de 12 sorteos completados hoy</div>`;
+
+    if(!activos.length && !cumplidos.length && !fallados.length){
+      html += '<div style="color:var(--muted);font-size:11px">No hay pares activos aún — los pares intra-día se activan durante el día según los resultados</div>';
+    }
+
+    if(activos.length){
+      html += `<div style="color:var(--y);font-size:10px;letter-spacing:1px;margin-bottom:6px">⏳ PENDIENTES (${activos.length})</div>`;
+      html += activos.map(p=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px;background:rgba(56,182,255,.06);border-radius:4px;border-left:3px solid var(--b)">
+          <div style="font-size:10px;color:var(--muted);min-width:100px">${p.hora_origen}→${p.hora_destino}</div>
+          <div style="color:var(--y);text-transform:uppercase;font-weight:700">${p.animal_origen}</div>
+          <div style="color:var(--muted)">→</div>
+          <div style="color:var(--c);text-transform:uppercase;font-weight:700">${p.animal_destino}</div>
+          <div style="color:var(--g);font-size:10px;margin-left:auto">+${parseFloat(p.ventaja||0).toFixed(1)}% sobre azar</div>
+        </div>`).join('');
+    }
+
+    if(cumplidos.length){
+      html += `<div style="color:var(--g);font-size:10px;letter-spacing:1px;margin:10px 0 6px">✅ CUMPLIDOS HOY (${cumplidos.length})</div>`;
+      html += cumplidos.map(p=>`
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;padding:6px 8px;background:rgba(0,255,136,.06);border-radius:4px">
+          <span style="color:var(--muted);font-size:10px">${p.hora_destino}</span>
+          <span style="color:var(--g);text-transform:uppercase;font-weight:700">${p.animal_origen} → ${p.animal_destino}</span>
+          <span style="color:var(--g);font-size:10px">✅ acertó</span>
+        </div>`).join('');
+    }
+
+    if(fallados.length){
+      html += `<div style="color:var(--r);font-size:10px;letter-spacing:1px;margin:10px 0 6px">❌ FALLADOS (${fallados.length})</div>`;
+      html += fallados.map(p=>`
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;padding:6px 8px;background:rgba(255,68,68,.06);border-radius:4px">
+          <span style="color:var(--muted);font-size:10px">${p.hora_destino}</span>
+          <span style="color:var(--muted);text-transform:uppercase">${p.animal_origen} → ${p.animal_destino}</span>
+          <span style="color:var(--r);font-size:10px">${p.resultado}</span>
+        </div>`).join('');
+    }
+
+    el.innerHTML = html;
+  }catch(e){
+    el.innerHTML=`<div style="color:var(--r);font-size:11px">Error cargando pares del día</div>`;
+  }
+}
   // Muestra los pares intra-día activos y cumplidos del día de hoy
   const el = document.getElementById('intraDiaMKV');
   if(!el) return;
