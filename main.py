@@ -1743,6 +1743,42 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
 # ══════════════════════════════════════════════════════
 # MARKOV INTRADAY — Top pares intra-día dinámicos
 # ══════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════
+# PROCESAR — genera predicción para la hora actual
+# El dashboard llama esto con el botón PROCESAR
+# ══════════════════════════════════════════════════════
+@app.get("/procesar")
+async def procesar(db: AsyncSession = Depends(get_db)):
+    """
+    Genera predicción V10 para la hora actual y la guarda en auditoria_ia.
+    Llamado por el botón PROCESAR del dashboard.
+    """
+    try:
+        resultado = await generar_prediccion(db)
+        if not resultado or not resultado.get("top3"):
+            return {"status": "error", "message": "Sin predicción generada"}
+        top3 = resultado.get("top3", [])
+        return {
+            "status":        "success",
+            "hora":          resultado.get("hora"),
+            "prediccion_1":  top3[0]["animal"].lower() if len(top3) > 0 else None,
+            "prediccion_2":  top3[1]["animal"].lower() if len(top3) > 1 else None,
+            "prediccion_3":  top3[2]["animal"].lower() if len(top3) > 2 else None,
+            "confianza_pct": resultado.get("confianza_idx", 0),
+            "señal_texto":   resultado.get("señal_texto", ""),
+            "operar":        resultado.get("operar", False),
+            "hora_premium":  resultado.get("hora_premium", False),
+            "top3":          top3,
+            "analisis":      resultado.get("analisis", ""),
+            "contexto_dia":  resultado.get("contexto_dia", {}),
+            "config_dinamica": resultado.get("config_dinamica", {}),
+        }
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/markov-intraday")
 async def markov_intraday_top(
     limit: int = Query(default=20),
