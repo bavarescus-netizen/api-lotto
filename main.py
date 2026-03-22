@@ -14,7 +14,8 @@ from app.services.motor_v10 import (
     entrenar_modelo, backtest, calibrar_predicciones,
     llenar_auditoria_retroactiva, aprender_desde_historico,
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
-    obtener_contexto_diario,
+    obtener_contexto_diario, recalcular_markov_intraday,
+    cargar_config_dinamica,
 )
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
@@ -138,8 +139,27 @@ async def iniciar_bot():
                     UNIQUE(hora, animal_previo, animal_sig)
                 )
             """))
+            # markov_intraday — pares intra-día dinámicos
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS markov_intraday (
+                    id                   SERIAL PRIMARY KEY,
+                    hora_origen          VARCHAR(20) NOT NULL,
+                    hora_destino         VARCHAR(20) NOT NULL,
+                    animal_origen        VARCHAR(50) NOT NULL,
+                    animal_destino       VARCHAR(50) NOT NULL,
+                    frecuencia           INTEGER DEFAULT 0,
+                    probabilidad         DOUBLE PRECISION DEFAULT 0,
+                    ventaja_vs_azar      DOUBLE PRECISION DEFAULT 0,
+                    ultima_actualizacion TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(hora_origen, hora_destino, animal_origen)
+                )
+            """))
+            await db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_markov_intraday_lookup
+                ON markov_intraday(hora_origen, hora_destino, animal_origen)
+            """))
             await db.commit()
-            print("✅ V10: markov_transiciones y motor_pesos_hora listos")
+            print("✅ V10: markov_transiciones, markov_intraday y motor_pesos_hora listos")
         except Exception as e:
             await db.rollback()
             print(f"Warning V10 tables: {e}")
@@ -320,6 +340,14 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "SELECT COUNT(*) FROM markov_transiciones"
         ))).scalar() or 0
 
+        intraday_total = 0
+        try:
+            intraday_total = (await db.execute(text(
+                "SELECT COUNT(*) FROM markov_intraday WHERE ventaja_vs_azar > 5.0"
+            ))).scalar() or 0
+        except Exception:
+            pass
+
         # ── Total auditoria ──
         total_audit = (await db.execute(text(
             "SELECT COUNT(*) FROM auditoria_ia"
@@ -338,6 +366,7 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "motor": {
                 "version": "V10", "generacion": gen,
                 "markov_transiciones": int(markov_total),
+                "markov_intraday_pares": int(intraday_total),
                 "decay_lambda": 0.008,
                 "pesos": {"reciente":0.25,"deuda":0.25,"anti":0.25,"patron":0.25},
             },
@@ -1698,6 +1727,10 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             logger.error(f"PASO 4 markov TRUNCATE ERROR: {e_mk}")
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
+        # PASO 5: Recalcular markov_intraday — pares intra-día dinámicos
+        resultado_intraday = await recalcular_markov_intraday(db)
+        intraday_n = resultado_intraday.get("insertados", 0)
+
         # Métricas finales
         res = (await db.execute(text("""
             SELECT
@@ -1729,17 +1762,100 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             "efectividad_top1": ef1,
             "efectividad_top3": ef3,
             "markov_transiciones": int(markov_n),
+            "markov_intraday":     intraday_n,
             "message": (
                 f"✅ Entrenado en {elapsed}s | "
                 f"{insertados:,} filas | "
                 f"Top1: {ef1}% | Top3: {ef3}% | "
-                f"Markov: {int(markov_n):,} transiciones"
+                f"Markov: {int(markov_n):,} | Intraday: {intraday_n} pares"
             )
         }
     except Exception as e:
         await db.rollback()
         import traceback; traceback.print_exc()
         return {"status": "error", "message": str(e)}
+
+
+
+# ══════════════════════════════════════════════════════
+# MARKOV INTRADAY — Top pares intra-día dinámicos
+# ══════════════════════════════════════════════════════
+@app.get("/markov-intraday")
+async def markov_intraday_top(
+    limit: int = Query(default=20),
+    hora_destino: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retorna los mejores pares intra-día desde markov_intraday.
+    Se actualiza automáticamente con cada ENTRENAR COMPLETO.
+    """
+    try:
+        params = {"limit": limit}
+        where  = "WHERE frecuencia >= 3 AND ventaja_vs_azar > 0"
+        if hora_destino:
+            where += " AND hora_destino = :hora_destino"
+            params["hora_destino"] = hora_destino
+
+        rows = (await db.execute(text(f"""
+            SELECT hora_origen, hora_destino, animal_origen, animal_destino,
+                   frecuencia, probabilidad, ventaja_vs_azar, ultima_actualizacion
+            FROM markov_intraday
+            {where}
+            ORDER BY ventaja_vs_azar DESC
+            LIMIT :limit
+        """), params)).fetchall()
+
+        return [
+            {
+                "hora_origen":    r[0],
+                "hora_destino":   r[1],
+                "animal_origen":  r[2],
+                "animal_destino": r[3],
+                "frecuencia":     int(r[4]),
+                "probabilidad":   round(float(r[5]), 2),
+                "ventaja_vs_azar": round(float(r[6]), 2),
+                "ultima_actualizacion": str(r[7]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/config-dinamica")
+async def get_config_dinamica(db: AsyncSession = Depends(get_db)):
+    """
+    Retorna la configuración dinámica actual del motor:
+    multiplicadores por hora, umbrales, pesos anti-racha.
+    Se actualiza con cada ENTRENAR COMPLETO.
+    """
+    try:
+        config = await cargar_config_dinamica(db)
+        return {
+            "status": "success",
+            "multiplicador_hora":   config.get("multiplicador_hora", {}),
+            "es_rentable_hora":     config.get("es_rentable_hora", {}),
+            "peso_anti_racha_hora": config.get("peso_anti_racha_hora", {}),
+            "ef_top3_por_hora":     config.get("ef_top3_por_hora", {}),
+            "umbral_rentabilidad":  config.get("umbral_rentabilidad", 10.0),
+            "umbral_confianza":     config.get("umbral_confianza", 25),
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/recalcular-intraday")
+async def endpoint_recalcular_intraday(db: AsyncSession = Depends(get_db)):
+    """
+    Recalcula manualmente markov_intraday desde historico real.
+    Normalmente se llama automáticamente desde ENTRENAR COMPLETO.
+    """
+    try:
+        resultado = await recalcular_markov_intraday(db)
+        return resultado
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/health")
