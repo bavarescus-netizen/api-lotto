@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Dashboard Lotto Pro</title>
+<title>Dashboard Lotto Pro V10</title>
 
 <style>
 :root{
@@ -10,11 +10,13 @@
   --card:#1e293b;
   --accent:#00eaff;
   --text:#e2e8f0;
+  --success:#00ff88;
+  --danger:#ff4444;
 }
 
 body{
   margin:0;
-  font-family:Arial, sans-serif;
+  font-family: 'Segoe UI', sans-serif;
   background:var(--bg);
   color:var(--text);
 }
@@ -22,259 +24,146 @@ body{
 nav{
   display:flex;
   gap:10px;
-  padding:10px;
+  padding:15px;
   background:#020617;
+  border-bottom: 1px solid #334155;
 }
 
 nav button{
-  padding:10px;
+  padding:10px 20px;
   background:var(--card);
-  border:none;
+  border:1px solid #334155;
+  border-radius: 5px;
   color:white;
   cursor:pointer;
+  transition: 0.3s;
 }
 
 nav button.active{
   background:var(--accent);
   color:black;
+  font-weight: bold;
 }
 
 .page{
   display:none;
   padding:20px;
+  max-width: 1200px;
+  margin: auto;
 }
 
 .page.active{
   display:block;
 }
 
+.grid-main{
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 20px;
+}
+
 .card{
   background:var(--card);
-  padding:15px;
-  border-radius:10px;
-  margin-bottom:10px;
+  padding:20px;
+  border-radius:12px;
+  margin-bottom:20px;
+  border: 1px solid #475569;
 }
+
+.card h3 { margin-top: 0; color: var(--accent); font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; }
+
+/* TABLAS */
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; padding: 12px; color: var(--accent); border-bottom: 2px solid #0f172a; }
+td { padding: 12px; border-bottom: 1px solid #334155; }
 
 /* TOAST */
 .toast{
-  position:fixed;
-  bottom:20px;
-  right:20px;
-  padding:10px 15px;
-  border-radius:8px;
-  color:white;
-  z-index:999;
+  position:fixed; bottom:20px; right:20px; padding:12px 20px;
+  border-radius:8px; color:white; z-index:999; font-weight: bold;
 }
-
-.toast.ok{ background:green; }
-.toast.error{ background:red; }
-
+.toast.ok{ background: var(--success); color: #064e3b; }
+.toast.error{ background: var(--danger); }
 </style>
 </head>
 
 <body>
 
 <nav>
-  <button data-tab="dashboard" class="active">Dashboard</button>
-  <button data-tab="predicciones">Predicciones</button>
+  <button class="active" onclick="showPage('inicio')">🏠 PANEL V10</button>
+  <button onclick="showPage('tareas')">⚙️ PROCESOS</button>
+  <button data-action="refresh">🔄 ACTUALIZAR</button>
 </nav>
 
-<div id="dashboard" class="page active">
-  <div class="card">
-    <h3>Estado del sistema</h3>
-    <div id="estado">Cargando...</div>
-    <button data-action="refresh">Actualizar</button>
-  </div>
+<div id="page-inicio" class="page active">
+  <div class="grid-main">
+    
+    <div class="col">
+      <div class="card">
+        <h3>🎯 PREDICCIÓN V10</h3>
+        <div id="current-prediction" style="text-align:center; padding:10px 0;">
+            <p>Conectando con el motor...</p>
+        </div>
+      </div>
 
-  <div class="card">
-    <h3>Motor Markov</h3>
-    <button data-action="fixMarkov">Corregir</button>
+      <div class="card">
+        <h3>📊 RENDIMIENTO HOY</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Efectividad Top 3:</span>
+            <b id="efectividad-dia" style="font-size: 1.8em; color: var(--success);">--%</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h3>📝 AUDITORÍA DE RESULTADOS</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>HORA</th>
+              <th>RESULTADO</th>
+              <th>PREDICCIONES</th>
+              <th>ESTADO</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-bitacora">
+            <tr><td colspan="4">Cargando bitácora...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 </div>
 
-<div id="predicciones" class="page">
+<div id="page-tareas" class="page">
   <div class="card">
-    <h3>Predicciones</h3>
-    <div id="prediccionesList">Cargando...</div>
+    <h3>⚙️ ESTADO DEL SERVIDOR</h3>
+    <div id="tarea-status" style="padding:15px; background:#0f172a; border-radius:8px; margin-bottom:15px; font-family:monospace;">
+        IDLE
+    </div>
+    <button onclick="lanzarAprendizaje()" style="background:var(--accent); color:black; border:none; padding:12px; border-radius:5px; cursor:pointer; font-weight:bold;">
+        FORZAR RE-ENTRENAMIENTO V10
+    </button>
   </div>
 </div>
 
 <script>
-
-// ==========================
-// INIT
-// ==========================
-
-document.addEventListener("DOMContentLoaded", () => {
-  initApp();
-});
-
-function initApp(){
-  initTabs();
-  startIntervals();
-  cargarDatos();
-}
-
-// ==========================
-// TABS
-// ==========================
-
-function initTabs(){
-  document.querySelectorAll('nav button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
-      document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.tab).classList.add('active');
-
-      cargarDatos();
-    });
-  });
-}
-
-function getActivePage(){
-  return document.querySelector('.page.active');
-}
-
-// ==========================
-// API
-// ==========================
-
-async function apiFetch(url, options = {}) {
+// --- UTILS ---
+async function apiFetch(url, opts={}){
   try {
-    const res = await fetch(url, options);
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    return await res.json();
-
-  } catch (err) {
-    console.error(err);
-    showToast('Error conexión', 'error');
+    const r = await fetch(url, opts);
+    return await r.json();
+  } catch(e) {
+    showToast("Error de conexión", "error");
     return null;
   }
 }
 
-// ==========================
-// DATA LOAD
-// ==========================
-
-async function cargarDatos(){
-  const page = getActivePage();
-  if(!page) return;
-
-  if(page.id === "dashboard"){
-    const data = await apiFetch('/estado');
-    if(data) renderEstado(data);
-  }
-
-  if(page.id === "predicciones"){
-    const data = await apiFetch('/predicciones');
-    if(data) renderPredicciones(data);
-  }
+function showPage(id){
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  if(event) event.target.classList.add('active');
 }
-
-// ==========================
-// RENDER
-// ==========================
-
-function renderEstado(data){
-  document.getElementById('estado').textContent =
-    JSON.stringify(data, null, 2);
-}
-
-function renderPredicciones(data){
-  const cont = document.getElementById('prediccionesList');
-
-  cont.innerHTML = data.map(p =>
-    `<div class="card">${p.numero} - ${p.probabilidad}%</div>`
-  ).join('');
-}
-
-// ==========================
-// ACTIONS
-// ==========================
-
-async function fixMarkovDirecto(){
-  showToast('Corrigiendo...');
-
-  const res = await apiFetch('/fix-markov', { method:'POST' });
-
-  if(res){
-    showToast('Corrección aplicada');
-    cargarDatos();
-  }
-}
-
-// ==========================
-// EVENTS GLOBAL
-// ==========================
-
-document.addEventListener('click', (e) => {
-  const action = e.target.dataset.action;
-
-  if (!action) return;
-
-  switch(action){
-    case 'refresh':
-      cargarDatos();
-      break;
-
-    case 'fixMarkov':
-      fixMarkovDirecto();
-      break;
-  }
-});
-
-// ==========================
-// INTERVAL CONTROL
-// ==========================
-
-let intervals = [];
-
-function startIntervals(){
-  stopIntervals();
-
-  intervals.push(setInterval(keepAlive, 120000));
-  intervals.push(setInterval(cargarDatos, 180000));
-}
-
-function stopIntervals(){
-  intervals.forEach(clearInterval);
-  intervals = [];
-}
-
-document.addEventListener("visibilitychange", () => {
-  if(document.hidden){
-    stopIntervals();
-  } else {
-    startIntervals();
-  }
-});
-
-// ==========================
-// KEEP ALIVE
-// ==========================
-
-async function keepAlive(){
-  await fetch('/ping').catch(()=>{});
-}
-
-// ==========================
-// UI
-// ==========================
-
-function showToast(msg, type='ok'){
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = msg;
-
-  document.body.appendChild(el);
-  setTimeout(()=> el.remove(), 3000);
-}
-
-</script>
-
-</body>
-</html>
