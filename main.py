@@ -208,7 +208,45 @@ async def get_dashboard_datos(db: AsyncSession = Depends(get_db)):
             status_code=500, 
             content={"status": "error", "message": str(e)}
         )
+# --- SERVIR EL DASHBOARD EN LA RAÍZ ---
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    try:
+        # directory="." indica que el archivo está en la carpeta principal
+        templates = Jinja2Templates(directory=".")
+        return templates.TemplateResponse("dashboard.html", {"request": request})
+    except Exception as e:
+        print(f"Error renderizando dashboard: {e}")
+        return HTMLResponse(content=f"Error al cargar dashboard.html: {e}", status_code=500)
 
+# --- ENDPOINT DE DATOS PARA EL DASHBOARD ---
+@app.get("/api/dashboard-datos")
+async def get_dashboard_datos(db: AsyncSession = Depends(get_db)):
+    try:
+        # Llamadas a las funciones de motor_v10.py que ya importaste
+        pred = await generar_prediccion(db)
+        stats = await obtener_estadisticas(db)
+        bitacora = await obtener_bitacora(db, limit=10)
+
+        return {
+            "status": "success",
+            "servidor_hora": datetime.datetime.now().strftime("%H:%M:%S"),
+            "tarea_estado": _tarea, 
+            "resumen": {
+                "efectividad_dia": stats.get("efectividad_promedio", 0) if stats else 0,
+                "total_sorteos": len(bitacora),
+            },
+            "prediccion": {
+                "hora": pred.get("hora", "--:--"),
+                "animalitos": pred.get("top3", []), 
+                "confianza": pred.get("confianza", 0),
+                "metodo": "V10 + Markov"
+            },
+            "bitacora": bitacora
+        }
+    except Exception as e:
+        print(f"Error en API Dashboard: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 # ═══════════════════════════════════════════════════════════
 # HOME — Dashboard estático, datos cargados via JS async
 # ═══════════════════════════════════════════════════════════
