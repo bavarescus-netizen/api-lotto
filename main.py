@@ -18,7 +18,7 @@ from app.services.motor_v10 import (
     cargar_config_dinamica,
 )
 
-# ── Estado global de tareas largas (no bloquean el servidor) ──
+# ── Estado global de tareas largas (no bloquean el servidor) ──Z
 _tarea = {
     "nombre": None,
     "estado": "idle",    # idle | running | done | error
