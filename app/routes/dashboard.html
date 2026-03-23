@@ -100,15 +100,12 @@ nav button.active{
 </div>
 
 <script>
-
 // ==========================
 // INIT
 // ==========================
-
 document.addEventListener("DOMContentLoaded", () => {
   initApp();
 });
-
 function initApp(){
   initTabs();
   startIntervals();
@@ -118,7 +115,6 @@ function initApp(){
 // ==========================
 // TABS
 // ==========================
-
 function initTabs(){
   document.querySelectorAll('nav button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -132,33 +128,6 @@ function initTabs(){
     });
   });
 }
-
-function getActivePage(){
-  return document.querySelector('.page.active');
-}
-
-// ==========================
-// API
-// ==========================
-
-async function apiFetch(url, options = {}) {
-  try {
-    const res = await fetch(url, options);
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    return await res.json();
-
-  } catch (err) {
-    console.error(err);
-    showToast('Error conexión', 'error');
-    return null;
-  }
-}
-
-// ==========================
-// DATA LOAD
-// ==========================
 
 async function cargarDatos(){
   const page = getActivePage();
@@ -175,10 +144,6 @@ async function cargarDatos(){
   }
 }
 
-// ==========================
-// RENDER
-// ==========================
-
 function renderEstado(data){
   document.getElementById('estado').textContent =
     JSON.stringify(data, null, 2);
@@ -193,24 +158,8 @@ function renderPredicciones(data){
 }
 
 // ==========================
-// ACTIONS
-// ==========================
-
-async function fixMarkovDirecto(){
-  showToast('Corrigiendo...');
-
-  const res = await apiFetch('/fix-markov', { method:'POST' });
-
-  if(res){
-    showToast('Corrección aplicada');
-    cargarDatos();
-  }
-}
-
-// ==========================
 // EVENTS GLOBAL
 // ==========================
-
 document.addEventListener('click', (e) => {
   const action = e.target.dataset.action;
 
@@ -226,54 +175,6 @@ document.addEventListener('click', (e) => {
       break;
   }
 });
-
-// ==========================
-// INTERVAL CONTROL
-// ==========================
-
-let intervals = [];
-
-function startIntervals(){
-  stopIntervals();
-
-  intervals.push(setInterval(keepAlive, 120000));
-  intervals.push(setInterval(cargarDatos, 180000));
-}
-
-function stopIntervals(){
-  intervals.forEach(clearInterval);
-  intervals = [];
-}
-
-document.addEventListener("visibilitychange", () => {
-  if(document.hidden){
-    stopIntervals();
-  } else {
-    startIntervals();
-  }
-});
-
-// ==========================
-// KEEP ALIVE
-// ==========================
-
-async function keepAlive(){
-  await fetch('/ping').catch(()=>{});
-}
-
-// ==========================
-// UI
-// ==========================
-
-function showToast(msg, type='ok'){
-  const el = document.createElement('div');
-  el.className = `toast ${type}`;
-  el.textContent = msg;
-
-  document.body.appendChild(el);
-  setTimeout(()=> el.remove(), 3000);
-}
-
 </script>
 
 </body>
