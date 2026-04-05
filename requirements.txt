@@ -20,3 +20,4 @@ beautifulsoup4
 requests
 scikit-learn
 numpy
+pytz 
