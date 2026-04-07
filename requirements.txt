@@ -5,7 +5,6 @@ asyncpg
 python-dotenv
 pandas
 matplotlib
-streamlit
 httpx
 jinja2
 psycopg2
@@ -16,8 +15,6 @@ lxml
 openpyxl
 apscheduler
 python-multipart
-beautifulsoup4
-requests
 scikit-learn
 numpy
-pytz 
+tzdata
