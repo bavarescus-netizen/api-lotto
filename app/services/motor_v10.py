@@ -5,7 +5,7 @@ VERSIÓN DINÁMICA COMPLETA
 Todo se lee desde la BD — sin diccionarios hardcodeados.
 Los patrones se actualizan solos con cada ENTRENAR COMPLETO.
 
-Cambios vs versión anterior:
+Cambios vs versión anterior: 
   - _MULTIPLICADOR_HORA        → lee rentabilidad_hora.efectividad_top3
   - _HORAS_PRIORITARIAS        → lee rentabilidad_hora (mismo dato, una sola fuente)
   - _PARES_CORRELACIONADOS     → lee markov_transiciones dinámicamente
