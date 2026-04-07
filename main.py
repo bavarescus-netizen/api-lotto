@@ -203,10 +203,10 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════
 @app.get("/estado")
 async def estado_sistema(db: AsyncSession = Depends(get_db)):
-    import pytz
+    from zoneinfo import ZoneInfo
     from datetime import datetime
     try:
-        ahora = datetime.now(pytz.timezone('America/Caracas'))
+        ahora = datetime.now(ZoneInfo('America/Caracas'))
 
         # ── Último resultado capturado ──
         u = (await db.execute(text(
@@ -1268,8 +1268,9 @@ async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
     resultados de hoy, pares intra-día activos, cadenas, animales no vistos.
     """
     try:
-        import pytz, datetime as _dt
-        tz    = pytz.timezone('America/Caracas')
+        from zoneinfo import ZoneInfo
+import datetime as _dt
+        tz    = ZoneInfo('America/Caracas')
         ahora = _dt.datetime.now(tz)
         _lbls = {8:'08:00 AM', 9:'09:00 AM', 10:'10:00 AM', 11:'11:00 AM',
                  12:'12:00 PM',13:'01:00 PM', 14:'02:00 PM', 15:'03:00 PM',
@@ -1860,10 +1861,10 @@ async def endpoint_recalcular_intraday(db: AsyncSession = Depends(get_db)):
 @app.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
     """Keep-alive para cron-job.org — llámalo cada 5 min"""
-    import pytz
+    from zoneinfo import ZoneInfo
     from datetime import datetime
     try:
-        ahora = datetime.now(pytz.timezone('America/Caracas'))
+        ahora = datetime.now(ZoneInfo('America/Caracas'))
         mk = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
         # Recovery automática: si hay sorteos sin predecir de hoy → calibrar + predecir
