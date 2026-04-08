@@ -1,6 +1,6 @@
 """
 METRICAS.PY — Ruta de métricas
-Actualizado V10 — usa motor_v10
+Actualizado V10 — usa motor_v10A
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
