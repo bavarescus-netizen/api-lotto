@@ -1,6 +1,6 @@
 """
 PREDICCION.PY — Ruta de predicción
-Actualizado V10 — usa motor_v10
+Actualizado V10 — usa motor_v10 
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
