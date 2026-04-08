@@ -14,8 +14,7 @@ from app.services.motor_v10 import (
     entrenar_modelo, backtest, calibrar_predicciones,
     llenar_auditoria_retroactiva, aprender_desde_historico,
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
-    obtener_contexto_diario, recalcular_markov_intraday,
-    cargar_config_dinamica,
+    obtener_contexto_diario,
 )
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
@@ -139,27 +138,8 @@ async def iniciar_bot():
                     UNIQUE(hora, animal_previo, animal_sig)
                 )
             """))
-            # markov_intraday — pares intra-día dinámicos
-            await db.execute(text("""
-                CREATE TABLE IF NOT EXISTS markov_intraday (
-                    id                   SERIAL PRIMARY KEY,
-                    hora_origen          VARCHAR(20) NOT NULL,
-                    hora_destino         VARCHAR(20) NOT NULL,
-                    animal_origen        VARCHAR(50) NOT NULL,
-                    animal_destino       VARCHAR(50) NOT NULL,
-                    frecuencia           INTEGER DEFAULT 0,
-                    probabilidad         DOUBLE PRECISION DEFAULT 0,
-                    ventaja_vs_azar      DOUBLE PRECISION DEFAULT 0,
-                    ultima_actualizacion TIMESTAMP DEFAULT NOW(),
-                    UNIQUE(hora_origen, hora_destino, animal_origen)
-                )
-            """))
-            await db.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_markov_intraday_lookup
-                ON markov_intraday(hora_origen, hora_destino, animal_origen)
-            """))
             await db.commit()
-            print("✅ V10: markov_transiciones, markov_intraday y motor_pesos_hora listos")
+            print("✅ V10: markov_transiciones y motor_pesos_hora listos")
         except Exception as e:
             await db.rollback()
             print(f"Warning V10 tables: {e}")
@@ -170,29 +150,47 @@ async def iniciar_bot():
 
 
 # ═══════════════════════════════════════════════════════════
-# HOME — Dashboard estático, datos cargados via JS async
+# HOME — Dashboard Jinja2
 # ═══════════════════════════════════════════════════════════
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     try:
-        # Solo servir el HTML — el dashboard carga todo via fetch() async
-        # Evita timeout de Render en primera carga
+        res_ia     = await generar_prediccion(db)
+        stats_data = await obtener_estadisticas(db)
+        res_db = await db.execute(text("""
+            SELECT h.fecha, h.hora, h.animalito, a.acierto, a.animal_predicho,
+                   a.prediccion_1, a.prediccion_2, a.prediccion_3
+            FROM historico h
+            LEFT JOIN auditoria_ia a ON h.fecha=a.fecha AND h.hora=a.hora
+            WHERE h.loteria='Lotto Activo'
+            ORDER BY h.fecha DESC, h.hora DESC LIMIT 12
+        """))
+        ultimos_db = []
+        for r in res_db.fetchall():
+            nombre_animal = re.sub(r'[^a-z]','',r[2].lower())
+            predicho_raw  = re.sub(r'[^a-z]','',(r[4] or '').lower())
+            fecha_str     = r[0].strftime("%m-%d") if r[0] else "—"
+            ultimos_db.append({
+                "fecha": fecha_str, "hora": r[1], "animal": r[2],
+                "img": f"{nombre_animal}.png", "acierto": r[3],
+                "predicho": predicho_raw,
+                "prediccion_1": r[5], "prediccion_2": r[6], "prediccion_3": r[7],
+            })
         return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "top3": [],
-            "ultimos_db": [],
-            "efectividad": 0,
-            "efectividad_top3": 0,
-            "aciertos_hoy": 0,
-            "sorteos_hoy": 0,
-            "total_historico": 0,
-            "horas_rentables": [],
-            "ultimo_resultado": "N/A",
-            "analisis": "",
-            "confianza_idx": 0,
-            "señal_texto": "",
-            "hora_premium": False,
-            "ef_hora_top3": 0,
+            "request": request, "top3": res_ia.get("top3",[]),
+            "ultimos_db": ultimos_db,
+            "efectividad": stats_data.get("efectividad_global",0),
+            "efectividad_top3": stats_data.get("efectividad_top3",0),
+            "aciertos_hoy": stats_data.get("aciertos_hoy",0),
+            "sorteos_hoy": stats_data.get("sorteos_hoy",0),
+            "total_historico": stats_data.get("total_historico",0),
+            "horas_rentables": stats_data.get("horas_rentables",[]),
+            "ultimo_resultado": res_ia.get("ultimo_resultado","N/A"),
+            "analisis": res_ia.get("analisis",""),
+            "confianza_idx": res_ia.get("confianza_idx",0),
+            "señal_texto": res_ia.get("señal_texto",""),
+            "hora_premium": res_ia.get("hora_premium",False),
+            "ef_hora_top3": res_ia.get("efectividad_hora_top3",0),
         })
     except Exception as e:
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
@@ -242,14 +240,33 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "ORDER BY fecha DESC LIMIT 1"
         ), {"hoy": ahora.date(), "hora": _hora_prox})).fetchone()
 
-        # Si no hay predicción guardada → usar la última disponible sin generar nueva
+        # Si no hay predicción guardada para la próxima hora → generarla en vivo
         if not p:
-            p = (await db.execute(text(
-                "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
-                "prediccion_1,prediccion_2,prediccion_3,"
-                "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
-                "FROM auditoria_ia ORDER BY fecha DESC, hora DESC LIMIT 1"
-            ))).fetchone()
+            try:
+                from app.core.motor_v10 import generar_prediccion
+                _pred_live = await generar_prediccion(db)
+                if _pred_live and _pred_live.get("prediccion_1"):
+                    # Construir tupla compatible
+                    p = (
+                        ahora.date(),
+                        _pred_live.get("hora", _hora_prox),
+                        _pred_live.get("prediccion_1"),
+                        _pred_live.get("confianza_pct", 0),
+                        None, None,
+                        _pred_live.get("prediccion_1"),
+                        _pred_live.get("prediccion_2"),
+                        _pred_live.get("prediccion_3"),
+                        _pred_live.get("confianza_hora", 0),
+                        _pred_live.get("es_hora_rentable", False),
+                    )
+            except Exception:
+                # Fallback: última predicción de la BD
+                p = (await db.execute(text(
+                    "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
+                    "prediccion_1,prediccion_2,prediccion_3,"
+                    "COALESCE(confianza_hora,0),COALESCE(es_hora_rentable,FALSE) "
+                    "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
+                ))).fetchone()
 
         # ── Métricas desde rentabilidad_hora (sin JOINs pesados) ──
         rh = (await db.execute(text("""
@@ -303,14 +320,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "SELECT COUNT(*) FROM markov_transiciones"
         ))).scalar() or 0
 
-        intraday_total = 0
-        try:
-            intraday_total = (await db.execute(text(
-                "SELECT COUNT(*) FROM markov_intraday WHERE ventaja_vs_azar > 5.0"
-            ))).scalar() or 0
-        except Exception:
-            pass
-
         # ── Total auditoria ──
         total_audit = (await db.execute(text(
             "SELECT COUNT(*) FROM auditoria_ia"
@@ -329,7 +338,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "motor": {
                 "version": "V10", "generacion": gen,
                 "markov_transiciones": int(markov_total),
-                "markov_intraday_pares": int(intraday_total),
                 "decay_lambda": 0.008,
                 "pesos": {"reciente":0.25,"deuda":0.25,"anti":0.25,"patron":0.25},
             },
@@ -1268,8 +1276,8 @@ async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
     resultados de hoy, pares intra-día activos, cadenas, animales no vistos.
     """
     try:
+        import datetime as _dt
         from zoneinfo import ZoneInfo
-import datetime as _dt
         tz    = ZoneInfo('America/Caracas')
         ahora = _dt.datetime.now(tz)
         _lbls = {8:'08:00 AM', 9:'09:00 AM', 10:'10:00 AM', 11:'11:00 AM',
@@ -1691,10 +1699,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             logger.error(f"PASO 4 markov TRUNCATE ERROR: {e_mk}")
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
-        # PASO 5: Recalcular markov_intraday — pares intra-día dinámicos
-        resultado_intraday = await recalcular_markov_intraday(db)
-        intraday_n = resultado_intraday.get("insertados", 0)
-
         # Métricas finales
         res = (await db.execute(text("""
             SELECT
@@ -1726,136 +1730,17 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             "efectividad_top1": ef1,
             "efectividad_top3": ef3,
             "markov_transiciones": int(markov_n),
-            "markov_intraday":     intraday_n,
             "message": (
                 f"✅ Entrenado en {elapsed}s | "
                 f"{insertados:,} filas | "
                 f"Top1: {ef1}% | Top3: {ef3}% | "
-                f"Markov: {int(markov_n):,} | Intraday: {intraday_n} pares"
+                f"Markov: {int(markov_n):,} transiciones"
             )
         }
     except Exception as e:
         await db.rollback()
         import traceback; traceback.print_exc()
         return {"status": "error", "message": str(e)}
-
-
-
-# ══════════════════════════════════════════════════════
-# MARKOV INTRADAY — Top pares intra-día dinámicos
-# ══════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════
-# PROCESAR — genera predicción para la hora actual
-# El dashboard llama esto con el botón PROCESAR
-# ══════════════════════════════════════════════════════
-@app.get("/procesar")
-async def procesar(db: AsyncSession = Depends(get_db)):
-    """
-    Genera predicción V10 para la hora actual y la guarda en auditoria_ia.
-    Llamado por el botón PROCESAR del dashboard.
-    """
-    try:
-        resultado = await generar_prediccion(db)
-        if not resultado or not resultado.get("top3"):
-            return {"status": "error", "message": "Sin predicción generada"}
-        top3 = resultado.get("top3", [])
-        return {
-            "status":        "success",
-            "hora":          resultado.get("hora"),
-            "prediccion_1":  top3[0]["animal"].lower() if len(top3) > 0 else None,
-            "prediccion_2":  top3[1]["animal"].lower() if len(top3) > 1 else None,
-            "prediccion_3":  top3[2]["animal"].lower() if len(top3) > 2 else None,
-            "confianza_pct": resultado.get("confianza_idx", 0),
-            "señal_texto":   resultado.get("señal_texto", ""),
-            "operar":        resultado.get("operar", False),
-            "hora_premium":  resultado.get("hora_premium", False),
-            "top3":          top3,
-            "analisis":      resultado.get("analisis", ""),
-            "contexto_dia":  resultado.get("contexto_dia", {}),
-            "config_dinamica": resultado.get("config_dinamica", {}),
-        }
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return {"status": "error", "message": str(e)}
-
-
-@app.get("/markov-intraday")
-async def markov_intraday_top(
-    limit: int = Query(default=20),
-    hora_destino: str = Query(default=None),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Retorna los mejores pares intra-día desde markov_intraday.
-    Se actualiza automáticamente con cada ENTRENAR COMPLETO.
-    """
-    try:
-        params = {"limit": limit}
-        where  = "WHERE frecuencia >= 3 AND ventaja_vs_azar > 0"
-        if hora_destino:
-            where += " AND hora_destino = :hora_destino"
-            params["hora_destino"] = hora_destino
-
-        rows = (await db.execute(text(f"""
-            SELECT hora_origen, hora_destino, animal_origen, animal_destino,
-                   frecuencia, probabilidad, ventaja_vs_azar, ultima_actualizacion
-            FROM markov_intraday
-            {where}
-            ORDER BY ventaja_vs_azar DESC
-            LIMIT :limit
-        """), params)).fetchall()
-
-        return [
-            {
-                "hora_origen":    r[0],
-                "hora_destino":   r[1],
-                "animal_origen":  r[2],
-                "animal_destino": r[3],
-                "frecuencia":     int(r[4]),
-                "probabilidad":   round(float(r[5]), 2),
-                "ventaja_vs_azar": round(float(r[6]), 2),
-                "ultima_actualizacion": str(r[7]),
-            }
-            for r in rows
-        ]
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@app.get("/config-dinamica")
-async def get_config_dinamica(db: AsyncSession = Depends(get_db)):
-    """
-    Retorna la configuración dinámica actual del motor:
-    multiplicadores por hora, umbrales, pesos anti-racha.
-    Se actualiza con cada ENTRENAR COMPLETO.
-    """
-    try:
-        config = await cargar_config_dinamica(db)
-        return {
-            "status": "success",
-            "multiplicador_hora":   config.get("multiplicador_hora", {}),
-            "es_rentable_hora":     config.get("es_rentable_hora", {}),
-            "peso_anti_racha_hora": config.get("peso_anti_racha_hora", {}),
-            "ef_top3_por_hora":     config.get("ef_top3_por_hora", {}),
-            "umbral_rentabilidad":  config.get("umbral_rentabilidad", 10.0),
-            "umbral_confianza":     config.get("umbral_confianza", 25),
-        }
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-@app.get("/recalcular-intraday")
-async def endpoint_recalcular_intraday(db: AsyncSession = Depends(get_db)):
-    """
-    Recalcula manualmente markov_intraday desde historico real.
-    Normalmente se llama automáticamente desde ENTRENAR COMPLETO.
-    """
-    try:
-        resultado = await recalcular_markov_intraday(db)
-        return resultado
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 @app.get("/health")
