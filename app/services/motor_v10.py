@@ -1102,8 +1102,7 @@ async def calcular_rentabilidad_horas(db) -> dict:
                     "total": total, "aciertos_top1": ac1, "aciertos_top3": ac3,
                     "efectividad_top1": ef1, "efectividad_top3": ef3,
                     "wilson_lower_top3": round(wl*100, 2),
-                    "es_rentable": ef3 >= 8.5,  # umbral real: ef_top3 > azar (7.89%)
-                    "mult_hora": config.get("multiplicador_hora", {}).get(hora, 0.90) if hasattr(config, 'get') else 0.90,
+                    "es_rentable": ef3 >= 8.5,
                 }
             else:
                 resultado[hora] = {
