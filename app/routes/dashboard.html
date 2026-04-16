@@ -1144,24 +1144,6 @@ async function correrBacktest(){
   }
 async function fixMarkovDirecto(){
     const btn=document.getElementById('btnFixDirecto');
-    btn.disabled=true; btn.textContent='⏳ Normalizando...';
-    try{
-      const r=await fetch('/fix-markov-directo');
-      const d=await r.json();
-      if(d.corruptas_antes===0){
-        btn.textContent=`✅ Ya limpio (max: ${d.prob_max?.toFixed(1)||'?'}%)`;
-      } else {
-        btn.textContent=`✅ ${d.corruptas_antes} corregidas → max: ${d.prob_max_ahora?.toFixed(1)||'?'}%`;
-      }
-      setTimeout(()=>{ btn.textContent='🔩 FIX PROB DIRECTO'; btn.disabled=false; cargarMarkovTop(); },4000);
-    }catch(e){
-      btn.textContent='❌ Error';
-      setTimeout(()=>{ btn.textContent='🔩 FIX PROB DIRECTO'; btn.disabled=false; },3000);
-    }
-  }
-
-async function fixMarkovDirecto(){
-    const btn=document.getElementById('btnFixDirecto');
     const st=document.getElementById('fixDirectoStatus');
     btn.disabled=true; btn.textContent='⏳ Corrigiendo...';
     st.textContent='';
