@@ -125,14 +125,6 @@ async def migrar_schema(db):
 # Se llama una vez por predicción para no hacer N queries
 # ══════════════════════════════════════════════════════
 async def cargar_config_dinamica(db) -> dict:
-    """
-    Carga desde BD todos los parámetros que antes eran hardcodeados:
-    - multiplicadores por hora (desde rentabilidad_hora)
-    - umbral de rentabilidad (percentil 75 de ef_top3)
-    - umbral de confianza (desde auditoria_ia histórica)
-    - pesos anti-racha por hora (desde historico real)
-    Retorna un dict con toda la config lista para usar.
-    """
     config = {
         "multiplicador_hora":    {},
         "es_rentable_hora":      {},
@@ -142,7 +134,6 @@ async def cargar_config_dinamica(db) -> dict:
         "ef_top3_por_hora":      {},
     }
 
-    # 1. Multiplicadores y rentabilidad desde rentabilidad_hora
     try:
         res = await db.execute(text("""
             SELECT hora, efectividad_top3, es_rentable, total_sorteos
@@ -159,9 +150,8 @@ async def cargar_config_dinamica(db) -> dict:
             config["ef_top3_por_hora"][hora]   = ef3
             config["es_rentable_hora"][hora]   = rentable
 
-            # Escala continua basada en efectividad real
             if total < 10:
-                mult = 0.90  # sin datos suficientes → neutro
+                mult = 0.90
             elif ef3 >= 15.0: mult = 1.40
             elif ef3 >= 12.0: mult = 1.30
             elif ef3 >= 10.0: mult = 1.15
@@ -174,7 +164,6 @@ async def cargar_config_dinamica(db) -> dict:
             if ef3 > 0:
                 ef_values.append(ef3)
 
-        # Umbral de rentabilidad = percentil 75 de ef_top3 real
         if len(ef_values) >= 4:
             ef_sorted = sorted(ef_values)
             p75_idx   = int(len(ef_sorted) * 0.75)
@@ -183,7 +172,6 @@ async def cargar_config_dinamica(db) -> dict:
     except Exception:
         pass
 
-    # 2. Umbral de confianza dinámico desde auditoria_ia
     try:
         res = await db.execute(text("""
             SELECT
@@ -196,13 +184,10 @@ async def cargar_config_dinamica(db) -> dict:
         r = res.fetchone()
         if r and int(r[0] or 0) >= 50:
             ef_global = float(r[1] or 0) / float(r[0]) * 100
-            # Umbral = ef_global * 0.85 (mínimo para operar)
             config["umbral_confianza"] = max(int(ef_global * 0.85), 20)
     except Exception:
         pass
 
-    # 3. Peso anti-racha por hora — calculado desde historico real
-    # % de repetición real por hora vs azar (2.63%)
     try:
         res = await db.execute(text("""
             WITH pares AS (
@@ -231,15 +216,14 @@ async def cargar_config_dinamica(db) -> dict:
         for r in rows:
             hora    = r[0]
             pct_rep = float(r[3] or azar_rep)
-            # Mientras menos repite vs azar → mayor peso anti-racha
-            ratio   = pct_rep / azar_rep  # <1 = anti-repite, >1 = pro-repite
-            if ratio <= 0.30:   peso = 0.42   # anti-repetición muy fuerte
+            ratio   = pct_rep / azar_rep
+            if ratio <= 0.30:   peso = 0.42
             elif ratio <= 0.50: peso = 0.36
             elif ratio <= 0.70: peso = 0.30
             elif ratio <= 0.90: peso = 0.22
-            elif ratio <= 1.10: peso = 0.18   # neutral
+            elif ratio <= 1.10: peso = 0.18
             elif ratio <= 1.30: peso = 0.15
-            else:               peso = 0.12   # pro-repetición → bajar anti
+            else:               peso = 0.12
             config["peso_anti_racha_hora"][hora] = peso
     except Exception:
         pass
@@ -498,20 +482,11 @@ async def calcular_anti_racha(db, hora_str, fecha_limite=None):
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 5: MARKOV INTRA-DÍA — DINÁMICO desde markov_intraday
-# Lee la tabla que se llena con ENTRENAR COMPLETO
-# Se actualiza solo — nuevos pares emergen automáticamente
 # ══════════════════════════════════════════════════════
 async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
-    """
-    Lee pares intra-día desde markov_intraday en BD.
-    Busca en múltiples horas origen (saltos 1, 2 y 3 horas).
-    Si hay varios pares activos, usa el de mayor ventaja estadística.
-    Umbral mínimo: frecuencia >= 3 y ventaja_vs_azar > 5.0%
-    """
     if fecha_limite is None:
         fecha_limite = date.today()
 
-    # Calcular horas origen posibles dinámicamente
     orden = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
              "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM",
              "06:00 PM","07:00 PM"]
@@ -520,7 +495,6 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
     except ValueError:
         return {}
 
-    # Revisar hasta 3 horas hacia atrás
     horas_origen = [orden[i] for i in range(max(0, idx_destino-3), idx_destino)]
     if not horas_origen:
         return {}
@@ -529,7 +503,6 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
     mejor_ventaja = 0.0
 
     for hora_origen in horas_origen:
-        # Buscar qué animal salió en esa hora origen HOY
         try:
             res_animal = await db.execute(text("""
                 SELECT LOWER(TRIM(animalito)) AS animal
@@ -545,7 +518,6 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
 
             animal_anterior = _normalizar(row[0])
 
-            # Buscar el mejor par desde markov_intraday
             res_par = await db.execute(text("""
                 SELECT animal_destino, probabilidad, ventaja_vs_azar, frecuencia
                 FROM markov_intraday
@@ -584,7 +556,6 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
     if not mejor_par:
         return {}
 
-    # Normalizar score: ventaja máxima conocida ~10.70%
     score = min(mejor_par["ventaja"] / 10.70, 1.0)
     return {
         mejor_par["animal"]: {
@@ -601,20 +572,11 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
 
 # ══════════════════════════════════════════════════════
 # SEÑAL 6: PARES CORRELACIONADOS — DINÁMICO desde markov_transiciones
-# Lee pares día→día en tiempo real
-# Se actualiza con cada ENTRENAR COMPLETO
 # ══════════════════════════════════════════════════════
 async def calcular_pares_correlacionados(db, hora_str, fecha_limite=None) -> dict:
-    """
-    Lee pares día→día desde markov_transiciones.
-    Si ayer salió X en esta hora, busca en BD qué animal tiene mayor prob hoy.
-    Umbral: frecuencia >= 5 y probabilidad > 4.0% (ventaja real sobre azar 2.63%)
-    Pares inversos: prob < 1.5% → penalización automática.
-    """
     if fecha_limite is None:
         fecha_limite = date.today()
     try:
-        # Animal que salió AYER en esta hora
         res = await db.execute(text("""
             SELECT animalito FROM historico
             WHERE hora    = :hora
@@ -628,7 +590,6 @@ async def calcular_pares_correlacionados(db, hora_str, fecha_limite=None) -> dic
 
         animal_ayer = _normalizar(row[0])
 
-        # Pares positivos — ventaja real sobre azar
         res_pares = await db.execute(text("""
             SELECT animal_sig, probabilidad, frecuencia
             FROM markov_transiciones
@@ -658,7 +619,6 @@ async def calcular_pares_correlacionados(db, hora_str, fecha_limite=None) -> dic
                     "frecuencia":  int(r[2]),
                 }
 
-        # Pares inversos — casi nunca ocurren → penalizar
         res_inv = await db.execute(text("""
             SELECT animal_sig, probabilidad
             FROM markov_transiciones
@@ -727,7 +687,6 @@ async def calcular_markov_hora(db, hora_str, fecha_limite=None):
     except Exception:
         pass
 
-    # Cálculo al vuelo si falla la tabla
     try:
         res_u = await db.execute(text("""
             SELECT animalito FROM historico
@@ -917,8 +876,7 @@ async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventan
 
 
 # ══════════════════════════════════════════════════════
-# COMBINAR SEÑALES V10 — completamente dinámico
-# Recibe config_dinamica en lugar de diccionarios hardcodeados
+# COMBINAR SEÑALES V10 — FIX: blindaje de tipos
 # ══════════════════════════════════════════════════════
 def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           ciclo_exacto, pen_reciente, pen_sobreprediccion,
@@ -926,11 +884,13 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           patron_fecha=None, pares=None, intraday=None):
     """
     Combina 9 señales usando config dinámica desde BD.
-    config = resultado de cargar_config_dinamica()
+    FIX v10.1: blindaje isinstance() para evitar 'unhashable type: dict'
+    cuando pares o intraday llegan como lista en lugar de dict.
     """
-    patron_fecha = patron_fecha or {}
-    pares        = pares or {}
-    intraday     = intraday or {}
+    # ── FIX CRÍTICO ── blindaje de tipos
+    patron_fecha = patron_fecha if isinstance(patron_fecha, dict) else {}
+    pares        = pares        if isinstance(pares,        dict) else {}
+    intraday     = intraday     if isinstance(intraday,     dict) else {}
 
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
@@ -938,10 +898,8 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         list(patron_fecha) + list(pares) + list(intraday)
     )
 
-    # Multiplicador dinámico desde BD (reemplaza _MULTIPLICADOR_HORA)
     mult_hora = config.get("multiplicador_hora", {}).get(hora_str, 0.90)
 
-    # Peso anti-racha dinámico desde BD (reemplaza _PESO_ANTI_RACHA_HORA)
     peso_anti_hora = config.get("peso_anti_racha_hora", {}).get(
         hora_str, pesos.get("anti", 0.22)
     )
@@ -1013,11 +971,6 @@ def calcular_indice_confianza_v10(scores, config, hora_str,
                                    aciertos_top3_hora=0,
                                    racha_fallos=0,
                                    ef_top3_reciente=None):
-    """
-    Índice de confianza completamente dinámico.
-    Usa config['multiplicador_hora'] en lugar de _HORAS_PRIORITARIAS hardcodeado.
-    Usa config['umbral_confianza'] en lugar de UMBRAL_CONFIANZA_OPERAR fijo.
-    """
     umbral_operar = config.get("umbral_confianza", _UMBRAL_CONFIANZA_DEFAULT)
 
     if not scores:
@@ -1027,7 +980,6 @@ def calcular_indice_confianza_v10(scores, config, hora_str,
     if len(valores) < 3:
         return 10, "🔴 DATOS INSUFICIENTES", False
 
-    # Base desde efectividad real reciente
     if ef_top3_reciente is not None and ef_top3_reciente > 0:
         base_reciente = min(int((ef_top3_reciente / 20.0) * 100), 80)
     elif total_sorteos_hora >= 20 and aciertos_top3_hora > 0:
@@ -1038,11 +990,9 @@ def calcular_indice_confianza_v10(scores, config, hora_str,
     else:
         base_reciente = 20
 
-    # Bonus por hora — usa multiplicador dinámico desde BD
     mult_hora  = config.get("multiplicador_hora", {}).get(hora_str or "", 0.90)
     bonus_hora = int((mult_hora - 0.90) * 100)
 
-    # Separación de scores (señal secundaria)
     top1, top2 = valores[0], valores[1]
     sep_rel    = (top1 - top2) / top1 if top1 > 0 else 0
     bonus_sep  = min(int(sep_rel * 30), 15)
@@ -1051,7 +1001,6 @@ def calcular_indice_confianza_v10(scores, config, hora_str,
 
     confianza = base_reciente + bonus_hora + bonus_sep
 
-    # Freno por racha de fallos
     if racha_fallos >= 5:   confianza = max(confianza - 20, 0)
     elif racha_fallos >= 3: confianza = max(confianza - 12, 0)
     elif racha_fallos >= 2: confianza = max(confianza - 6, 0)
@@ -1097,7 +1046,6 @@ async def calcular_rentabilidad_horas(db) -> dict:
                 ef1   = round(ac1/total*100, 2)
                 ef3   = round(ac3/total*100, 2)
                 wl    = wilson_lower(ac3, total)
-                # Umbral dinámico (se calcula en cargar_config_dinamica)
                 resultado[hora] = {
                     "total": total, "aciertos_top1": ac1, "aciertos_top3": ac3,
                     "efectividad_top1": ef1, "efectividad_top3": ef3,
@@ -1167,24 +1115,16 @@ async def obtener_rentabilidad_hora(db, hora_str) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# RECALCULAR markov_intraday — se llama en ENTRENAR COMPLETO
-# Calcula todos los pares intra-día desde historico real
-# y llena la tabla markov_intraday automáticamente
+# RECALCULAR markov_intraday
 # ══════════════════════════════════════════════════════
 async def recalcular_markov_intraday(db) -> dict:
-    """
-    Calcula todos los pares intra-día desde historico real.
-    Para cada combinación (hora_origen, hora_destino) con saltos 1, 2 y 3 horas,
-    calcula la probabilidad condicional de cada animal destino dado el origen.
-    Umbral mínimo: 3 ocurrencias. Guarda ventaja_vs_azar automáticamente.
-    """
     try:
         orden = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
                  "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM",
                  "06:00 PM","07:00 PM"]
 
         insertados = 0
-        azar = 100.0 / 38  # 2.63%
+        azar = 100.0 / 38
 
         for salto in [1, 2, 3]:
             for i in range(len(orden) - salto):
@@ -1286,7 +1226,6 @@ async def obtener_contexto_diario(db, hora_actual_str, fecha=None) -> dict:
                        "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
                        "04:00 PM","05:00 PM","06:00 PM","07:00 PM"]
 
-        # Resultados del día
         res = await db.execute(text("""
             SELECT TRIM(hora) AS hora, LOWER(TRIM(animalito)) AS animal
             FROM historico
@@ -1313,7 +1252,6 @@ async def obtener_contexto_diario(db, hora_actual_str, fecha=None) -> dict:
         except ValueError:
             horas_futuras = set(orden_horas)
 
-        # Pares intra-día activos — leídos dinámicamente desde markov_intraday
         res_pares = await db.execute(text("""
             SELECT hora_origen, hora_destino, animal_origen, animal_destino, ventaja_vs_azar
             FROM markov_intraday
@@ -1379,12 +1317,10 @@ async def generar_prediccion(db) -> dict:
         dia_semana = ahora.weekday()
         hoy        = ahora.date()
 
-        # Cargar config dinámica UNA VEZ — reemplaza todos los dicts hardcodeados
         config    = await cargar_config_dinamica(db)
         pesos     = await obtener_pesos_para_hora(db, hora_str)
         rent_hora = await obtener_rentabilidad_hora(db, hora_str)
 
-        # Señales
         deuda        = await calcular_deuda(db, hora_str)
         reciente     = await calcular_frecuencia_reciente(db, hora_str)
         patron       = await calcular_patron_dia(db, hora_str, dia_semana)
@@ -1404,7 +1340,6 @@ async def generar_prediccion(db) -> dict:
             patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday
         )
 
-        # Racha de fallos recientes
         racha_fallos = 0
         ef_top3_reciente = None
         try:
@@ -1480,7 +1415,6 @@ async def generar_prediccion(db) -> dict:
 
         es_hora_rentable = config.get("es_rentable_hora", {}).get(hora_str, False)
 
-        # Guardar predicción
         if top3:
             try:
                 pred1 = top3[0]["animal"].lower() if len(top3) > 0 else None
@@ -1510,7 +1444,6 @@ async def generar_prediccion(db) -> dict:
             except Exception:
                 await db.rollback()
 
-            # Guardar desglose en auditoria_señales
             try:
                 animal_top1 = _normalizar(top3[0]["animal"]) if top3 else None
                 if animal_top1:
@@ -1584,10 +1517,10 @@ async def generar_prediccion(db) -> dict:
             "proxima_hora":          proxima_hora,
             "pesos_actuales":        pesos,
             "config_dinamica": {
-                "mult_hora":          config.get("multiplicador_hora",{}).get(hora_str, 0.90),
-                "peso_anti":          config.get("peso_anti_racha_hora",{}).get(hora_str, 0.22),
+                "mult_hora":           config.get("multiplicador_hora",{}).get(hora_str, 0.90),
+                "peso_anti":           config.get("peso_anti_racha_hora",{}).get(hora_str, 0.22),
                 "umbral_rentabilidad": config.get("umbral_rentabilidad", 10.0),
-                "umbral_confianza":   config.get("umbral_confianza", 25),
+                "umbral_confianza":    config.get("umbral_confianza", 25),
             },
             "contexto_dia": {
                 "resultados_hoy":     ctx_dia.get("resultados_hoy", {}),
@@ -1615,11 +1548,10 @@ async def generar_prediccion(db) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# ENTRENAR — ahora incluye recalcular_markov_intraday
+# ENTRENAR
 # ══════════════════════════════════════════════════════
 async def entrenar_modelo(db) -> dict:
     try:
-        # Calibrar auditoria_ia pendientes
         await db.execute(text("""
             UPDATE auditoria_ia a
             SET acierto        = (LOWER(TRIM(a.animal_predicho))=LOWER(TRIM(h.animalito))),
@@ -1629,7 +1561,6 @@ async def entrenar_modelo(db) -> dict:
               AND (a.acierto IS NULL OR a.resultado_real='PENDIENTE' OR a.resultado_real IS NULL)
         """))
 
-        # Reconstruir probabilidades_hora
         try:
             await db.execute(text("DELETE FROM probabilidades_hora"))
             await db.execute(text("""
@@ -1672,14 +1603,12 @@ async def entrenar_modelo(db) -> dict:
                 LEFT JOIN reciente_7  r7  ON sp.hora=r7.hora  AND sp.animalito=r7.animalito
             """))
             await db.commit()
-        except Exception as e_prob:
+        except Exception:
             await db.rollback()
 
-        # Rentabilidad por hora
         rentabilidad = await calcular_rentabilidad_horas(db)
         await actualizar_tabla_rentabilidad(db, rentabilidad)
 
-        # ✅ NUEVO — Recalcular markov_intraday dinámicamente
         resultado_intraday = await recalcular_markov_intraday(db)
 
         res1 = await db.execute(text("SELECT COUNT(*) FROM historico WHERE loteria='Lotto Activo'"))
@@ -1728,7 +1657,7 @@ async def entrenar_modelo(db) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# APRENDIZAJE POR REFUERZO — sin cambios estructurales
+# APRENDIZAJE POR REFUERZO
 # ══════════════════════════════════════════════════════
 async def aprender_desde_historico(db, fecha_inicio=None, dias_por_generacion=30) -> dict:
     try:
@@ -2148,7 +2077,6 @@ async def obtener_estadisticas(db) -> dict:
         generacion = res_gen.scalar() or 1
         wilson_top3 = round(wilson_lower(ac3, total_cal)*100, 2) if total_cal > 0 else 0
 
-        # Config dinámica actual
         config = await cargar_config_dinamica(db)
 
         return {
