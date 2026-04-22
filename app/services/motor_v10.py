@@ -2545,7 +2545,7 @@ async def aprender_sorteo(db, fecha, hora: str, animal_real: str) -> dict:
         ))
         generacion = res_gen.scalar() or 1
 
-        # 8. Guardar registro
+       # 8. Guardar registro
         await db.execute(text("""
             INSERT INTO aprendizaje_sorteo (
                 fecha, hora, animal_real,
@@ -2556,7 +2556,7 @@ async def aprender_sorteo(db, fecha, hora: str, animal_real: str) -> dict:
             ) VALUES (
                 :f, :h, :real, :p1, :p2, :p3,
                 :at1, :at3, :señal,
-                :pa::jsonb, :pd::jsonb, :tasa, :gen
+                cast(:pa as jsonb), cast(:pd as jsonb), :tasa, :gen
             )
             ON CONFLICT (fecha, hora) DO UPDATE SET
                 animal_real      = EXCLUDED.animal_real,
@@ -2575,7 +2575,7 @@ async def aprender_sorteo(db, fecha, hora: str, animal_real: str) -> dict:
             "pd": json.dumps(pesos_despues),
             "tasa": tasa, "gen": generacion,
         })
-
+      
         # 9. Actualizar motor_pesos_hora
         await db.execute(text("""
             INSERT INTO motor_pesos_hora
