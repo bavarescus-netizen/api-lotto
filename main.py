@@ -15,6 +15,8 @@ from app.services.motor_v10 import (
     llenar_auditoria_retroactiva, aprender_desde_historico,
     migrar_schema, actualizar_resultados_señales, obtener_score_señales,
     obtener_contexto_diario,
+    # ── PASO 2: Aprendizaje por sorteo ──
+    aprender_sorteo, aprender_ultimos_n, obtener_historial_aprendizaje,
 )
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
@@ -144,6 +146,35 @@ async def iniciar_bot():
             await db.rollback()
             print(f"Warning V10 tables: {e}")
 
+        # ── PASO 2: tabla aprendizaje_sorteo ──
+        try:
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS aprendizaje_sorteo (
+                    id               SERIAL PRIMARY KEY,
+                    fecha            DATE NOT NULL,
+                    hora             VARCHAR(20) NOT NULL,
+                    animal_real      VARCHAR(50) NOT NULL,
+                    animal_pred1     VARCHAR(50),
+                    animal_pred2     VARCHAR(50),
+                    animal_pred3     VARCHAR(50),
+                    acerto_top1      BOOLEAN DEFAULT FALSE,
+                    acerto_top3      BOOLEAN DEFAULT FALSE,
+                    señal_dominante  VARCHAR(30),
+                    peso_antes       JSONB,
+                    peso_despues     JSONB,
+                    delta_ef         FLOAT DEFAULT 0,
+                    tasa_aprendizaje FLOAT DEFAULT 0.02,
+                    generacion       INT DEFAULT 1,
+                    creado           TIMESTAMP DEFAULT NOW(),
+                    UNIQUE(fecha, hora)
+                )
+            """))
+            await db.commit()
+            print("✅ PASO2: tabla aprendizaje_sorteo lista")
+        except Exception as e:
+            await db.rollback()
+            print(f"Warning aprendizaje_sorteo: {e}")
+
         break
     asyncio.create_task(ciclo_infinito())
     print("🚀 LOTTOAI PRO V10 — Markov + Decay + Gap + Pesos por hora")
@@ -155,21 +186,17 @@ async def iniciar_bot():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     # Sirve el HTML inmediatamente — el dashboard carga datos via JS
-    # NOTA: Starlette 1.0.0 requiere request como parámetro separado
     try:
-        return templates.TemplateResponse(
-            request=request,
-            name="dashboard.html",
-            context={
-                "top3": [], "ultimos_db": [],
-                "efectividad": 0, "efectividad_top3": 0,
-                "aciertos_hoy": 0, "sorteos_hoy": 0,
-                "total_historico": 0, "horas_rentables": [],
-                "ultimo_resultado": "N/A", "analisis": "",
-                "confianza_idx": 0, "señal_texto": "",
-                "hora_premium": False, "ef_hora_top3": 0,
-            }
-        )
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request,
+            "top3": [], "ultimos_db": [],
+            "efectividad": 0, "efectividad_top3": 0,
+            "aciertos_hoy": 0, "sorteos_hoy": 0,
+            "total_historico": 0, "horas_rentables": [],
+            "ultimo_resultado": "N/A", "analisis": "",
+            "confianza_idx": 0, "señal_texto": "",
+            "hora_premium": False, "ef_hora_top3": 0,
+        })
     except Exception as e:
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
@@ -1886,6 +1913,58 @@ async def endpoint_retroactivo_bloque(
 # RENTABILIDAD POR HORA — Tab "Rentabilidad Horas"
 # Lee de rentabilidad_hora + calcula en vivo desde auditoria_ia
 # ══════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+# PASO 2 — APRENDIZAJE POR SORTEO
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/aprender-sorteo")
+async def endpoint_aprender_sorteo(
+    fecha: str = Query(description="Fecha YYYY-MM-DD"),
+    hora:  str = Query(description="Hora ej: 08:00 AM"),
+    real:  str = Query(description="Animal real que salió"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Micro-ajusta los pesos del motor para una hora específica
+    basándose en el resultado real de ese sorteo.
+    Se llama automáticamente al cargar cada resultado.
+    """
+    from datetime import date as _date
+    try:
+        fecha_d = _date.fromisoformat(fecha)
+    except Exception:
+        return JSONResponse({"error": "Fecha inválida. Usar YYYY-MM-DD"}, status_code=400)
+    resultado = await aprender_sorteo(db, fecha_d, hora, real)
+    status_code = 200 if resultado.get("status") in ("success", "skip") else 500
+    return JSONResponse(resultado, status_code=status_code)
+
+
+@app.get("/aprender-ultimos")
+async def endpoint_aprender_ultimos(
+    n: int = Query(default=50, description="Cuántos sorteos procesar"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Procesa los últimos N sorteos con resultado real que aún
+    no tienen micro-ajuste registrado. Ideal para puesta al día.
+    """
+    resultado = await aprender_ultimos_n(db, n)
+    status_code = 200 if resultado.get("status") in ("success", "ok") else 500
+    return JSONResponse(resultado, status_code=status_code)
+
+
+@app.get("/historial-aprendizaje")
+async def endpoint_historial_aprendizaje(
+    limit: int = Query(default=30),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Historial de micro-ajustes de pesos realizados.
+    Muestra qué señal fue dominante y cómo evolucionaron los pesos.
+    """
+    return await obtener_historial_aprendizaje(db, limit)
+
 @app.get("/rentabilidad")
 async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
     try:
