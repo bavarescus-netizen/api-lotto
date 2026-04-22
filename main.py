@@ -155,17 +155,21 @@ async def iniciar_bot():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     # Sirve el HTML inmediatamente — el dashboard carga datos via JS
+    # NOTA: Starlette 1.0.0 requiere request como parámetro separado
     try:
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "top3": [], "ultimos_db": [],
-            "efectividad": 0, "efectividad_top3": 0,
-            "aciertos_hoy": 0, "sorteos_hoy": 0,
-            "total_historico": 0, "horas_rentables": [],
-            "ultimo_resultado": "N/A", "analisis": "",
-            "confianza_idx": 0, "señal_texto": "",
-            "hora_premium": False, "ef_hora_top3": 0,
-        })
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context={
+                "top3": [], "ultimos_db": [],
+                "efectividad": 0, "efectividad_top3": 0,
+                "aciertos_hoy": 0, "sorteos_hoy": 0,
+                "total_historico": 0, "horas_rentables": [],
+                "ultimo_resultado": "N/A", "analisis": "",
+                "confianza_idx": 0, "señal_texto": "",
+                "hora_premium": False, "ef_hora_top3": 0,
+            }
+        )
     except Exception as e:
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
