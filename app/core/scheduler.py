@@ -61,6 +61,16 @@ async def capturar_y_procesar(db):
                     await actualizar_auditoria_post_sorteo(db, fecha_hoy, hora_str, nombre_normalizado)
 
                 await db.commit()
+
+                # ── PASO 2: Micro-aprendizaje automático tras cada sorteo ──
+                try:
+                    from app.services.motor_v10 import aprender_sorteo
+                    for hora_str_ap, num_ap, nombre_ap in matches:
+                        nombre_n_ap = NUM_A_ANIMAL.get(str(int(num_ap)), nombre_ap.lower().strip())
+                        await aprender_sorteo(db, fecha_hoy, hora_str_ap, nombre_n_ap)
+                except Exception as e_ap:
+                    logger.warning(f"⚠️ Micro-aprendizaje: {e_ap}")
+
             else:
                 logger.warning(f"⚠️ Web bloqueada o caída (Status {r.status_code})")
     except Exception as e:
