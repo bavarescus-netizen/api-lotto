@@ -2656,6 +2656,7 @@ async def aprender_ultimos_n(db, n: int = 50) -> dict:
         for row in sorteos:
             fecha_s, hora_s, animal_s = row
             r = await aprender_sorteo(db, fecha_s, hora_s, animal_s)
+            print(f"DEBUG: {fecha_s} {hora_s} → {r}")  # ← AGREGA ESTA LÍNEA
             if r.get("status") == "success":
                 procesados += 1
                 if r.get("acerto_top1"):     aciertos1 += 1
