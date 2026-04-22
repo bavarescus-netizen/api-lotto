@@ -2408,3 +2408,335 @@ async def llenar_auditoria_retroactiva(db, fecha_desde=None, fecha_hasta=None, d
     except Exception as e:
         await db.rollback()
         return {"status":"error","message":str(e)}
+
+
+# ══════════════════════════════════════════════════════
+# APRENDIZAJE POR SORTEO — PASO 2
+# Micro-ajuste de pesos después de cada resultado real
+# Tasa pequeña (0.02) para no sobreajustar
+# Se ejecuta automáticamente tras cada sorteo capturado
+# ══════════════════════════════════════════════════════
+
+def _micro_ajuste_pesos(pesos: dict, señal_ganadora: str,
+                         acerto_top1: bool, acerto_top3: bool,
+                         tasa: float = 0.02) -> dict:
+    """
+    Ajusta pesos de las señales en base al resultado de UN sorteo.
+    - Acierto top1  → refuerza señal ganadora +tasa, penaliza resto
+    - Acierto top3  → refuerzo moderado (+tasa*0.5)
+    - Fallo total   → penaliza señal dominante (-tasa*0.5)
+    Renormaliza para que sumen 1.0. Límites: min 0.05, max 0.60.
+    """
+    nuevos = pesos.copy()
+
+    if acerto_top1:
+        factor       =  tasa
+        penalizacion =  tasa / max(len(pesos) - 1, 1)
+        signo_otros  = -1
+    elif acerto_top3:
+        factor       =  tasa * 0.5
+        penalizacion =  tasa * 0.5 / max(len(pesos) - 1, 1)
+        signo_otros  = -1
+    else:
+        factor       = -tasa * 0.5
+        penalizacion =  tasa * 0.5 / max(len(pesos) - 1, 1)
+        signo_otros  = +1   # fallo → las otras señales suben un poco
+
+    for señal in nuevos:
+        if señal == señal_ganadora:
+            nuevos[señal] = max(0.05, min(0.60, nuevos[señal] + factor))
+        else:
+            nuevos[señal] = max(0.05, min(0.60, nuevos[señal] + signo_otros * penalizacion))
+
+    total = sum(nuevos.values()) or 1.0
+    return {k: round(v / total, 4) for k, v in nuevos.items()}
+
+
+async def aprender_sorteo(db, fecha, hora: str, animal_real: str) -> dict:
+    """
+    Micro-ajuste de pesos para UN sorteo específico.
+    Flujo:
+      1. Verifica que no fue procesado ya
+      2. Lee predicción guardada en auditoria_ia
+      3. Determina acierto top1 / top3
+      4. Identifica señal dominante en auditoria_señales
+      5. Aplica micro-ajuste dinámico (tasa varía por confianza)
+      6. Guarda en aprendizaje_sorteo y actualiza motor_pesos_hora
+    """
+    import json
+    try:
+        animal_real = _normalizar(animal_real)
+        if not animal_real:
+            return {"status": "error", "message": "animal_real vacío"}
+
+        # 1. ¿Ya procesado?
+        res_ya = await db.execute(text("""
+            SELECT id FROM aprendizaje_sorteo
+            WHERE fecha = :f AND hora = :h
+        """), {"f": fecha, "h": hora})
+        if res_ya.fetchone():
+            return {"status": "skip", "message": f"Ya aprendido: {fecha} {hora}"}
+
+        # 2. Predicción guardada
+        res_pred = await db.execute(text("""
+            SELECT prediccion_1, prediccion_2, prediccion_3, confianza_pct
+            FROM auditoria_ia
+            WHERE fecha = :f AND hora = :h
+            LIMIT 1
+        """), {"f": fecha, "h": hora})
+        row_pred = res_pred.fetchone()
+
+        pred1 = _normalizar(row_pred[0]) if row_pred and row_pred[0] else None
+        pred2 = _normalizar(row_pred[1]) if row_pred and row_pred[1] else None
+        pred3 = _normalizar(row_pred[2]) if row_pred and row_pred[2] else None
+
+        acerto_top1 = (pred1 == animal_real) if pred1 else False
+        acerto_top3 = animal_real in [x for x in [pred1, pred2, pred3] if x]
+
+        # 3. Señal dominante
+        señal_dominante = "secuencia"
+        mapa_señal_a_peso = {
+            "deuda": "deuda", "reciente": "reciente", "patron": "patron",
+            "anti": "anti",   "secuencia": "secuencia",
+            "ciclo": "deuda", "patron_fecha": "patron",
+            "intraday": "secuencia", "pares": "secuencia",
+        }
+        try:
+            res_s = await db.execute(text("""
+                SELECT score_deuda, score_reciente, score_patron_dia,
+                       score_anti_racha, score_markov, score_ciclo_exacto,
+                       score_patron_fecha,
+                       COALESCE(score_intraday, 0),
+                       COALESCE(score_pares, 0)
+                FROM auditoria_señales
+                WHERE fecha = :f AND hora = :h
+                LIMIT 1
+            """), {"f": fecha, "h": hora})
+            row_s = res_s.fetchone()
+            if row_s:
+                nombres = ["deuda","reciente","patron","anti","secuencia",
+                           "ciclo","patron_fecha","intraday","pares"]
+                sc_map = {nombres[i]: float(row_s[i] or 0) for i in range(len(nombres))}
+                mejor_raw = max(sc_map, key=sc_map.get)
+                señal_dominante = mapa_señal_a_peso.get(mejor_raw, "secuencia")
+        except Exception:
+            pass
+
+        # 4. Pesos actuales para esta hora
+        pesos_antes = await obtener_pesos_para_hora(db, hora)
+
+        # 5. Tasa dinámica según confianza
+        confianza = float(row_pred[3] or 0) if row_pred else 0
+        if confianza >= 50 and not acerto_top3:
+            tasa = 0.03   # alta confianza + fallo → aprender más
+        elif confianza < 20:
+            tasa = 0.01   # baja confianza → aprender despacio
+        else:
+            tasa = 0.02
+
+        # 6. Micro-ajuste
+        pesos_despues = _micro_ajuste_pesos(
+            pesos_antes, señal_dominante, acerto_top1, acerto_top3, tasa
+        )
+
+        # 7. Generación actual
+        res_gen = await db.execute(text(
+            "SELECT COALESCE(MAX(generacion), 1) FROM motor_pesos"
+        ))
+        generacion = res_gen.scalar() or 1
+
+        # 8. Guardar registro
+        await db.execute(text("""
+            INSERT INTO aprendizaje_sorteo (
+                fecha, hora, animal_real,
+                animal_pred1, animal_pred2, animal_pred3,
+                acerto_top1, acerto_top3,
+                señal_dominante, peso_antes, peso_despues,
+                tasa_aprendizaje, generacion
+            ) VALUES (
+                :f, :h, :real, :p1, :p2, :p3,
+                :at1, :at3, :señal,
+                :pa::jsonb, :pd::jsonb, :tasa, :gen
+            )
+            ON CONFLICT (fecha, hora) DO UPDATE SET
+                animal_real      = EXCLUDED.animal_real,
+                acerto_top1      = EXCLUDED.acerto_top1,
+                acerto_top3      = EXCLUDED.acerto_top3,
+                señal_dominante  = EXCLUDED.señal_dominante,
+                peso_antes       = EXCLUDED.peso_antes,
+                peso_despues     = EXCLUDED.peso_despues,
+                tasa_aprendizaje = EXCLUDED.tasa_aprendizaje
+        """), {
+            "f": fecha, "h": hora, "real": animal_real,
+            "p1": pred1, "p2": pred2, "p3": pred3,
+            "at1": acerto_top1, "at3": acerto_top3,
+            "señal": señal_dominante,
+            "pa": json.dumps(pesos_antes),
+            "pd": json.dumps(pesos_despues),
+            "tasa": tasa, "gen": generacion,
+        })
+
+        # 9. Actualizar motor_pesos_hora
+        await db.execute(text("""
+            INSERT INTO motor_pesos_hora
+                (hora, generacion, peso_decay, peso_markov, peso_gap, peso_reciente,
+                 efectividad, total_evaluados, aciertos_top3)
+            VALUES (:hora, :gen, :anti, :markov, :deuda, :rec, 0, 0, 0)
+            ON CONFLICT (hora, generacion) DO UPDATE SET
+                peso_decay    = EXCLUDED.peso_decay,
+                peso_markov   = EXCLUDED.peso_markov,
+                peso_gap      = EXCLUDED.peso_gap,
+                peso_reciente = EXCLUDED.peso_reciente,
+                fecha         = NOW()
+        """), {
+            "hora":   hora, "gen": generacion,
+            "anti":   pesos_despues.get("anti",      0.22),
+            "markov": pesos_despues.get("secuencia", 0.24),
+            "deuda":  pesos_despues.get("deuda",     0.20),
+            "rec":    pesos_despues.get("reciente",  0.20),
+        })
+        await db.commit()
+
+        return {
+            "status":          "success",
+            "fecha":           str(fecha),
+            "hora":            hora,
+            "animal_real":     animal_real,
+            "pred_top3":       [pred1, pred2, pred3],
+            "acerto_top1":     acerto_top1,
+            "acerto_top3":     acerto_top3,
+            "señal_dominante": señal_dominante,
+            "tasa_usada":      tasa,
+            "pesos_antes":     pesos_antes,
+            "pesos_despues":   pesos_despues,
+            "delta": {k: round(pesos_despues.get(k,0) - pesos_antes.get(k,0), 4)
+                      for k in pesos_antes},
+            "message": (
+                f"✅ {hora} | Real: {animal_real} | "
+                f"{'TOP1 ✅' if acerto_top1 else 'TOP3 ✅' if acerto_top3 else 'FALLO ❌'} | "
+                f"Señal: {señal_dominante} | Δ={tasa}"
+            )
+        }
+    except Exception as e:
+        await db.rollback()
+        import traceback; traceback.print_exc()
+        return {"status": "error", "message": str(e)}
+
+
+async def aprender_ultimos_n(db, n: int = 50) -> dict:
+    """
+    Procesa los últimos N sorteos con resultado real
+    que aún no tienen micro-ajuste registrado.
+    """
+    try:
+        res = await db.execute(text("""
+            SELECT h.fecha, h.hora, h.animalito
+            FROM historico h
+            WHERE h.loteria = 'Lotto Activo'
+              AND NOT EXISTS (
+                  SELECT 1 FROM aprendizaje_sorteo a
+                  WHERE a.fecha = h.fecha AND a.hora = h.hora
+              )
+              AND EXISTS (
+                  SELECT 1 FROM auditoria_ia ai
+                  WHERE ai.fecha = h.fecha AND ai.hora = h.hora
+                    AND ai.prediccion_1 IS NOT NULL
+              )
+            ORDER BY h.fecha DESC, h.hora DESC
+            LIMIT :n
+        """), {"n": n})
+        sorteos = res.fetchall()
+
+        if not sorteos:
+            return {"status": "ok", "procesados": 0,
+                    "message": "✅ Sistema al día — nada nuevo que aprender"}
+
+        procesados = aciertos1 = aciertos3 = fallos = 0
+        log = []
+        for row in sorteos:
+            fecha_s, hora_s, animal_s = row
+            r = await aprender_sorteo(db, fecha_s, hora_s, animal_s)
+            if r.get("status") == "success":
+                procesados += 1
+                if r.get("acerto_top1"):     aciertos1 += 1
+                elif r.get("acerto_top3"):   aciertos3 += 1
+                else:                        fallos    += 1
+                log.append({
+                    "fecha":  str(fecha_s), "hora": hora_s,
+                    "real":   animal_s,
+                    "result": "top1" if r.get("acerto_top1")
+                              else "top3" if r.get("acerto_top3") else "fallo",
+                    "señal":  r.get("señal_dominante"),
+                })
+
+        ef_micro = round((aciertos1 + aciertos3) / max(procesados, 1) * 100, 1)
+        return {
+            "status":      "success",
+            "procesados":  procesados,
+            "aciertos_t1": aciertos1,
+            "aciertos_t3": aciertos3,
+            "fallos":      fallos,
+            "ef_micro":    ef_micro,
+            "log":         log[-10:],
+            "message": (
+                f"✅ Micro-aprendizaje: {procesados} sorteos | "
+                f"Top1:{aciertos1} Top3:{aciertos3} Fallos:{fallos} | "
+                f"Ef:{ef_micro}%"
+            )
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": str(e)}
+
+
+async def obtener_historial_aprendizaje(db, limit: int = 30) -> dict:
+    """Historial de micro-ajustes para auditoría y dashboard."""
+    try:
+        res = await db.execute(text("""
+            SELECT fecha, hora, animal_real, animal_pred1,
+                   acerto_top1, acerto_top3, señal_dominante,
+                   tasa_aprendizaje, peso_antes, peso_despues, creado
+            FROM aprendizaje_sorteo
+            ORDER BY fecha DESC, hora DESC
+            LIMIT :lim
+        """), {"lim": limit})
+
+        registros = []
+        for r in res.fetchall():
+            peso_a = r[8] if isinstance(r[8], dict) else {}
+            peso_d = r[9] if isinstance(r[9], dict) else {}
+            registros.append({
+                "fecha":           str(r[0]),
+                "hora":            r[1],
+                "animal_real":     r[2],
+                "pred1":           r[3],
+                "acerto_top1":     bool(r[4]),
+                "acerto_top3":     bool(r[5]),
+                "señal_dominante": r[6],
+                "tasa":            float(r[7] or 0.02),
+                "delta_secuencia": round(
+                    float(peso_d.get("secuencia",0)) - float(peso_a.get("secuencia",0)), 4),
+                "delta_deuda": round(
+                    float(peso_d.get("deuda",0)) - float(peso_a.get("deuda",0)), 4),
+            })
+
+        res_s = await db.execute(text("""
+            SELECT COUNT(*),
+                   SUM(CASE WHEN acerto_top1 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN acerto_top3 THEN 1 ELSE 0 END),
+                   AVG(tasa_aprendizaje), MAX(creado)
+            FROM aprendizaje_sorteo
+        """))
+        s = res_s.fetchone()
+        total_ap = int(s[0] or 0)
+        ef_ap    = round(int(s[2] or 0) / max(total_ap, 1) * 100, 1)
+
+        return {
+            "total_aprendizajes": total_ap,
+            "ef_top3_aprendido":  ef_ap,
+            "tasa_promedio":      round(float(s[3] or 0.02), 4),
+            "ultimo_aprendizaje": str(s[4]) if s[4] else None,
+            "registros":          registros,
+        }
+    except Exception as e:
+        return {"error": str(e), "registros": []}
