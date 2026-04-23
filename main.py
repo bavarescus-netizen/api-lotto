@@ -2067,3 +2067,13 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
             "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)
         }
     }
+    @app.get("/ver-columnas")
+async def ver_columnas(db=Depends(get_db)):
+    res = await db.execute(text("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'predicciones'
+        ORDER BY ordinal_position
+    """))
+    columnas = [row[0] for row in res.fetchall()]
+    return {"tabla": "predicciones", "columnas": columnas}
