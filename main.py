@@ -1994,46 +1994,7 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
                 }
                 for r in rows
             ]
-@app.get("/backtest-confianza")
-def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
-    """
-    Analiza histórico: ¿qué pasa si solo apostamos cuando confianza >= N?
-    Solo lectura — no modifica nada.
-    """
-    # Total con filtro
-    query_filtrado = """
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
-            SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
-        FROM predicciones
-        WHERE confianza >= :confianza_min
-    """
-    # Total sin filtro
-    query_total = """
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
-            SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
-        FROM predicciones
-    """
-    con_filtro = db.execute(query_filtrado, {"confianza_min": confianza_min}).fetchone()
-    sin_filtro = db.execute(query_total).fetchone()
 
-    return {
-        "confianza_min": confianza_min,
-        "sin_filtro": {
-            "total": sin_filtro.total,
-            "aciertos_top3": sin_filtro.top3,
-            "ef_top3": round(sin_filtro.top3 / sin_filtro.total * 100, 2)
-        },
-        "con_filtro": {
-            "total": con_filtro.total,
-            "aciertos_top3": con_filtro.top3,
-            "ef_top3": round(con_filtro.top3 / con_filtro.total * 100, 2),
-            "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)
-        }
-    }
         # Fallback: calcular en vivo desde auditoria_ia si la tabla está vacía
         rows2 = (await db.execute(text("""
             SELECT a.hora,
