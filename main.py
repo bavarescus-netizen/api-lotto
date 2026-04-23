@@ -2030,27 +2030,29 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+from sqlalchemy import text
+
 @app.get("/backtest-confianza")
 async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
-    query_filtrado = """
+    
+    res_filtrado = await db.execute(text("""
         SELECT 
             COUNT(*) as total,
             SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
             SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
         FROM predicciones
         WHERE confianza >= :confianza_min
-    """
-    query_total = """
+    """), {"confianza_min": confianza_min})
+    con_filtro = res_filtrado.fetchone()
+
+    res_total = await db.execute(text("""
         SELECT 
             COUNT(*) as total,
             SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
             SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
         FROM predicciones
-    """
-    con_filtro = await db.execute(query_filtrado, {"confianza_min": confianza_min})
-    con_filtro = con_filtro.fetchone()
-    sin_filtro = await db.execute(query_total)
-    sin_filtro = sin_filtro.fetchone()
+    """))
+    sin_filtro = res_total.fetchone()
 
     return {
         "confianza_min": confianza_min,
