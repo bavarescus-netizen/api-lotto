@@ -2031,12 +2031,7 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/backtest-confianza")
-def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
-    """
-    Analiza histórico: ¿qué pasa si solo apostamos cuando confianza >= N?
-    Solo lectura — no modifica nada.
-    """
-    # Total con filtro
+async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
     query_filtrado = """
         SELECT 
             COUNT(*) as total,
@@ -2045,7 +2040,6 @@ def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
         FROM predicciones
         WHERE confianza >= :confianza_min
     """
-    # Total sin filtro
     query_total = """
         SELECT 
             COUNT(*) as total,
@@ -2053,8 +2047,10 @@ def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
             SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
         FROM predicciones
     """
-    con_filtro = db.execute(query_filtrado, {"confianza_min": confianza_min}).fetchone()
-    sin_filtro = db.execute(query_total).fetchone()
+    con_filtro = await db.execute(query_filtrado, {"confianza_min": confianza_min})
+    con_filtro = con_filtro.fetchone()
+    sin_filtro = await db.execute(query_total)
+    sin_filtro = sin_filtro.fetchone()
 
     return {
         "confianza_min": confianza_min,
