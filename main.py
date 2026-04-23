@@ -2030,7 +2030,6 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-from sqlalchemy import text
 
 @app.get("/backtest-confianza")
 async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
