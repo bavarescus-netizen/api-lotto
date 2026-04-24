@@ -249,12 +249,34 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "ORDER BY fecha DESC LIMIT 1"
         ), {"hoy": ahora.date(), "hora": _hora_prox})).fetchone()
 
-        # Si no hay predicción guardada para la próxima hora → generarla en vivo
+        # Si no hay predicción guardada para la próxima hora → generarla en vivo y GUARDARLA
         if not p:
             try:
                 from app.core.motor_v10 import generar_prediccion
                 _pred_live = await generar_prediccion(db)
                 if _pred_live and _pred_live.get("prediccion_1"):
+                    # ── GUARDAR en BD para que no se duplique mañana ──
+                    try:
+                        await db.execute(text("""
+                            INSERT INTO auditoria_ia
+                                (fecha, hora, animal_predicho, prediccion_1, prediccion_2,
+                                 prediccion_3, confianza_pct, confianza_hora, es_hora_rentable)
+                            VALUES
+                                (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :conf_hora, :rentable)
+                            ON CONFLICT (fecha, hora) DO NOTHING
+                        """), {
+                            "fecha":     ahora.date(),
+                            "hora":      _pred_live.get("hora", _hora_prox),
+                            "p1":        _pred_live.get("prediccion_1"),
+                            "p2":        _pred_live.get("prediccion_2"),
+                            "p3":        _pred_live.get("prediccion_3"),
+                            "conf":      _pred_live.get("confianza_pct", 0),
+                            "conf_hora": _pred_live.get("confianza_hora", 0),
+                            "rentable":  _pred_live.get("es_hora_rentable", False),
+                        })
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
                     # Construir tupla compatible
                     p = (
                         ahora.date(),
@@ -551,6 +573,74 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             },
         }
     except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# GENERAR PREDICCIONES DÍA — Motor V10 para todas las horas
+# ═══════════════════════════════════════════════════════════
+@app.get("/generar-predicciones-dia")
+async def generar_predicciones_dia(db: AsyncSession = Depends(get_db)):
+    """
+    Genera y guarda predicciones V10 para todas las horas del día actual.
+    Solo inserta si no existe predicción para esa fecha+hora.
+    Llamar al inicio del día o cuando se detecten predicciones faltantes.
+    """
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    ahora = datetime.now(ZoneInfo('America/Caracas'))
+    fecha_hoy = ahora.date()
+    horas = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
+             "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM","06:00 PM","07:00 PM"]
+    generadas = 0
+    omitidas = 0
+    errores = 0
+    try:
+        from app.services.motor_v10 import generar_prediccion
+        for hora in horas:
+            # Verificar si ya existe predicción V10 para hoy+hora
+            existe = (await db.execute(text("""
+                SELECT 1 FROM auditoria_ia
+                WHERE fecha = :fecha AND hora = :hora
+                AND prediccion_1 IS NOT NULL
+            """), {"fecha": fecha_hoy, "hora": hora})).fetchone()
+            if existe:
+                omitidas += 1
+                continue
+            try:
+                pred = await generar_prediccion(db, hora)
+                if pred and pred.get("prediccion_1"):
+                    await db.execute(text("""
+                        INSERT INTO auditoria_ia
+                            (fecha, hora, animal_predicho, prediccion_1, prediccion_2,
+                             prediccion_3, confianza_pct, confianza_hora, es_hora_rentable)
+                        VALUES
+                            (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :conf_hora, :rentable)
+                        ON CONFLICT (fecha, hora) DO NOTHING
+                    """), {
+                        "fecha":     fecha_hoy,
+                        "hora":      hora,
+                        "p1":        pred.get("prediccion_1"),
+                        "p2":        pred.get("prediccion_2"),
+                        "p3":        pred.get("prediccion_3"),
+                        "conf":      pred.get("confianza_pct", 0),
+                        "conf_hora": pred.get("confianza_hora", 0),
+                        "rentable":  pred.get("es_hora_rentable", False),
+                    })
+                    generadas += 1
+            except Exception:
+                errores += 1
+        await db.commit()
+        return {
+            "status": "success",
+            "fecha": str(fecha_hoy),
+            "generadas": generadas,
+            "omitidas": omitidas,
+            "errores": errores,
+            "message": f"✅ {generadas} predicciones generadas para {fecha_hoy}"
+        }
+    except Exception as e:
+        await db.rollback()
         return {"status": "error", "message": str(e)}
 
 
@@ -1596,15 +1686,9 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             JOIN top3_hora t ON t.hora = h.hora
             WHERE h.loteria = 'Lotto Activo' AND t.pred1 IS NOT NULL
             ON CONFLICT (fecha, hora) DO UPDATE SET
-                prediccion_1    = EXCLUDED.prediccion_1,
-                prediccion_2    = EXCLUDED.prediccion_2,
-                prediccion_3    = EXCLUDED.prediccion_3,
-                animal_predicho = EXCLUDED.animal_predicho,
-                confianza_pct   = EXCLUDED.confianza_pct,
                 resultado_real  = EXCLUDED.resultado_real,
                 acierto         = EXCLUDED.acierto
-            WHERE auditoria_ia.prediccion_1 IS NULL
-               OR auditoria_ia.resultado_real IS NULL
+            WHERE auditoria_ia.resultado_real IS NULL
                OR auditoria_ia.resultado_real IN ('PENDIENTE', '')
         """))
         insertados = r.rowcount
@@ -2053,5 +2137,3 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
         "con_filtro": {"total": int(con_filtro.total), "aciertos": int(con_filtro.top1), "ef_pct": round(con_filtro.top1 / con_filtro.total * 100, 2), "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)},
         "conclusion": "filtro_mejora" if (con_filtro.top1 / con_filtro.total) > (sin_filtro.top1 / sin_filtro.total) else "filtro_no_mejora"
     }
-    
-
