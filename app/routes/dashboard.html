@@ -140,31 +140,10 @@ tbody tr:last-child td{border-bottom:none}
       <div id="dashPred"><div class="loader"><div class="spin"></div></div></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn bg2" onclick="actualizarTodo()" title="Refresca predicción y métricas">↺ ACTUALIZAR</button>
-        <button class="btn bb2" onclick="procesarAhora()" title="Genera predicción para la próxima hora y la guarda en BD">▶ PROCESAR</button>
-        <button class="btn by2" onclick="cargarUltimo()" title="Descarga el último resultado del scraper y actualiza auditoria_ia">⬇ CARGAR ÚLTIMO</button>
+        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()" title="Ejecuta retroactivo completo 2018→hoy. Usar los lunes.">⚡ ENTRENAR COMPLETO</button>
       </div>
-      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button onclick="fixMarkovDirecto()" id="btnFixDirecto"
-          style="background:rgba(56,182,255,.12);border:1px solid rgba(56,182,255,.4);
-                 color:var(--b);padding:5px 12px;border-radius:4px;cursor:pointer;font-size:10px;
-                 letter-spacing:1px;font-family:monospace"
-          title="Recalcula probabilidades corruptas en markov_transiciones (usar si los % se ven raros)">
-          🔩 FIX MARKOV PROB
-        </button>
-        <button onclick="fixMarkov()" id="btnFixMarkov"
-          style="background:rgba(255,68,68,.12);border:1px solid rgba(255,68,68,.4);
-                 color:#ff6b6b;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:10px;
-                 letter-spacing:1px;font-family:monospace"
-          title="Reconstruye la tabla markov_transiciones desde cero (usar si hay muchos errores)">
-          🔧 RECONSTRUIR MARKOV
-        </button>
-        <button class="btn bsql" id="btnSQL" onclick="entrenarSQL()"
-          title="Ejecuta retroactivo completo 2018→hoy + auto-pesos. Tarda ~20 min. Usar los lunes.">
-          ⚡ ENTRENAR COMPLETO
-        </button>
-      </div>
-      <div style="margin-top:6px;font-size:10px;color:var(--muted);font-family:monospace">
-        💡 Rutina semanal: ENTRENAR COMPLETO (lunes) → luego AUTO-PESOS en tab Señales
+      <div style="margin-top:8px;font-size:10px;color:var(--muted);font-family:monospace">
+        💡 Auto-actualización cada 5 min · Entrenar completo los lunes · Auto-pesos en tab Señales
       </div>
     </div>
     <div>
@@ -275,10 +254,7 @@ tbody tr:last-child td{border-bottom:none}
     <div>
       <div class="sh">Markov día→día</div>
       <div class="alert ai" style="margin-bottom:12px">🔗 <b id="markovCount">13,342</b> transiciones · Si HOY salió X → ¿mañana en la misma hora?</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
-        <button class="btn" style="font-size:10px;background:rgba(255,194,51,.1);border-color:rgba(255,194,51,.3);color:var(--y)" onclick="fixMarkovDirecto()" id="btnFixDirecto">⚡ CORREGIR PROB. CORRUPTAS</button>
-        <span id="fixDirectoStatus" style="font-size:10px;font-family:var(--mono);color:var(--muted)"></span>
-      </div>
+      <div style="height:4px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <select class="inp" id="selMH" onchange="cargarMarkov()">
           <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
@@ -456,9 +432,7 @@ tbody tr:last-child td{border-bottom:none}
       <option value="3000">Todo el histórico</option>
     </select>
     <button id="btnScoreSeñales" class="btn bg2" onclick="cargarScoreSeñales(+document.getElementById('selDiasSeñales').value)">🔍 ANALIZAR SEÑALES</button>
-    <button id="btnRetro2018" class="btn" style="background:rgba(0,232,122,.1);border-color:rgba(0,232,122,.35);color:var(--g);font-size:10px" onclick="lanzarRetroactivo2018()">⏳ CARGAR 2018→HOY</button>
     <button id="btnAutoPesos" class="btn" style="background:rgba(56,182,255,.1);border-color:rgba(56,182,255,.35);color:var(--b);font-size:10px" onclick="aplicarAutoPesos()">⚡ AUTO-PESOS</button>
-    <button id="btnMigrarSig" class="btn" style="background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.4);color:var(--p);font-size:10px" onclick="migrarTablaSeñales()">⚙ MIGRAR TABLA</button>
   </div>
   <div id="retroStatus" style="display:none;margin-bottom:14px;padding:10px;background:rgba(255,194,51,.07);border:1px solid rgba(255,194,51,.25);border-radius:4px;font-family:var(--mono);font-size:11px;color:var(--y)"></div>
   <div id="scoreSeñalesOut">
@@ -603,7 +577,13 @@ function renderPredDash(pred){
 async function cargarAudit(){
   try{
     const rows=await fetch('/ultimos?limit=10').then(r=>r.json());
-    const list=Array.isArray(rows)?rows:(rows.ultimos||rows.data||[]);
+    const listRaw=Array.isArray(rows)?rows:(rows.ultimos||rows.data||[]);
+    // Ordenar: fecha DESC, hora cronológica
+    const list=[...listRaw].sort((a,b)=>{
+      const fa=a.fecha||'', fb=b.fecha||'';
+      if(fb!==fa) return fb.localeCompare(fa);
+      return ORDEN_HORAS.indexOf(a.hora||'')-ORDEN_HORAS.indexOf(b.hora||'');
+    });
     document.getElementById('dashAudit').innerHTML=`<div class="tbl"><table>
       <thead><tr><th>FECHA</th><th>HORA</th><th>PRED 1</th><th>PRED 2</th><th>PRED 3</th><th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th></tr></thead>
       <tbody>${list.map(r=>{
@@ -774,8 +754,8 @@ async function cargarHoras(){
       document.getElementById('horaGrid').innerHTML='<div style="color:var(--muted);font-family:var(--mono);font-size:12px;padding:20px">Sin datos — presiona ⚡ ENTRENAR COMPLETO primero.</div>';
       return;
     }
-    // Normalizar campos (soporta ambos formatos)
-    const norm=horas.map(h=>({
+    // Normalizar campos (soporta ambos formatos) y ordenar cronológicamente
+    const norm=sortHoras(horas.map(h=>({
       hora:     h.hora,
       total:    h.total||h.total_sorteos||0,
       ac1:      h.aciertos_top1||0,
@@ -784,7 +764,7 @@ async function cargarHoras(){
       ef3:      parseFloat(h.ef_top3||h.efectividad_top3||0),
       rentable: h.es_rentable||false,
       vs_azar:  parseFloat(h.vs_azar||0),
-    }));
+    })));
     document.getElementById('horaGrid').innerHTML=norm.map(h=>{
       const color=h.ef3>=10?'var(--g)':h.ef3>=8?'var(--y)':'var(--r)';
       return `<div class="hc ${h.rentable?'rent':''}">
@@ -931,7 +911,13 @@ async function cargarHistorial(mas=false){
   try{
     const d=await fetch('/historial?'+params).then(r=>r.json());
     const rows=d.registros||d.predicciones||d.data||(Array.isArray(d)?d:[]);
-    histRows=mas?[...histRows,...rows]:rows;
+    // Ordenar: fecha DESC, luego hora cronológica (08AM→07PM)
+    const rowsOrdenados=[...rows].sort((a,b)=>{
+      const fa=a.fecha||'', fb=b.fecha||'';
+      if(fb!==fa) return fb.localeCompare(fa);
+      return ORDEN_HORAS.indexOf(a.hora||'')-ORDEN_HORAS.indexOf(b.hora||'');
+    });
+    histRows=mas?[...histRows,...rowsOrdenados]:rowsOrdenados;
     histOffset+=rows.length;
     const total=histRows.length;
     const ac3=histRows.filter(r=>{
@@ -1264,6 +1250,21 @@ async function cargarUltimo(){
   }finally{
     if(btn){btn.disabled=false;btn.textContent='⬇ CARGAR ÚLTIMO';}
   }
+}
+
+// Orden correcto de horas 08AM → 07PM
+const ORDEN_HORAS = ['08:00 AM','09:00 AM','10:00 AM','11:00 AM','12:00 PM',
+                     '01:00 PM','02:00 PM','03:00 PM','04:00 PM','05:00 PM','06:00 PM','07:00 PM'];
+function sortHoras(arr, horaKey='hora'){
+  return [...arr].sort((a,b)=>ORDEN_HORAS.indexOf(a[horaKey])-ORDEN_HORAS.indexOf(b[horaKey]));
+}
+function sortHorasRows(rows){
+  // Para arrays de objetos con campo hora
+  return [...rows].sort((a,b)=>{
+    const ha=a.hora||a.HORA||'';
+    const hb=b.hora||b.HORA||'';
+    return ORDEN_HORAS.indexOf(ha)-ORDEN_HORAS.indexOf(hb);
+  });
 }
 
 function horaActual(){
