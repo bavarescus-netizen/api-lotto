@@ -2075,7 +2075,7 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
             "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)
         },
         "conclusion": "filtro_mejora" if (con_filtro.top1 / con_filtro.total) > (sin_filtro.top1 / sin_filtro.total) else "filtro_no_mejora"
-    
+     }
         }
     }
 
