@@ -2043,22 +2043,20 @@ async def ver_columnas(db=Depends(get_db)):
     
 @app.get("/backtest-confianza")
 async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
-    
+
     res_filtrado = await db.execute(text("""
         SELECT 
             COUNT(*) as total,
-            SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
-            SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
+            SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1
         FROM predicciones
-        WHERE confianza >= :confianza_min
+        WHERE score >= :confianza_min
     """), {"confianza_min": confianza_min})
     con_filtro = res_filtrado.fetchone()
 
     res_total = await db.execute(text("""
         SELECT 
             COUNT(*) as total,
-            SUM(CASE WHEN acierto_top1 THEN 1 ELSE 0 END) as top1,
-            SUM(CASE WHEN acierto_top3 THEN 1 ELSE 0 END) as top3
+            SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1
         FROM predicciones
     """))
     sin_filtro = res_total.fetchone()
@@ -2066,15 +2064,18 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
     return {
         "confianza_min": confianza_min,
         "sin_filtro": {
-            "total": sin_filtro.total,
-            "aciertos_top3": sin_filtro.top3,
-            "ef_top3": round(sin_filtro.top3 / sin_filtro.total * 100, 2)
+            "total": int(sin_filtro.total),
+            "aciertos": int(sin_filtro.top1),
+            "ef_pct": round(sin_filtro.top1 / sin_filtro.total * 100, 2)
         },
         "con_filtro": {
-            "total": con_filtro.total,
-            "aciertos_top3": con_filtro.top3,
-            "ef_top3": round(con_filtro.top3 / con_filtro.total * 100, 2),
+            "total": int(con_filtro.total),
+            "aciertos": int(con_filtro.top1),
+            "ef_pct": round(con_filtro.top1 / con_filtro.total * 100, 2),
             "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)
+        },
+        "conclusion": "filtro_mejora" if (con_filtro.top1 / con_filtro.total) > (sin_filtro.top1 / sin_filtro.total) else "filtro_no_mejora"
+    
         }
     }
 
