@@ -117,17 +117,28 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
 
 async def generar_prediccion_inicial(db, fecha, hora):
     """
-    Genera predicción para una hora si no existe todavía.
-    Se usa para las horas del día que aún no tienen predicción.
+    Genera predicción para una hora si no existe todavía O si la que existe
+    es de un día anterior (bug de predicciones duplicadas).
+    IMPORTANTE: el reaprendizaje del último sorteo ya debe haberse hecho
+    antes de llamar a esta función para que Markov tenga el contexto fresco.
     """
-    existe = (await db.execute(text("""
-        SELECT 1 FROM auditoria_ia
-        WHERE fecha = :fecha AND hora = :hora
+    # Verificar si existe predicción Y si es del día de hoy
+    fila = (await db.execute(text("""
+        SELECT fecha FROM auditoria_ia
+        WHERE hora = :hora
         AND prediccion_1 IS NOT NULL
-    """), {"fecha": fecha, "hora": hora})).fetchone()
+        ORDER BY fecha DESC
+        LIMIT 1
+    """), {"hora": hora})).fetchone()
 
-    if existe:
-        return  # Ya tiene predicción, no tocar
+    # Si ya existe una predicción de HOY, no tocar
+    if fila and str(fila[0]) == str(fecha):
+        return
+
+    # Si no existe O es de un día anterior → generar/recalcular
+    es_recalculo = fila is not None
+    if es_recalculo:
+        logger.info(f"🔄 Predicción {hora} es del día {fila[0]} → recalculando para {fecha}")
 
     try:
         from app.services.motor_v10 import generar_prediccion
@@ -139,7 +150,16 @@ async def generar_prediccion_inicial(db, fecha, hora):
                      prediccion_3, confianza_pct, confianza_hora, es_hora_rentable)
                 VALUES
                     (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :conf_hora, :rentable)
-                ON CONFLICT (fecha, hora) DO NOTHING
+                ON CONFLICT (fecha, hora) DO UPDATE SET
+                    animal_predicho  = EXCLUDED.animal_predicho,
+                    prediccion_1     = EXCLUDED.prediccion_1,
+                    prediccion_2     = EXCLUDED.prediccion_2,
+                    prediccion_3     = EXCLUDED.prediccion_3,
+                    confianza_pct    = EXCLUDED.confianza_pct,
+                    confianza_hora   = EXCLUDED.confianza_hora,
+                    es_hora_rentable = EXCLUDED.es_hora_rentable
+                WHERE auditoria_ia.resultado_real IS NULL
+                   OR auditoria_ia.resultado_real IN ('PENDIENTE', '', 'pendiente')
             """), {
                 "fecha":     fecha,
                 "hora":      hora,
@@ -151,6 +171,14 @@ async def generar_prediccion_inicial(db, fecha, hora):
                 "rentable":  pred.get("es_hora_rentable", False),
             })
             await db.commit()
+            accion = "Recalculada" if es_recalculo else "Generada"
+            logger.info(
+                f"✅ {accion} pred {hora} para {fecha}: "
+                f"{pred.get('prediccion_1','?').upper()} / "
+                f"{pred.get('prediccion_2','?').upper()} / "
+                f"{pred.get('prediccion_3','?').upper()} "
+                f"| conf={pred.get('confianza_pct',0)}"
+            )
     except Exception as e:
         await db.rollback()
         logger.warning(f"⚠️ Error predicción inicial {hora}: {e}")
@@ -247,8 +275,8 @@ async def capturar_y_procesar(db):
                     await recalcular_rentabilidad_automatico(db)
                     _sorteos_desde_ultimo_recalculo = 0
 
-            # ── Generar predicción para la PRÓXIMA hora si no existe ──
-            # (cubre el caso de que el día empiece sin predicciones)
+            # ── Generar predicción para la PRÓXIMA hora ──
+            # ORDEN CORRECTO: primero aprender del contexto actual, luego predecir
             hora_prox = None
             h_actual = ahora.hour
             for h_slot, h_lbl in zip(
@@ -258,7 +286,26 @@ async def capturar_y_procesar(db):
                 if h_slot > h_actual:
                     hora_prox = h_lbl
                     break
+
             if hora_prox:
+                # 1. Si NO hubo sorteos nuevos esta vuelta, igual verificar si hay
+                #    un resultado reciente que aún no fue procesado para aprendizaje
+                if not nuevos_insertados:
+                    try:
+                        ultimo = (await db.execute(text("""
+                            SELECT hora, animalito FROM historico
+                            WHERE fecha = :fecha
+                            ORDER BY hora DESC
+                            LIMIT 1
+                        """), {"fecha": fecha_hoy})).fetchone()
+                        if ultimo:
+                            from app.services.motor_v10 import aprender_sorteo
+                            await aprender_sorteo(db, fecha_hoy, ultimo[0], ultimo[1])
+                            logger.info(f"🧠 Re-aprendizaje preventivo: {ultimo[0]}={ultimo[1]}")
+                    except Exception as e_prev:
+                        logger.debug(f"Re-aprendizaje preventivo omitido: {e_prev}")
+
+                # 2. AHORA generar predicción con Markov actualizado
                 await generar_prediccion_inicial(db, fecha_hoy, hora_prox)
 
     except Exception as e:
@@ -266,7 +313,7 @@ async def capturar_y_procesar(db):
 
 
 async def ciclo_infinito():
-    logger.info("🚀 [LottoAI PRO] Scheduler V8 — Reactivo por sorteo")
+    logger.info("🚀 [LottoAI PRO] Scheduler V11 — Reactivo por sorteo + reaprendizaje previo")
     while True:
         try:
             ahora = datetime.now(TIMEZONE_VE)
