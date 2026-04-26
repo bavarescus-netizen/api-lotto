@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOTTOAI PRO V10</title>
+<title>LOTTOAI PRO V11</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Bebas+Neue&family=DM+Sans:wght@300;400;500;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#07080d;--panel:#0d0f17;--border:#1a1d2e;--border2:#232640;--g:#00e87a;--g2:rgba(0,232,122,.08);--r:#ff3355;--r2:rgba(255,51,85,.08);--y:#ffc233;--y2:rgba(255,194,51,.08);--b:#38b6ff;--b2:rgba(56,182,255,.08);--p:#a855f7;--text:#dde1f5;--muted:#4a4f6e;--mono:'IBM Plex Mono',monospace;--display:'Bebas Neue',sans-serif;--body:'DM Sans',sans-serif}
+:root{--bg:#07080d;--panel:#0d0f17;--border:#1a1d2e;--border2:#232640;--g:#00e87a;--g2:rgba(0,232,122,.08);--r:#ff3355;--r2:rgba(255,51,85,.08);--y:#ffc233;--y2:rgba(255,194,51,.08);--b:#38b6ff;--b2:rgba(56,182,255,.08);--p:#a855f7;--text:#dde1f5;--muted:#8b90b0;--mono:'IBM Plex Mono',monospace;--display:'Bebas Neue',sans-serif;--body:'DM Sans',sans-serif}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:var(--body);min-height:100vh;overflow-x:hidden}
 body::after{content:'';position:fixed;inset:0;z-index:999;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px)}
@@ -21,7 +21,7 @@ body::after{content:'';position:fixed;inset:0;z-index:999;pointer-events:none;ba
 .topbar-info{font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;gap:18px;align-items:center}
 .topbar-info b{color:var(--text)}
 .tabs{display:flex;gap:2px;padding:14px 24px 0;border-bottom:1px solid var(--border);background:var(--panel)}
-.tab{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;padding:9px 18px;border:1px solid transparent;border-bottom:none;cursor:pointer;color:var(--muted);border-radius:4px 4px 0 0;transition:all .15s}
+.tab{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;padding:9px 18px;border:1px solid transparent;border-bottom:none;cursor:pointer;color:#7a7f9a;border-radius:4px 4px 0 0;transition:all .15s}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--g);border-color:var(--border2);background:var(--bg);border-bottom:2px solid var(--bg);margin-bottom:-1px}
 .main{flex:1;padding:24px;max-width:1400px;margin:0 auto;width:100%}
@@ -99,9 +99,9 @@ tbody tr:last-child td{border-bottom:none}
 <div class="app">
 <div class="sleep-banner" id="sleepBanner">⚠ RENDER SLEEP — reconectando... El sistema se reanudará en segundos.</div>
 <div class="topbar">
-  <div class="topbar-logo"><div class="pulse" id="topPulse"></div>LOTTOAI<span>PRO</span>&nbsp;V10</div>
+  <div class="topbar-logo"><div class="pulse" id="topPulse"></div>LOTTOAI<span>PRO</span>&nbsp;V11</div>
   <div class="topbar-info">
-    <span>MODELO: <b>V10 MARKOV+DECAY</b></span>
+    <span>MODELO: <b>V11 MARKOV+DECAY+PATRÓN</b></span>
     <span>BD: <b id="topBD">—</b> REG</span>
     <span>EF.TOP3: <b id="topEf" style="color:var(--g)">—</b></span>
     <span id="topClock" style="color:var(--g)">—</span>
@@ -578,11 +578,11 @@ async function cargarAudit(){
   try{
     const rows=await fetch('/ultimos?limit=10').then(r=>r.json());
     const listRaw=Array.isArray(rows)?rows:(rows.ultimos||rows.data||[]);
-    // Ordenar: fecha DESC, hora cronológica
+    // Ordenar: fecha DESC, hora DESC dentro del mismo día (último sorteo arriba)
     const list=[...listRaw].sort((a,b)=>{
       const fa=a.fecha||'', fb=b.fecha||'';
       if(fb!==fa) return fb.localeCompare(fa);
-      return ORDEN_HORAS.indexOf(a.hora||'')-ORDEN_HORAS.indexOf(b.hora||'');
+      return ORDEN_HORAS.indexOf(b.hora||'')-ORDEN_HORAS.indexOf(a.hora||'');
     });
     document.getElementById('dashAudit').innerHTML=`<div class="tbl"><table>
       <thead><tr><th>FECHA</th><th>HORA</th><th>PRED 1</th><th>PRED 2</th><th>PRED 3</th><th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th></tr></thead>
@@ -603,7 +603,7 @@ async function cargarAudit(){
           <td style="font-weight:700">${(p1||'—').toUpperCase()}</td>
           <td style="color:var(--muted)">${p2||'—'}</td>
           <td style="color:var(--muted)">${p3||'—'}</td>
-          <td style="color:${pend?'var(--muted)':'var(--y)'}">${pend?'PEND.':(real||'—').toUpperCase()}</td>
+          <td style="color:${pend?'var(--muted)':top3?'var(--g)':'var(--y)'};font-weight:${top3?'700':'400'}">${pend?'PEND.':(real||'—').toUpperCase()}</td>
           <td>${b1}</td><td>${b3}</td>
           <td style="font-family:var(--mono);font-size:11px">${r.confianza_pct||'—'}</td>
         </tr>`;
@@ -911,11 +911,12 @@ async function cargarHistorial(mas=false){
   try{
     const d=await fetch('/historial?'+params).then(r=>r.json());
     const rows=d.registros||d.predicciones||d.data||(Array.isArray(d)?d:[]);
-    // Ordenar: fecha DESC, luego hora cronológica (08AM→07PM)
+    // Ordenar: fecha DESC (más reciente arriba), luego hora DESC dentro del mismo día (07PM→08AM)
     const rowsOrdenados=[...rows].sort((a,b)=>{
       const fa=a.fecha||'', fb=b.fecha||'';
       if(fb!==fa) return fb.localeCompare(fa);
-      return ORDEN_HORAS.indexOf(a.hora||'')-ORDEN_HORAS.indexOf(b.hora||'');
+      // Mismo día → hora DESC (el último sorteo del día aparece primero)
+      return ORDEN_HORAS.indexOf(b.hora||'')-ORDEN_HORAS.indexOf(a.hora||'');
     });
     histRows=mas?[...histRows,...rowsOrdenados]:rowsOrdenados;
     histOffset+=rows.length;
@@ -950,7 +951,7 @@ async function cargarHistorial(mas=false){
         <td style="font-weight:700;color:${top1?'var(--g)':'var(--text)'}">${(p1||'—').toUpperCase()}</td>
         <td style="color:${top3&&real===p2?'var(--g)':'var(--muted)'}">${p2||'—'}</td>
         <td style="color:${top3&&real===p3?'var(--g)':'var(--muted)'}">${p3||'—'}</td>
-        <td style="color:${pend?'var(--muted)':'var(--y)'}">${pend?'PENDIENTE':(real||'—').toUpperCase()}</td>
+        <td style="color:${pend?'var(--muted)':top3?'var(--g)':'var(--y)'};font-weight:${top3?'700':'400'}">${pend?'PENDIENTE':(real||'—').toUpperCase()}</td>
         <td>${pend?'<span class="badge bb">?</span>':top1?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>'}</td>
         <td>${pend?'<span class="badge bb">?</span>':top3?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>'}</td>
         <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.confianza_pct||r.confianza||'—'}</td>
@@ -1311,9 +1312,10 @@ function horaActualVzla(){
 
 // INIT
 document.addEventListener('DOMContentLoaded',async()=>{
-  await cargarEstado();
-  await cargarAudit();
-  cargarHistorial();
+  // Lanzar todo en paralelo — historial carga al mismo tiempo que estado/audit
+  cargarEstado();
+  cargarAudit();
+  cargarHistorial(); // no await → carga en paralelo, tab listo al instante
   setInterval(async()=>{await cargarEstado();await cargarAudit();},5*60*1000);
 
   // ── AUTO-REFRESH cada 5 min: predicción + contexto del día ──
