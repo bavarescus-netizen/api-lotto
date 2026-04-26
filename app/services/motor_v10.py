@@ -413,41 +413,78 @@ async def calcular_frecuencia_reciente(db, hora_str, fecha_limite=None):
 # SEÑAL 3: PATRÓN DÍA SEMANA
 # ══════════════════════════════════════════════════════
 async def calcular_patron_dia(db, hora_str, dia_semana, fecha_limite=None):
+    """
+    Señal adaptativa día+hora — V11
+    Combina 3 ventanas temporales con pesos dinámicos:
+      - 90 días  (peso 0.60) — comportamiento reciente
+      - 365 días (peso 0.30) — tendencia anual
+      - histórico (peso 0.10) — base estadística
+    Los pesos se ajustan automáticamente según cuántos datos hay en cada ventana.
+    """
     if fecha_limite is None:
         fecha_limite = date.today()
-    f2y = fecha_limite - timedelta(days=730)
+
+    f90  = fecha_limite - timedelta(days=90)
+    f365 = fecha_limite - timedelta(days=365)
+
     res = await db.execute(text("""
-        WITH historico_completo AS (
-            SELECT animalito, COUNT(*) AS total
+        WITH v90 AS (
+            SELECT animalito, COUNT(*) AS c
+            FROM historico
+            WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
+              AND fecha>=:f90 AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        v365 AS (
+            SELECT animalito, COUNT(*) AS c
+            FROM historico
+            WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
+              AND fecha>=:f365 AND fecha<:hoy AND loteria='Lotto Activo'
+            GROUP BY animalito
+        ),
+        vtotal AS (
+            SELECT animalito, COUNT(*) AS c
             FROM historico
             WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
               AND fecha<:hoy AND loteria='Lotto Activo'
             GROUP BY animalito
-        ),
-        reciente_2y AS (
-            SELECT animalito, COUNT(*) AS rec
-            FROM historico
-            WHERE hora=:hora AND EXTRACT(DOW FROM fecha)=:dia
-              AND fecha>=:f2y AND fecha<:hoy AND loteria='Lotto Activo'
-            GROUP BY animalito
         )
-        SELECT h.animalito,
-               h.total * 0.60 + COALESCE(r.rec,0) * 0.40 AS score_pond,
-               h.total,
-               COALESCE(r.rec,0) AS rec
-        FROM historico_completo h
-        LEFT JOIN reciente_2y r ON h.animalito=r.animalito
+        SELECT t.animalito,
+               COALESCE(v90.c, 0)                          AS c90,
+               COALESCE(v365.c, 0)                         AS c365,
+               t.c                                          AS ctotal,
+               -- Score ponderado: más peso a lo reciente
+               COALESCE(v90.c,0)*0.60
+               + COALESCE(v365.c,0)*0.30
+               + t.c*0.10                                   AS score_pond
+        FROM vtotal t
+        LEFT JOIN v90  ON t.animalito=v90.animalito
+        LEFT JOIN v365 ON t.animalito=v365.animalito
         ORDER BY score_pond DESC
-    """), {"hora": hora_str, "dia": dia_semana, "hoy": fecha_limite, "f2y": f2y})
+    """), {
+        "hora": hora_str, "dia": dia_semana,
+        "hoy": fecha_limite, "f90": f90, "f365": f365
+    })
     rows = res.fetchall()
     resultado = {}
     if rows:
-        max_v = max(float(r[1]) for r in rows) or 1.0
+        max_v = max(float(r[4]) for r in rows) or 1.0
+        total_90 = sum(int(r[1]) for r in rows)
         for r in rows:
+            c90, c365, ctotal = int(r[1]), int(r[2]), int(r[3])
+            score = float(r[4]) / max_v
+            # Bonus si el animal está en tendencia creciente en ventana 90d
+            if total_90 > 0:
+                pct_90 = c90 / total_90
+                if pct_90 > 0.15:   # domina más del 15% en 90 días → bonus
+                    score = min(score * 1.20, 1.0)
+                elif pct_90 == 0:   # no apareció en 90 días → penalizar
+                    score *= 0.70
             resultado[_normalizar(r[0])] = {
-                "score": float(r[1]) / max_v,
-                "veces": int(r[2]),
-                "veces_2y": int(r[3]),
+                "score":    score,
+                "veces_90": c90,
+                "veces_365": c365,
+                "veces_total": ctotal,
             }
     return resultado
 
@@ -478,6 +515,158 @@ async def calcular_anti_racha(db, hora_str, fecha_limite=None):
             "bloquear": dias <= 1,
         }
     return resultado
+
+
+# ══════════════════════════════════════════════════════
+# SEÑAL NUEVA: DECAY POR RACHA DE FALLOS — V11
+# Si un animal lleva N fallos consecutivos en esta hora → penalizar
+# Si lleva N aciertos → bonus
+# ══════════════════════════════════════════════════════
+async def calcular_decay_racha(db, hora_str, fecha_limite=None) -> dict:
+    """
+    Analiza los últimos 10 resultados por animal en esta hora.
+    Penaliza animales con rachas de fallos recientes.
+    Bonifica animales con rachas de aciertos recientes.
+    Se actualiza automáticamente con cada sorteo nuevo.
+    """
+    if fecha_limite is None:
+        fecha_limite = date.today()
+    try:
+        # Obtener últimos 10 resultados por animal en esta hora
+        res = await db.execute(text("""
+            WITH ultimos AS (
+                SELECT
+                    h.animalito,
+                    a.acierto,
+                    ROW_NUMBER() OVER (PARTITION BY h.animalito ORDER BY h.fecha DESC) as rn
+                FROM historico h
+                JOIN auditoria_ia a ON a.fecha=h.fecha AND a.hora=h.hora
+                WHERE h.hora=:hora
+                  AND h.fecha < :hoy
+                  AND h.loteria='Lotto Activo'
+                  AND a.acierto IS NOT NULL
+            )
+            SELECT animalito, acierto
+            FROM ultimos
+            WHERE rn <= 10
+            ORDER BY animalito, rn
+        """), {"hora": hora_str, "hoy": fecha_limite})
+        rows = res.fetchall()
+
+        # Calcular racha por animal
+        por_animal = {}
+        for r in rows:
+            animal = _normalizar(r[0])
+            acierto = r[1]
+            if animal not in por_animal:
+                por_animal[animal] = []
+            por_animal[animal].append(acierto)
+
+        resultado = {}
+        for animal, resultados in por_animal.items():
+            fallos_consec = 0
+            aciertos_consec = 0
+            for ac in resultados:  # ya están ordenados más reciente primero
+                if ac is False:
+                    fallos_consec += 1
+                    aciertos_consec = 0
+                elif ac is True:
+                    aciertos_consec += 1
+                    break
+                else:
+                    break
+
+            # Score: 0.5 = neutro, < 0.5 = penalizar, > 0.5 = bonificar
+            if fallos_consec >= 7:    score = 0.10  # racha muy mala
+            elif fallos_consec >= 5:  score = 0.25
+            elif fallos_consec >= 3:  score = 0.40
+            elif aciertos_consec >= 3: score = 0.85  # racha buena
+            elif aciertos_consec >= 2: score = 0.70
+            else:                      score = 0.55  # neutro ligeramente positivo
+
+            resultado[animal] = {
+                "score": score,
+                "fallos_consec": fallos_consec,
+                "aciertos_consec": aciertos_consec,
+            }
+        return resultado
+    except Exception:
+        return {}
+
+
+# ══════════════════════════════════════════════════════
+# SEÑAL NUEVA: MEMORIA CORTA vs LARGA — V11
+# 70% últimos 90 días + 30% histórico completo
+# Detecta cambios de patrón recientes
+# ══════════════════════════════════════════════════════
+async def calcular_memoria_adaptativa(db, hora_str, fecha_limite=None) -> dict:
+    """
+    Combina memoria corta (90 días) y larga (histórico) con peso dinámico.
+    Si hay divergencia entre ambas → el sistema prioriza lo reciente.
+    Esto permite detectar cambios de patrón automáticamente.
+    """
+    if fecha_limite is None:
+        fecha_limite = date.today()
+    f90 = fecha_limite - timedelta(days=90)
+    try:
+        res = await db.execute(text("""
+            WITH corto AS (
+                SELECT animalito, COUNT(*) as c
+                FROM historico
+                WHERE hora=:hora AND fecha>=:f90 AND fecha<:hoy
+                  AND loteria='Lotto Activo'
+                GROUP BY animalito
+            ),
+            largo AS (
+                SELECT animalito, COUNT(*) as c
+                FROM historico
+                WHERE hora=:hora AND fecha<:hoy
+                  AND loteria='Lotto Activo'
+                GROUP BY animalito
+            )
+            SELECT l.animalito,
+                   COALESCE(c.c, 0) as c_corto,
+                   l.c              as c_largo
+            FROM largo l
+            LEFT JOIN corto c ON l.animalito=c.animalito
+        """), {"hora": hora_str, "hoy": fecha_limite, "f90": f90})
+        rows = res.fetchall()
+        if not rows:
+            return {}
+
+        total_corto = sum(int(r[1]) for r in rows) or 1
+        total_largo = sum(int(r[2]) for r in rows) or 1
+
+        resultado = {}
+        max_score = 0.0
+        scores_raw = {}
+        for r in rows:
+            animal = _normalizar(r[0])
+            pct_corto = int(r[1]) / total_corto
+            pct_largo = int(r[2]) / total_largo
+            # 70% memoria corta + 30% memoria larga
+            score = pct_corto * 0.70 + pct_largo * 0.30
+            # Detectar divergencia: si en corto sube vs largo → bonus tendencia
+            divergencia = pct_corto - pct_largo
+            if divergencia > 0.05:    score *= 1.15  # tendencia creciente
+            elif divergencia < -0.05: score *= 0.85  # tendencia decreciente
+            scores_raw[animal] = {
+                "score_raw": score,
+                "pct_90d": round(pct_corto * 100, 2),
+                "pct_hist": round(pct_largo * 100, 2),
+                "tendencia": "↑" if divergencia > 0.03 else ("↓" if divergencia < -0.03 else "→"),
+            }
+            max_score = max(max_score, score)
+
+        max_score = max_score or 1.0
+        for animal, data in scores_raw.items():
+            resultado[animal] = {
+                **data,
+                "score": data["score_raw"] / max_score,
+            }
+        return resultado
+    except Exception:
+        return {}
 
 
 # ══════════════════════════════════════════════════════
@@ -881,21 +1070,24 @@ async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventan
 def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           ciclo_exacto, pen_reciente, pen_sobreprediccion,
                           hora_str, pesos, config,
-                          patron_fecha=None, pares=None, intraday=None):
+                          patron_fecha=None, pares=None, intraday=None,
+                          decay_racha=None, memoria_adap=None):
     """
-    Combina 9 señales usando config dinámica desde BD.
-    FIX v10.1: blindaje isinstance() para evitar 'unhashable type: dict'
-    cuando pares o intraday llegan como lista en lugar de dict.
+    Combina señales usando config dinámica desde BD — V11
+    Nuevas señales: decay_racha (racha fallos/aciertos) + memoria_adap (70/30 corto/largo)
     """
-    # ── FIX CRÍTICO ── blindaje de tipos
+    # ── Blindaje de tipos ──
     patron_fecha = patron_fecha if isinstance(patron_fecha, dict) else {}
     pares        = pares        if isinstance(pares,        dict) else {}
     intraday     = intraday     if isinstance(intraday,     dict) else {}
+    decay_racha  = decay_racha  if isinstance(decay_racha,  dict) else {}
+    memoria_adap = memoria_adap if isinstance(memoria_adap, dict) else {}
 
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
         list(anti) + list(markov) + list(ciclo_exacto) +
-        list(patron_fecha) + list(pares) + list(intraday)
+        list(patron_fecha) + list(pares) + list(intraday) +
+        list(decay_racha) + list(memoria_adap)
     )
 
     mult_hora = config.get("multiplicador_hora", {}).get(hora_str, 0.90)
@@ -904,15 +1096,18 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         hora_str, pesos.get("anti", 0.22)
     )
 
-    peso_ciclo = 0.15
-    peso_fecha = 0.12
-    peso_pares = 0.08
-    peso_intra = 0.14
+    peso_ciclo   = 0.12
+    peso_fecha   = 0.10
+    peso_pares   = 0.06
+    peso_intra   = 0.12
+    peso_decay   = 0.08  # V11: decay por racha
+    peso_memoria = 0.08  # V11: memoria adaptativa
 
     suma_pesos = (
         pesos["deuda"] + pesos["reciente"] + pesos["patron"] +
         peso_anti_hora + pesos["secuencia"] +
-        peso_ciclo + peso_fecha + peso_pares + peso_intra
+        peso_ciclo + peso_fecha + peso_pares + peso_intra +
+        peso_decay + peso_memoria
     )
 
     scores = {}
@@ -929,6 +1124,16 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         intra_score = intra_info.get("score", 0)
         intra_contribucion = intra_score * peso_intra
 
+        # V11: decay por racha de fallos/aciertos
+        decay_info  = decay_racha.get(animal, {})
+        decay_score = decay_info.get("score", 0.55)
+        decay_contribucion = decay_score * peso_decay
+
+        # V11: memoria adaptativa 70/30
+        mem_info  = memoria_adap.get(animal, {})
+        mem_score = mem_info.get("score", 0)
+        mem_contribucion = mem_score * peso_memoria
+
         base = (
             deuda.get(animal,       {}).get("score", 0) * pesos["deuda"]     +
             score_reciente                               * pesos["reciente"]  +
@@ -938,7 +1143,9 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
             ciclo_exacto.get(animal,{}).get("score", 0) * peso_ciclo         +
             patron_fecha.get(animal,{}).get("score", 0) * peso_fecha         +
             par_contribucion                                                   +
-            intra_contribucion
+            intra_contribucion                                                 +
+            decay_contribucion                                                 +
+            mem_contribucion
         )
         base /= suma_pesos
 
@@ -1333,11 +1540,15 @@ async def generar_prediccion(db) -> dict:
         pares_corr   = await calcular_pares_correlacionados(db, hora_str)
         intraday     = await calcular_markov_intraday(db, hora_str)
         ctx_dia      = await obtener_contexto_diario(db, hora_str, hoy)
+        # ── V11: Nuevas señales adaptativas ──
+        decay_racha  = await calcular_decay_racha(db, hora_str)
+        memoria_adap = await calcular_memoria_adaptativa(db, hora_str)
 
         scores = combinar_señales_v10(
             deuda, reciente, patron, anti, markov,
             ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos, config,
-            patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday
+            patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday,
+            decay_racha=decay_racha, memoria_adap=memoria_adap
         )
 
         racha_fallos = 0
