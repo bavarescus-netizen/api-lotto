@@ -61,6 +61,7 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
     Después de conocer el resultado de una hora, recalcula la predicción
     de la SIGUIENTE hora usando el motor con el contexto actualizado.
     Núcleo del sistema reactivo intraday.
+    FORZAR siempre para el día actual — el tentativo de anoche se reemplaza.
     """
     hora_prox = hora_siguiente(hora_resultado)
     if not hora_prox:
@@ -76,6 +77,8 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
             logger.warning(f"⚠️ Motor no devolvió predicción para {hora_prox}")
             return
 
+        # FORZAR siempre — es corrección intraday del día actual
+        # El tentativo nocturno se reemplaza con contexto real fresco
         await db.execute(text("""
             INSERT INTO auditoria_ia
                 (fecha, hora, animal_predicho, prediccion_1, prediccion_2,
@@ -90,8 +93,6 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
                 confianza_pct    = EXCLUDED.confianza_pct,
                 confianza_hora   = EXCLUDED.confianza_hora,
                 es_hora_rentable = EXCLUDED.es_hora_rentable
-            WHERE auditoria_ia.resultado_real IS NULL
-               OR auditoria_ia.resultado_real IN ('PENDIENTE', '', 'pendiente')
         """), {
             "fecha":     fecha,
             "hora":      hora_prox,
@@ -105,7 +106,7 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
         await db.commit()
 
         logger.info(
-            f"🎯 Nueva pred {hora_prox}: "
+            f"🎯 Corrección intraday {hora_prox}: "
             f"{pred.get('prediccion_1','?').upper()} / "
             f"{pred.get('prediccion_2','?').upper()} / "
             f"{pred.get('prediccion_3','?').upper()} "
@@ -232,18 +233,24 @@ async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
 async def generar_prediccion_inicial(db, fecha, hora):
     """
     Genera predicción para una hora si no existe para ESA FECHA.
-    Fix del bug de duplicados: compara fecha exacta, no solo hora.
+    Si existe el tentativo de anoche pero aún no hay resultado real,
+    lo respeta. Solo recalcula si NO hay predicción en absoluto.
+    El recálculo real con contexto fresco lo hace recalcular_prediccion_siguiente
+    después de cada sorteo — esta función solo cubre el gap de la primera hora (08AM)
+    cuando no hubo tentativo nocturno.
     """
     # Verificar si ya existe predicción para esta fecha+hora específica
     fila = (await db.execute(text("""
-        SELECT 1 FROM auditoria_ia
+        SELECT prediccion_1, resultado_real FROM auditoria_ia
         WHERE fecha = :fecha AND hora = :hora
-        AND prediccion_1 IS NOT NULL
     """), {"fecha": fecha, "hora": hora})).fetchone()
 
-    if fila:
-        return  # Ya existe para esta fecha exacta — no tocar
+    # Si ya tiene predicción de hoy (tentativo o intraday) → no tocar
+    # recalcular_prediccion_siguiente se encarga de actualizarla cuando sale el sorteo anterior
+    if fila and fila[0]:
+        return
 
+    # No existe → generar predicción inicial para esta hora
     try:
         from app.services.motor_v10 import generar_prediccion
         pred = await generar_prediccion(db, hora)
@@ -253,6 +260,7 @@ async def generar_prediccion_inicial(db, fecha, hora):
                 forzar=False,
                 origen="INICIAL"
             )
+            logger.info(f"🌱 Predicción inicial generada para {fecha} {hora}")
     except Exception as e:
         await db.rollback()
         logger.warning(f"⚠️ Error predicción inicial {hora}: {e}")
