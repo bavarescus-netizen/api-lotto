@@ -205,6 +205,20 @@ async def home(request: Request):
         return HTMLResponse(content=f"<h2>Error: {str(e)}</h2>", status_code=500)
 
 
+@app.get("/paper", response_class=HTMLResponse)
+async def paper_trading(request: Request):
+    """Tracker de paper trading — archivo en raíz del proyecto."""
+    paper_path = os.path.join(BASE_DIR, "paper_trading.html")
+    try:
+        with open(paper_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h2>paper_trading.html no encontrado en la raíz del proyecto</h2>",
+            status_code=404
+        )
+
+
 # ═══════════════════════════════════════════════════════════
 # ESTADO — V10 completo
 # ═══════════════════════════════════════════════════════════
