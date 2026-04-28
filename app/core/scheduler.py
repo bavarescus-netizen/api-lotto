@@ -21,7 +21,7 @@ from app.services.motor_v10 import MAPA_ANIMALES
 
 logger = logging.getLogger(__name__)
 TIMEZONE_VE = ZoneInfo("America/Caracas")
-BASE_URL = "https://loteriadehoy.com/animalito/lottoactivo"
+BASE_URL = "https://loteriadehoy.com/animalito/lottoactivo/resultados/"
 NUM_A_ANIMAL = MAPA_ANIMALES
 
 _sorteos_desde_ultimo_recalculo = 0
@@ -482,6 +482,22 @@ async def capturar_y_procesar(db):
 # CICLO PRINCIPAL
 # ─────────────────────────────────────────────────────────────
 
+async def _asegurar_prediccion_hora_actual(db, ahora):
+    """Genera predicción para la próxima hora si no existe en BD — independiente del scraper."""
+    fecha_hoy = ahora.date()
+    h_actual = ahora.hour
+    horas_slots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+    for h_slot, h_lbl in zip(horas_slots, HORAS_SORTEO):
+        if h_slot >= h_actual:
+            try:
+                await generar_prediccion_inicial(db, fecha_hoy, h_lbl)
+                logger.info(f"🔮 Predicción asegurada para: {h_lbl}")
+            except Exception as e:
+                logger.warning(f"⚠️ No se pudo generar predicción {h_lbl}: {e}")
+            break  # Solo la próxima hora pendiente
+
+
 async def ciclo_infinito():
     logger.info("🚀 [LottoAI PRO] Scheduler V11 FINAL — Tentativo + Intraday + Comparación")
     while True:
@@ -493,12 +509,16 @@ async def ciclo_infinito():
             if hora_ve == 19 or (hora_ve == 20 and ahora.minute < 30):
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
+                    # ✅ Predicción independiente del scraper
+                    await _asegurar_prediccion_hora_actual(db, ahora)
                 espera = 120
 
             # Horario sorteos 8AM-8PM: cada 5 min
             elif 8 <= hora_ve <= 20:
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
+                    # ✅ Predicción independiente del scraper
+                    await _asegurar_prediccion_hora_actual(db, ahora)
                 espera = 300
 
             # Noche/madrugada: sin procesar
