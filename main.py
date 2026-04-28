@@ -80,6 +80,12 @@ async def iniciar_bot():
             await db.commit()
         except Exception:
             await db.rollback()
+        # ✅ V11: migrar columnas tentativo para comparación TENTATIVO vs INTRADAY vs REAL
+        try:
+            from app.core.scheduler import migrar_columnas_tentativo
+            await migrar_columnas_tentativo(db)
+        except Exception as e_mig:
+            logger.warning(f"⚠️ migrar_columnas_tentativo: {e_mig}")
 
         # motor_pesos original
         try:
@@ -443,13 +449,15 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
 # ULTIMOS — con pred1/pred2/pred3
 # ═══════════════════════════════════════════════════════════
 @app.get("/ultimos")
-async def ultimos(limit: int = Query(default=10), db: AsyncSession = Depends(get_db)):
+async def ultimos(limit: int = Query(default=15), db: AsyncSession = Depends(get_db)):
     try:
         rows = (await db.execute(text("""
             SELECT fecha, hora, animal_predicho,
                    prediccion_1, prediccion_2, prediccion_3,
                    confianza_pct, confianza_hora, es_hora_rentable,
-                   acierto, resultado_real
+                   acierto, resultado_real,
+                   pred_tentativa_1, pred_tentativa_2, pred_tentativa_3,
+                   origen
             FROM auditoria_ia
             ORDER BY fecha DESC,
                 CASE hora
@@ -464,17 +472,22 @@ async def ultimos(limit: int = Query(default=10), db: AsyncSession = Depends(get
         """), {"limit": limit})).fetchall()
         return [
             {
-                "fecha":            str(r[0]),
-                "hora":             r[1],
-                "animal_predicho":  r[2],
-                "prediccion_1":     r[3],
-                "prediccion_2":     r[4],
-                "prediccion_3":     r[5],
-                "confianza_pct":    float(r[6]) if r[6] else None,
-                "confianza_hora":   float(r[7]) if r[7] else None,
-                "es_hora_rentable": bool(r[8]) if r[8] is not None else False,
-                "acierto":          bool(r[9]) if r[9] is not None else None,
-                "resultado_real":   r[10],
+                "fecha":              str(r[0]),
+                "hora":               r[1],
+                "animal_predicho":    r[2],
+                "prediccion_1":       r[3],
+                "prediccion_2":       r[4],
+                "prediccion_3":       r[5],
+                "confianza_pct":      float(r[6]) if r[6] else None,
+                "confianza_hora":     float(r[7]) if r[7] else None,
+                "es_hora_rentable":   bool(r[8]) if r[8] is not None else False,
+                "acierto":            bool(r[9]) if r[9] is not None else None,
+                "resultado_real":     r[10],
+                # ✅ NUEVO: tentativo original para comparar en dashboard
+                "pred_tentativa_1":   r[11],
+                "pred_tentativa_2":   r[12],
+                "pred_tentativa_3":   r[13],
+                "origen":             r[14] or "INICIAL",
             }
             for r in rows
         ]
