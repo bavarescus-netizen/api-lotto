@@ -1,5 +1,5 @@
 """
-MOTOR V10 — LOTTOAI PRO
+MOTOR V101 — LOTTOAI PRO
 ========================
 VERSIÓN DINÁMICA COMPLETA
 Todo se lee desde la BD — sin diccionarios hardcodeados.
@@ -1506,7 +1506,13 @@ async def obtener_contexto_diario(db, hora_actual_str, fecha=None) -> dict:
 # ══════════════════════════════════════════════════════
 # PREDICCIÓN V10 — NÚCLEO PRINCIPAL
 # ══════════════════════════════════════════════════════
-async def generar_prediccion(db) -> dict:
+async def generar_prediccion(db, hora: str = None) -> dict:
+    """
+    Genera predicción para una hora específica.
+    Si hora=None, calcula la hora actual/próxima del sorteo (comportamiento original).
+    Si hora se especifica (ej: '03:00 PM'), usa esa hora directamente — 
+    esto permite predicciones tentativas y por hora con contexto correcto.
+    """
     try:
         tz   = ZoneInfo('America/Caracas')
         ahora = datetime.now(tz)
@@ -1516,10 +1522,15 @@ async def generar_prediccion(db) -> dict:
                  12:'12:00 PM',13:'01:00 PM',14:'02:00 PM',15:'03:00 PM',
                  16:'04:00 PM',17:'05:00 PM',18:'06:00 PM',19:'07:00 PM'}
 
-        if _h < 8:      hora_str = _lbls[8]
-        elif _h >= 19:  hora_str = _lbls[8]
-        elif _mn > 2:   hora_str = _lbls.get(_h+1, _lbls[8])
-        else:           hora_str = _lbls.get(_h, _lbls[8])
+        if hora:
+            # ✅ Hora explícita — usar la hora indicada con fecha actual
+            hora_str = hora
+        else:
+            # Comportamiento original — calcular hora actual/próxima
+            if _h < 8:      hora_str = _lbls[8]
+            elif _h >= 19:  hora_str = _lbls[8]
+            elif _mn > 2:   hora_str = _lbls.get(_h+1, _lbls[8])
+            else:           hora_str = _lbls.get(_h, _lbls[8])
 
         dia_semana = ahora.weekday()
         hoy        = ahora.date()
