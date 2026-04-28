@@ -1,3 +1,14 @@
+"""
+scheduler_v11_final.py — LottoAI PRO V11
+=========================================
+Cambios vs versión anterior:
+  ✅ FIX CRÍTICO: hora del scraper "08" → "08:00 AM" (HORA_NUM_A_LABEL)
+  ✅ FIX: hora_siguiente() no rompe con ValueError silencioso
+  ✅ NUEVO: columnas pred_tentativa_1/2/3 + origen en auditoria_ia
+  ✅ NUEVO: dashboard puede comparar TENTATIVO vs INTRADAY vs REAL
+  ✅ Ciclo nocturno 7PM revisado cada 2 min (antes del bloque general)
+"""
+
 import asyncio
 import logging
 import re
@@ -16,17 +27,16 @@ NUM_A_ANIMAL = MAPA_ANIMALES
 _sorteos_desde_ultimo_recalculo = 0
 _RECALCULO_CADA_N = 12
 
-# Flag para evitar regenerar el tentativo de mañana más de una vez por noche
+# Evita regenerar el tentativo más de una vez por noche
 _tentativo_manana_generado: date | None = None
 
-# Horas de sorteo en formato exacto usado en auditoria_ia
+# Horas en formato exacto de auditoria_ia
 HORAS_SORTEO = [
     "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
     "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM"
 ]
 
-# ✅ FIX PRINCIPAL: mapa de hora numérica del HTML → formato HORAS_SORTEO
-# El scraper extrae "08", "09"... pero auditoria_ia usa "08:00 AM", "09:00 AM"...
+# ✅ FIX CRÍTICO: el HTML devuelve "08", "13", etc. → convertir al formato correcto
 HORA_NUM_A_LABEL = {
     "08": "08:00 AM",
     "09": "09:00 AM",
@@ -43,6 +53,34 @@ HORA_NUM_A_LABEL = {
 }
 
 
+# ─────────────────────────────────────────────────────────────
+# MIGRACIÓN: agregar columnas tentativo si no existen
+# ─────────────────────────────────────────────────────────────
+
+async def migrar_columnas_tentativo(db):
+    """
+    Agrega pred_tentativa_1/2/3 y origen a auditoria_ia si no existen.
+    Llamar desde el startup de main.py una vez.
+    """
+    try:
+        await db.execute(text("""
+            ALTER TABLE auditoria_ia
+                ADD COLUMN IF NOT EXISTS pred_tentativa_1 VARCHAR,
+                ADD COLUMN IF NOT EXISTS pred_tentativa_2 VARCHAR,
+                ADD COLUMN IF NOT EXISTS pred_tentativa_3 VARCHAR,
+                ADD COLUMN IF NOT EXISTS origen VARCHAR DEFAULT 'INICIAL'
+        """))
+        await db.commit()
+        logger.info("✅ Migración columnas tentativo: OK")
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"⚠️ Migración columnas tentativo (puede ser normal si ya existen): {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# UTILIDADES
+# ─────────────────────────────────────────────────────────────
+
 def hora_siguiente(hora_actual: str) -> str | None:
     """Dada una hora en formato HORAS_SORTEO, devuelve la siguiente del día."""
     try:
@@ -54,12 +92,12 @@ def hora_siguiente(hora_actual: str) -> str | None:
     return None
 
 
-# ─────────────────────────────────────────────
-# AUDITORIA: guardar resultado real
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# AUDITORIA: guardar resultado real post-sorteo
+# ─────────────────────────────────────────────────────────────
 
 async def actualizar_auditoria_post_sorteo(db, fecha, hora, animal_real):
-    """Actualiza resultado_real y acierto en auditoria_ia cuando sale un sorteo."""
+    """Guarda resultado_real y acierto en auditoria_ia cuando sale un sorteo."""
     if not animal_real:
         return
     animal_real = animal_real.lower().strip()
@@ -71,24 +109,28 @@ async def actualizar_auditoria_post_sorteo(db, fecha, hora, animal_real):
             WHERE fecha = :fecha AND hora = :hora
         """), {"real": animal_real, "fecha": fecha, "hora": hora})
         await db.commit()
-        logger.info(f"✅ Resultado guardado: {hora} → {animal_real}")
+        logger.info(f"✅ Resultado guardado: {hora} → {animal_real.upper()}")
     except Exception as e:
         await db.rollback()
-        logger.error(f"❌ Error auditoría post-sorteo: {e}")
+        logger.error(f"❌ Error auditoría post-sorteo {hora}: {e}")
 
 
-# ─────────────────────────────────────────────
-# PREDICCIONES: guardar / recalcular
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# PREDICCIONES: guardar (helper unificado)
+# ─────────────────────────────────────────────────────────────
 
-async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, origen: str = ""):
+async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, origen: str = "INICIAL"):
     """
-    Helper unificado para guardar predicciones en auditoria_ia.
+    Guarda predicción en auditoria_ia.
 
     forzar=True  → DO UPDATE siempre (tentativo nocturno, correcciones intraday)
-    forzar=False → DO UPDATE solo si aún no hay resultado real (predicción inicial)
-    origen       → etiqueta para el log ("TENTATIVO", "CORRECCIÓN", "INICIAL", etc.)
+    forzar=False → DO UPDATE solo si resultado_real está vacío (predicción inicial)
+
+    origen="TENTATIVO-DD/MM" → guarda también en pred_tentativa_* para comparar
+    origen="INTRADAY"        → actualiza prediccion_1/2/3 pero NO toca pred_tentativa_*
     """
+    es_tentativo = "TENTATIVO" in origen.upper()
+
     if forzar:
         conflict_clause = """
             ON CONFLICT (fecha, hora) DO UPDATE SET
@@ -98,10 +140,10 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
                 prediccion_3     = EXCLUDED.prediccion_3,
                 confianza_pct    = EXCLUDED.confianza_pct,
                 confianza_hora   = EXCLUDED.confianza_hora,
-                es_hora_rentable = EXCLUDED.es_hora_rentable
+                es_hora_rentable = EXCLUDED.es_hora_rentable,
+                origen           = EXCLUDED.origen
         """
     else:
-        # Solo actualiza si no hay resultado real aún (respeta sorteos ya registrados)
         conflict_clause = """
             ON CONFLICT (fecha, hora) DO UPDATE SET
                 animal_predicho  = EXCLUDED.animal_predicho,
@@ -110,7 +152,8 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
                 prediccion_3     = EXCLUDED.prediccion_3,
                 confianza_pct    = EXCLUDED.confianza_pct,
                 confianza_hora   = EXCLUDED.confianza_hora,
-                es_hora_rentable = EXCLUDED.es_hora_rentable
+                es_hora_rentable = EXCLUDED.es_hora_rentable,
+                origen           = EXCLUDED.origen
             WHERE auditoria_ia.resultado_real IS NULL
                OR auditoria_ia.resultado_real IN ('PENDIENTE', '', 'pendiente')
         """
@@ -119,9 +162,9 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
         await db.execute(text(f"""
             INSERT INTO auditoria_ia
                 (fecha, hora, animal_predicho, prediccion_1, prediccion_2,
-                 prediccion_3, confianza_pct, confianza_hora, es_hora_rentable)
+                 prediccion_3, confianza_pct, confianza_hora, es_hora_rentable, origen)
             VALUES
-                (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :conf_hora, :rentable)
+                (:fecha, :hora, :p1, :p1, :p2, :p3, :conf, :conf_hora, :rentable, :origen)
             {conflict_clause}
         """), {
             "fecha":     fecha,
@@ -132,8 +175,27 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
             "conf":      pred.get("confianza_pct", 0),
             "conf_hora": pred.get("confianza_hora", 0),
             "rentable":  pred.get("es_hora_rentable", False),
+            "origen":    origen,
         })
         await db.commit()
+
+        # ✅ NUEVO: si es tentativo, guardar también en pred_tentativa_* (COALESCE = no sobreescribir)
+        # Así aunque INTRADAY actualice prediccion_1, el tentativo original queda para comparar
+        if es_tentativo:
+            await db.execute(text("""
+                UPDATE auditoria_ia SET
+                    pred_tentativa_1 = COALESCE(pred_tentativa_1, :p1),
+                    pred_tentativa_2 = COALESCE(pred_tentativa_2, :p2),
+                    pred_tentativa_3 = COALESCE(pred_tentativa_3, :p3)
+                WHERE fecha = :fecha AND hora = :hora
+            """), {
+                "p1": pred.get("prediccion_1"),
+                "p2": pred.get("prediccion_2"),
+                "p3": pred.get("prediccion_3"),
+                "fecha": fecha,
+                "hora": hora,
+            })
+            await db.commit()
 
         tag = f"[{origen}] " if origen else ""
         logger.info(
@@ -145,14 +207,18 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
         )
     except Exception as e:
         await db.rollback()
-        logger.error(f"❌ Error guardar_prediccion {fecha} {hora}: {e}")
+        logger.error(f"❌ Error guardar_prediccion {fecha} {hora} [{origen}]: {e}")
 
+
+# ─────────────────────────────────────────────────────────────
+# CORRECCIÓN INTRADAY
+# ─────────────────────────────────────────────────────────────
 
 async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resultado):
     """
     Tras conocer el resultado de una hora, recalcula la predicción
-    de la SIGUIENTE hora con el contexto actualizado (corrección intraday).
-    Siempre fuerza la actualización — reemplaza el tentativo de anoche.
+    de la SIGUIENTE con contexto actualizado (origen=INTRADAY).
+    El tentativo queda preservado en pred_tentativa_* para comparar.
     """
     hora_prox = hora_siguiente(hora_resultado)
     if not hora_prox:
@@ -161,7 +227,7 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
 
     try:
         from app.services.motor_v10 import generar_prediccion
-        logger.info(f"🔄 Recalculando {hora_prox} tras {hora_resultado}={animal_resultado}")
+        logger.info(f"🔄 Recalculando {hora_prox} tras {hora_resultado}={animal_resultado.upper()}")
 
         pred = await generar_prediccion(db, hora_prox)
         if not pred or not pred.get("prediccion_1"):
@@ -179,11 +245,14 @@ async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resu
         logger.error(f"❌ Error recalculando predicción {hora_prox}: {e}")
 
 
+# ─────────────────────────────────────────────────────────────
+# PREDICCIÓN INICIAL (cuando no hay tentativo nocturno)
+# ─────────────────────────────────────────────────────────────
+
 async def generar_prediccion_inicial(db, fecha, hora):
     """
-    Genera predicción para una hora si no existe para esa fecha.
-    Respeta el tentativo nocturno si ya existe.
-    Solo actúa cuando no hay ninguna predicción para fecha+hora.
+    Genera predicción para una hora si no existe ninguna para esa fecha.
+    Respeta el tentativo nocturno si ya existe — no lo toca.
     """
     try:
         fila = (await db.execute(text("""
@@ -192,7 +261,7 @@ async def generar_prediccion_inicial(db, fecha, hora):
         """), {"fecha": fecha, "hora": hora})).fetchone()
 
         if fila and fila[0]:
-            return  # Ya existe predicción → no tocar
+            return  # Ya existe → no tocar
 
         from app.services.motor_v10 import generar_prediccion
         pred = await generar_prediccion(db, hora)
@@ -202,21 +271,24 @@ async def generar_prediccion_inicial(db, fecha, hora):
                 forzar=False,
                 origen="INICIAL"
             )
-            logger.info(f"🌱 Predicción inicial generada: {fecha} {hora}")
+            logger.info(f"🌱 Predicción inicial: {fecha} {hora}")
     except Exception as e:
         await db.rollback()
         logger.warning(f"⚠️ Error predicción inicial {hora}: {e}")
 
 
-# ─────────────────────────────────────────────
-# TENTATIVO NOCTURNO
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# TENTATIVO NOCTURNO (tras el último sorteo: 07PM)
+# ─────────────────────────────────────────────────────────────
 
 async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
     """
-    Genera predicciones tentativas para todas las horas de mañana
-    justo después del último sorteo del día (07:00 PM).
-    Markov ya fue actualizado con el resultado de 7PM antes de llamar esto.
+    Genera predicciones tentativas para TODAS las horas de mañana
+    justo después de conocer el resultado de 07:00 PM.
+
+    - Markov ya fue actualizado con ese resultado antes de llamar esto
+    - origen = TENTATIVO-DD/MM → guarda también en pred_tentativa_*
+    - El dashboard mostrará: TENTATIVO | INTRADAY | REAL para cada hora
     """
     global _tentativo_manana_generado
 
@@ -225,6 +297,8 @@ async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
         return
 
     fecha_manana = fecha_hoy + timedelta(days=1)
+    tag_origen = f"TENTATIVO-{fecha_hoy.strftime('%d/%m')}"
+
     logger.info(
         f"🌅 Último sorteo ({animal_ultimo.upper()}) procesado. "
         f"Generando TENTATIVO para mañana {fecha_manana}..."
@@ -241,7 +315,7 @@ async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
                     await guardar_prediccion(
                         db, fecha_manana, hora, pred,
                         forzar=True,
-                        origen=f"TENTATIVO-{fecha_hoy.strftime('%d/%m')}"
+                        origen=tag_origen
                     )
                     generadas += 1
             except Exception as e_hora:
@@ -251,7 +325,11 @@ async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
         _tentativo_manana_generado = fecha_hoy
         logger.info(
             f"✅ Tentativo completo: {generadas}/{len(HORAS_SORTEO)} horas "
-            f"para {fecha_manana}. Markov fresco post-{animal_ultimo.upper()}."
+            f"para {fecha_manana}. Markov post-{animal_ultimo.upper()}."
+        )
+        logger.info(
+            "📋 Mañana: INTRADAY corregirá cada hora. "
+            "pred_tentativa_* guardado para comparar en dashboard."
         )
 
     except Exception as e:
@@ -259,9 +337,9 @@ async def generar_tentativo_manana(db, fecha_hoy: date, animal_ultimo: str):
         logger.error(f"❌ Error generando tentativo de mañana: {e}")
 
 
-# ─────────────────────────────────────────────
-# RENTABILIDAD
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# RENTABILIDAD AUTOMÁTICA
+# ─────────────────────────────────────────────────────────────
 
 async def recalcular_rentabilidad_automatico(db):
     try:
@@ -281,9 +359,9 @@ async def recalcular_rentabilidad_automatico(db):
         logger.warning(f"⚠️ Error recalculando rentabilidad: {e}")
 
 
-# ─────────────────────────────────────────────
-# CAPTURA PRINCIPAL — scraper + procesamiento
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
+# CAPTURA PRINCIPAL — scraper + procesamiento completo
+# ─────────────────────────────────────────────────────────────
 
 async def capturar_y_procesar(db):
     global _sorteos_desde_ultimo_recalculo
@@ -307,15 +385,14 @@ async def capturar_y_procesar(db):
 
             html = r.text
 
-            # ✅ FIX: el patrón extrae hora como "08", "09", "13"...
-            # Se convierte a formato "08:00 AM", "01:00 PM"... con HORA_NUM_A_LABEL
+            # Extrae: hora_raw="08"/"13", num="12", nombre="Caballo"
             patron = r"(\d{2}):00.*?(\d{1,2})\s*[-–]\s*([a-zA-Záéíóúñ]+)"
             matches = re.findall(patron, html, re.DOTALL)
             nuevos_insertados = []
 
             for hora_raw, num, nombre in matches:
 
-                # ✅ FIX: convertir "08" → "08:00 AM", "13" → "01:00 PM", etc.
+                # ✅ FIX: "08" → "08:00 AM", "13" → "01:00 PM", etc.
                 hora_str = HORA_NUM_A_LABEL.get(hora_raw)
                 if not hora_str:
                     logger.warning(f"⚠️ Hora no reconocida en HTML: '{hora_raw}' — omitiendo")
@@ -323,7 +400,7 @@ async def capturar_y_procesar(db):
 
                 nombre_norm = NUM_A_ANIMAL.get(str(int(num)), nombre.lower().strip())
 
-                # Insertar en histórico (tabla de resultados reales)
+                # Insertar en histórico
                 res = await db.execute(text("""
                     INSERT INTO historico (fecha, hora, animalito, loteria)
                     VALUES (:f, :h, :a, 'Lotto Activo')
@@ -334,18 +411,18 @@ async def capturar_y_procesar(db):
                 insertado = res.fetchone()
                 if insertado:
                     nuevos_insertados.append((hora_str, nombre_norm))
-                    logger.info(f"📥 Nuevo sorteo: {hora_str} → {nombre_norm.upper()}")
+                    logger.info(f"📥 Nuevo: {hora_str} → {nombre_norm.upper()}")
 
-                # Actualizar resultado real en auditoria_ia (hora_str ya en formato correcto)
+                # Actualizar resultado real en auditoria_ia
                 await actualizar_auditoria_post_sorteo(db, fecha_hoy, hora_str, nombre_norm)
 
             await db.commit()
 
-            # ── Procesar cada sorteo NUEVO ──
+            # ── Procesar cada sorteo NUEVO ─────────────────────────────────────
             if nuevos_insertados:
                 for hora_nuevo, animal_nuevo in nuevos_insertados:
 
-                    # 1. Micro-aprendizaje — Markov aprende el resultado real
+                    # 1. Micro-aprendizaje (Markov aprende)
                     try:
                         from app.services.motor_v10 import aprender_sorteo
                         resultado = await aprender_sorteo(db, fecha_hoy, hora_nuevo, animal_nuevo)
@@ -359,23 +436,20 @@ async def capturar_y_procesar(db):
                     except Exception as e_ap:
                         logger.warning(f"⚠️ Micro-aprendizaje {hora_nuevo}: {e_ap}")
 
-                    # 2. Recalcular predicción de la siguiente hora (corrección intraday)
-                    #    hora_siguiente("07:00 PM") → None → no hace nada extra
+                    # 2. Corrección INTRADAY de la siguiente hora
                     await recalcular_prediccion_siguiente(db, fecha_hoy, hora_nuevo, animal_nuevo)
 
-                    # 3. Si es el último sorteo del día → generar TENTATIVO de mañana
+                    # 3. Si es el último sorteo → TENTATIVO de mañana
                     if hora_nuevo == "07:00 PM":
                         await generar_tentativo_manana(db, fecha_hoy, animal_nuevo)
 
                 _sorteos_desde_ultimo_recalculo += len(nuevos_insertados)
 
-                # Recalcular rentabilidad cada N sorteos
                 if _sorteos_desde_ultimo_recalculo >= _RECALCULO_CADA_N:
                     await recalcular_rentabilidad_automatico(db)
                     _sorteos_desde_ultimo_recalculo = 0
 
             # ── Generar predicción inicial para la próxima hora si no existe ──
-            # (el tentativo nocturno ya la debería tener, esta función lo respeta)
             hora_prox = None
             h_actual = ahora.hour
             for h_slot, h_lbl in zip(
@@ -393,32 +467,31 @@ async def capturar_y_procesar(db):
         logger.error(f"❌ Error en capturar_y_procesar: {e}")
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # CICLO PRINCIPAL
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 
 async def ciclo_infinito():
-    logger.info("🚀 [LottoAI PRO] Scheduler V11 FINAL — Tentativo nocturno + correcciones intraday")
+    logger.info("🚀 [LottoAI PRO] Scheduler V11 FINAL — Tentativo + Intraday + Comparación")
     while True:
         try:
             ahora = datetime.now(TIMEZONE_VE)
             hora_ve = ahora.hour
 
+            # 7PM-8:30PM: cada 2 min — capturar 7PM y disparar tentativo ASAP
             if hora_ve == 19 or (hora_ve == 20 and ahora.minute < 30):
-                # 7PM-8:30PM — revisar cada 2 min para no perder el resultado de 7PM
-                # y disparar el tentativo nocturno lo antes posible
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
                 espera = 120
 
+            # Horario sorteos 8AM-8PM: cada 5 min
             elif 8 <= hora_ve <= 20:
-                # Horario de sorteos — revisar cada 5 min
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
                 espera = 300
 
+            # Noche/madrugada: sin procesar
             else:
-                # Noche/madrugada — no procesar, esperar 30 min
                 espera = 1800
 
             await asyncio.sleep(espera)
