@@ -574,37 +574,100 @@ function renderPredDash(pred){
     </div>`).join('');
 }
 
-// AUDIT
+// AUDIT — tabla comparativa TENTATIVO vs INTRADAY vs REAL
 async function cargarAudit(){
   try{
-    const rows=await fetch('/ultimos?limit=10').then(r=>r.json());
+    const rows=await fetch('/ultimos?limit=15').then(r=>r.json());
     const listRaw=Array.isArray(rows)?rows:(rows.ultimos||rows.data||[]);
-    // Ordenar: fecha DESC, hora DESC dentro del mismo día (último sorteo arriba)
     const list=[...listRaw].sort((a,b)=>{
       const fa=a.fecha||'', fb=b.fecha||'';
       if(fb!==fa) return fb.localeCompare(fa);
       return ORDEN_HORAS.indexOf(b.hora||'')-ORDEN_HORAS.indexOf(a.hora||'');
     });
-    document.getElementById('dashAudit').innerHTML=`<div class="tbl"><table>
-      <thead><tr><th>FECHA</th><th>HORA</th><th>PRED 1</th><th>PRED 2</th><th>PRED 3</th><th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th></tr></thead>
+
+    // Detectar si hay columnas tentativo en los datos
+    const hayTentativo = list.some(r=>r.pred_tentativa_1);
+
+    const thTentativo = hayTentativo
+      ? `<th style="color:var(--y);border-left:2px solid rgba(255,194,51,.2)">TENTATIVO</th><th style="color:var(--y)">T2</th><th style="color:var(--y)">T3</th>`
+      : '';
+    const thIntraday = hayTentativo
+      ? `<th style="color:var(--b);border-left:2px solid rgba(56,182,255,.2)">INTRADAY</th><th style="color:var(--b)">I2</th><th style="color:var(--b)">I3</th>`
+      : `<th>PRED 1</th><th>PRED 2</th><th>PRED 3</th>`;
+
+    document.getElementById('dashAudit').innerHTML=`
+      ${hayTentativo?`<div style="display:flex;gap:16px;margin-bottom:8px;font-family:var(--mono);font-size:10px;letter-spacing:1px">
+        <span style="color:var(--y)">🌙 TENTATIVO = predicción de anoche</span>
+        <span style="color:var(--b)">⚡ INTRADAY = corrección en tiempo real</span>
+        <span style="color:var(--g)">✅ = acierto</span>
+      </div>`:''}
+      <div class="tbl"><table>
+      <thead><tr>
+        <th>FECHA</th><th>HORA</th>
+        ${thTentativo}
+        ${thIntraday}
+        <th>RESULTADO</th><th>TOP1</th><th>TOP3</th><th>CONF.</th>
+      </tr></thead>
       <tbody>${list.map(r=>{
         const real=(r.resultado_real||'').toLowerCase().trim();
+
+        // Predicción actual (INTRADAY o la única que hay)
         const p1=(r.prediccion_1||r.animal_predicho||'').toLowerCase().trim();
         const p2=(r.prediccion_2||'').toLowerCase().trim();
         const p3=(r.prediccion_3||'').toLowerCase().trim();
+
+        // Tentativo original (de la noche anterior)
+        const t1=(r.pred_tentativa_1||'').toLowerCase().trim();
+        const t2=(r.pred_tentativa_2||'').toLowerCase().trim();
+        const t3=(r.pred_tentativa_3||'').toLowerCase().trim();
+
+        // Comparar si el motor cambió de opinión
+        const cambio = t1 && p1 && t1!==p1;
+        const origen = r.origen||'';
+        const esIntraday = origen==='INTRADAY';
+
         const top1=real&&real===p1;
         const top3=real&&[p1,p2,p3].includes(real);
         const pend=!real||real==='pendiente'||real==='—';
-        // FIX: sorteos sin resultado = badge azul "?"
+
+        const top1T=real&&real===t1;
+        const top3T=real&&[t1,t2,t3].includes(real);
+
         const b1=pend?'<span class="badge bb">?</span>':top1?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>';
         const b3=pend?'<span class="badge bb">?</span>':top3?'<span class="badge bg">✓</span>':'<span class="badge br">✗</span>';
-        return `<tr>
+
+        // Estilo de fila: verde si top3, amarillo si hubo cambio intraday
+        const rowBg = top3&&!pend?'background:rgba(0,232,122,.04)':cambio?'background:rgba(56,182,255,.03)':'';
+
+        // Columnas tentativo
+        const tdTentativo = hayTentativo ? `
+          <td style="border-left:2px solid rgba(255,194,51,.15);color:${top1T&&!pend?'var(--g)':t1?'var(--y)':'var(--muted)'};font-size:11px">
+            ${t1?(t1.toUpperCase()+(cambio?'<span style="color:var(--muted);font-size:9px"> ≠</span>':'')):
+            '<span style="color:var(--muted)">—</span>'}
+          </td>
+          <td style="color:var(--muted);font-size:11px">${t2||'—'}</td>
+          <td style="color:var(--muted);font-size:11px">${t3||'—'}</td>` : '';
+
+        // Columnas predicción actual (INTRADAY o única)
+        const tdIntraday = hayTentativo ? `
+          <td style="border-left:2px solid rgba(56,182,255,.15);font-weight:700;color:${top1&&!pend?'var(--g)':esIntraday?'var(--b)':'var(--text)'}">
+            ${p1?p1.toUpperCase():'—'}
+            ${esIntraday?'<span style="display:inline-block;width:5px;height:5px;background:var(--b);border-radius:50%;margin-left:4px;vertical-align:middle"></span>':''}
+          </td>
+          <td style="color:var(--muted);font-size:11px">${p2||'—'}</td>
+          <td style="color:var(--muted);font-size:11px">${p3||'—'}</td>` :
+          `<td style="font-weight:700">${(p1||'—').toUpperCase()}</td>
+          <td style="color:var(--muted)">${p2||'—'}</td>
+          <td style="color:var(--muted)">${p3||'—'}</td>`;
+
+        return `<tr style="${rowBg}">
           <td style="font-family:var(--mono);font-size:11px">${r.fecha||'—'}</td>
           <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${r.hora||'—'}</td>
-          <td style="font-weight:700">${(p1||'—').toUpperCase()}</td>
-          <td style="color:var(--muted)">${p2||'—'}</td>
-          <td style="color:var(--muted)">${p3||'—'}</td>
-          <td style="color:${pend?'var(--muted)':top3?'var(--g)':'var(--y)'};font-weight:${top3?'700':'400'}">${pend?'PEND.':(real||'—').toUpperCase()}</td>
+          ${tdTentativo}
+          ${tdIntraday}
+          <td style="color:${pend?'var(--muted)':top3?'var(--g)':'var(--y)'};font-weight:${top3?'700':'400'}">
+            ${pend?'PEND.':(real||'—').toUpperCase()}
+          </td>
           <td>${b1}</td><td>${b3}</td>
           <td style="font-family:var(--mono);font-size:11px">${r.confianza_pct||'—'}</td>
         </tr>`;
