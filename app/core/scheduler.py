@@ -97,19 +97,30 @@ def hora_siguiente(hora_actual: str) -> str | None:
 # ─────────────────────────────────────────────────────────────
 
 async def actualizar_auditoria_post_sorteo(db, fecha, hora, animal_real):
-    """Guarda resultado_real y acierto en auditoria_ia cuando sale un sorteo."""
+    """Guarda resultado_real, acierto TOP1 y TOP3, y actualiza origen."""
     if not animal_real:
         return
-    animal_real = animal_real.lower().strip()
+    animal_real_upper = animal_real.upper().strip()
+    animal_real_lower = animal_real.lower().strip()
     try:
         await db.execute(text("""
             UPDATE auditoria_ia
-            SET resultado_real = :real,
-                acierto = (LOWER(TRIM(prediccion_1)) = :real)
+            SET resultado_real = :real_upper,
+                acierto = (
+                    LOWER(TRIM(prediccion_1)) = :real_lower
+                    OR LOWER(TRIM(prediccion_2)) = :real_lower
+                    OR LOWER(TRIM(prediccion_3)) = :real_lower
+                ),
+                origen = 'INTRADAY'
             WHERE fecha = :fecha AND hora = :hora
-        """), {"real": animal_real, "fecha": fecha, "hora": hora})
+        """), {
+            "real_upper": animal_real_upper,
+            "real_lower": animal_real_lower,
+            "fecha": fecha,
+            "hora": hora
+        })
         await db.commit()
-        logger.info(f"✅ Resultado guardado: {hora} → {animal_real.upper()}")
+        logger.info(f"✅ Resultado guardado: {hora} → {animal_real_upper}")
     except Exception as e:
         await db.rollback()
         logger.error(f"❌ Error auditoría post-sorteo {hora}: {e}")
