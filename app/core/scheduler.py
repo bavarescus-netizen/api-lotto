@@ -483,19 +483,19 @@ async def capturar_y_procesar(db):
 # ─────────────────────────────────────────────────────────────
 
 async def _asegurar_prediccion_hora_actual(db, ahora):
-    """Genera predicción para la próxima hora si no existe en BD — independiente del scraper."""
+    """Genera predicciones para TODAS las horas pendientes del día — independiente del scraper."""
     fecha_hoy = ahora.date()
     h_actual = ahora.hour
     horas_slots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
     for h_slot, h_lbl in zip(horas_slots, HORAS_SORTEO):
-        if h_slot >= h_actual:
+        if h_slot >= h_actual:  # Solo horas presentes y futuras del día
             try:
                 await generar_prediccion_inicial(db, fecha_hoy, h_lbl)
                 logger.info(f"🔮 Predicción asegurada para: {h_lbl}")
             except Exception as e:
                 logger.warning(f"⚠️ No se pudo generar predicción {h_lbl}: {e}")
-            break  # Solo la próxima hora pendiente
+            # ✅ SIN break — genera TODAS las horas pendientes
 
 
 async def ciclo_infinito():
