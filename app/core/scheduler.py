@@ -396,17 +396,17 @@ async def capturar_y_procesar(db):
 
             html = r.text
 
-            # Extrae: hora_raw="08"/"13", num="12", nombre="Caballo"
-            patron = r"(\d{2}):00.*?(\d{1,2})\s*[-–]\s*([a-zA-Záéíóúñ]+)"
+            # Extrae: num="5", nombre="Leon", hora="08:00 AM"
+            # Estructura HTML: <h4>5 Leon</h4><h5>Lotto Activo 08:00 AM</h5>
+            patron = r'<h4[^>]*>(\d+)\s+([a-zA-ZáéíóúñÁÉÍÓÚÑ]+)</h4>\s*<h5>Lotto Activo\s+(\d{2}:\d{2}\s+[AP]M)</h5>'
             matches = re.findall(patron, html, re.DOTALL)
             nuevos_insertados = []
 
-            for hora_raw, num, nombre in matches:
+            for num, nombre, hora_str in matches:
 
-                # ✅ FIX: "08" → "08:00 AM", "13" → "01:00 PM", etc.
-                hora_str = HORA_NUM_A_LABEL.get(hora_raw)
+                # hora_str ya viene en formato "08:00 AM" / "01:00 PM"
                 if not hora_str:
-                    logger.warning(f"⚠️ Hora no reconocida en HTML: '{hora_raw}' — omitiendo")
+                    logger.warning(f"⚠️ Hora no reconocida en HTML: '{hora_str}' — omitiendo")
                     continue
 
                 nombre_norm = NUM_A_ANIMAL.get(str(int(num)), nombre.lower().strip())
@@ -483,19 +483,19 @@ async def capturar_y_procesar(db):
 # ─────────────────────────────────────────────────────────────
 
 async def _asegurar_prediccion_hora_actual(db, ahora):
-    """Genera predicciones para TODAS las horas pendientes del día — independiente del scraper."""
+    """Genera predicción para la próxima hora si no existe en BD — independiente del scraper."""
     fecha_hoy = ahora.date()
     h_actual = ahora.hour
     horas_slots = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
     for h_slot, h_lbl in zip(horas_slots, HORAS_SORTEO):
-        if h_slot >= h_actual:  # Solo horas presentes y futuras del día
+        if h_slot >= h_actual:
             try:
                 await generar_prediccion_inicial(db, fecha_hoy, h_lbl)
                 logger.info(f"🔮 Predicción asegurada para: {h_lbl}")
             except Exception as e:
                 logger.warning(f"⚠️ No se pudo generar predicción {h_lbl}: {e}")
-            # ✅ SIN break — genera TODAS las horas pendientes
+            break  # Solo la próxima hora pendiente
 
 
 async def ciclo_infinito():
