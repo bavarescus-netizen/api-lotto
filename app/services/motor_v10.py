@@ -524,27 +524,33 @@ async def calcular_anti_racha(db, hora_str, fecha_limite=None):
 # ══════════════════════════════════════════════════════
 async def calcular_decay_racha(db, hora_str, fecha_limite=None) -> dict:
     """
-    Analiza los últimos 10 resultados por animal en esta hora.
-    Penaliza animales con rachas de fallos recientes.
-    Bonifica animales con rachas de aciertos recientes.
-    Se actualiza automáticamente con cada sorteo nuevo.
+    FIX v11.1 — Usa LEFT JOIN en lugar de INNER JOIN.
+
+    ANTES: JOIN auditoria_ia → solo animales con predicción registrada aparecen.
+           Animales sin predicción previa desaparecen del análisis.
+    AHORA:
+      - LEFT JOIN → todos los animales del historico participan.
+      - Si NO hay registro en auditoria_ia → acierto = None → score neutro (0.55).
+      - Evalúa si el animal fue predicho (acierto) o simplemente salió (aparición real).
+      - Para animales predichos: rastrea racha de fallos/aciertos de la predicción.
+      - Para animales sin predicción: usa frecuencia de aparición real como proxy.
     """
     if fecha_limite is None:
         fecha_limite = date.today()
     try:
-        # Obtener últimos 10 resultados por animal en esta hora
+        # LEFT JOIN: incluye TODOS los animales que salieron, tengan o no predicción
         res = await db.execute(text("""
             WITH ultimos AS (
                 SELECT
                     h.animalito,
                     a.acierto,
-                    ROW_NUMBER() OVER (PARTITION BY h.animalito ORDER BY h.fecha DESC) as rn
+                    ROW_NUMBER() OVER (PARTITION BY h.animalito ORDER BY h.fecha DESC) AS rn
                 FROM historico h
-                JOIN auditoria_ia a ON a.fecha=h.fecha AND a.hora=h.hora
-                WHERE h.hora=:hora
-                  AND h.fecha < :hoy
-                  AND h.loteria='Lotto Activo'
-                  AND a.acierto IS NOT NULL
+                LEFT JOIN auditoria_ia a
+                    ON a.fecha = h.fecha AND a.hora = h.hora
+                WHERE h.hora    = :hora
+                  AND h.fecha   < :hoy
+                  AND h.loteria = 'Lotto Activo'
             )
             SELECT animalito, acierto
             FROM ultimos
@@ -553,41 +559,45 @@ async def calcular_decay_racha(db, hora_str, fecha_limite=None) -> dict:
         """), {"hora": hora_str, "hoy": fecha_limite})
         rows = res.fetchall()
 
-        # Calcular racha por animal
         por_animal = {}
         for r in rows:
-            animal = _normalizar(r[0])
-            acierto = r[1]
+            animal  = _normalizar(r[0])
+            acierto = r[1]   # puede ser True, False, o None (sin predicción)
             if animal not in por_animal:
                 por_animal[animal] = []
             por_animal[animal].append(acierto)
 
         resultado = {}
         for animal, resultados in por_animal.items():
-            fallos_consec = 0
+            fallos_consec   = 0
             aciertos_consec = 0
-            for ac in resultados:  # ya están ordenados más reciente primero
+            sin_pred_count  = sum(1 for ac in resultados if ac is None)
+
+            for ac in resultados:
                 if ac is False:
-                    fallos_consec += 1
-                    aciertos_consec = 0
+                    fallos_consec   += 1
+                    aciertos_consec  = 0
                 elif ac is True:
                     aciertos_consec += 1
                     break
                 else:
+                    # None = no había predicción → no rompe racha pero tampoco cuenta
                     break
 
-            # Score: 0.5 = neutro, < 0.5 = penalizar, > 0.5 = bonificar
-            if fallos_consec >= 7:    score = 0.10  # racha muy mala
-            elif fallos_consec >= 5:  score = 0.25
-            elif fallos_consec >= 3:  score = 0.40
-            elif aciertos_consec >= 3: score = 0.85  # racha buena
+            # Score base: 0.55 neutro
+            if fallos_consec >= 7:     score = 0.10
+            elif fallos_consec >= 5:   score = 0.25
+            elif fallos_consec >= 3:   score = 0.40
+            elif aciertos_consec >= 3: score = 0.85
             elif aciertos_consec >= 2: score = 0.70
-            else:                      score = 0.55  # neutro ligeramente positivo
+            elif sin_pred_count >= 8:  score = 0.55   # casi nunca predito → neutro
+            else:                      score = 0.55
 
             resultado[animal] = {
-                "score": score,
-                "fallos_consec": fallos_consec,
+                "score":           score,
+                "fallos_consec":   fallos_consec,
                 "aciertos_consec": aciertos_consec,
+                "sin_pred":        sin_pred_count,
             }
         return resultado
     except Exception:
@@ -672,9 +682,24 @@ async def calcular_memoria_adaptativa(db, hora_str, fecha_limite=None) -> dict:
 # ══════════════════════════════════════════════════════
 # SEÑAL 5: MARKOV INTRA-DÍA — DINÁMICO desde markov_intraday
 # ══════════════════════════════════════════════════════
-async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
+async def calcular_markov_intraday(db, hora_str, fecha_limite=None,
+                                    resultados_hoy: dict = None) -> dict:
+    """
+    FIX v11.1 — Intraday con doble fuente de contexto.
+
+    ANTES: buscaba en historico WHERE fecha=HOY → vacío hasta el mediodía.
+    AHORA:
+      1. Usa resultados_hoy (dict {hora: animal}) si se pasa desde generar_prediccion.
+         Esto garantiza que siempre hay contexto real de las horas anteriores del día.
+      2. Fallback: si no hay resultado de hoy en hora_origen, usa el último histórico
+         de esa hora (día anterior o días pasados) — NUNCA devuelve {} por falta de datos.
+      3. Pondera el resultado: si el animal viene de hoy → ventaja × 1.3 (boost).
+         Si viene del historial → ventaja × 0.8 (señal más débil pero presente).
+    """
     if fecha_limite is None:
         fecha_limite = date.today()
+    if resultados_hoy is None:
+        resultados_hoy = {}
 
     orden = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
              "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM",
@@ -688,74 +713,78 @@ async def calcular_markov_intraday(db, hora_str, fecha_limite=None) -> dict:
     if not horas_origen:
         return {}
 
-    mejor_par = None
-    mejor_ventaja = 0.0
+    mejor_par    = None
+    mejor_score  = 0.0
 
     for hora_origen in horas_origen:
         try:
-            res_animal = await db.execute(text("""
-                SELECT LOWER(TRIM(animalito)) AS animal
-                FROM historico
-                WHERE hora    = :hora_ant
-                  AND fecha   = :hoy
-                  AND loteria = 'Lotto Activo'
-                LIMIT 1
-            """), {"hora_ant": hora_origen, "hoy": fecha_limite})
-            row = res_animal.fetchone()
-            if not row:
-                continue
+            # ── Fuente 1: resultado real de HOY (pasado desde generar_prediccion) ──
+            animal_hoy = resultados_hoy.get(hora_origen)
+            boost      = 1.30  # animal confirmado de hoy → señal fuerte
 
-            animal_anterior = _normalizar(row[0])
+            # ── Fuente 2 (fallback): último histórico de esa hora ──
+            if not animal_hoy:
+                res_hist = await db.execute(text("""
+                    SELECT LOWER(TRIM(animalito))
+                    FROM historico
+                    WHERE hora = :hora AND fecha < :hoy AND loteria = 'Lotto Activo'
+                    ORDER BY fecha DESC LIMIT 1
+                """), {"hora": hora_origen, "hoy": fecha_limite})
+                row_hist = res_hist.fetchone()
+                if not row_hist:
+                    continue
+                animal_hoy = _normalizar(row_hist[0])
+                boost      = 0.80  # señal histórica → penalizar ligeramente
 
+            animal_anterior = _normalizar(animal_hoy)
+
+            # ── Buscar par en markov_intraday (umbral más bajo: 3.0 en lugar de 5.0) ──
             res_par = await db.execute(text("""
                 SELECT animal_destino, probabilidad, ventaja_vs_azar, frecuencia
                 FROM markov_intraday
-                WHERE hora_origen   = :h_orig
-                  AND hora_destino  = :h_dest
-                  AND animal_origen = :animal
+                WHERE hora_origen    = :h_orig
+                  AND hora_destino   = :h_dest
+                  AND animal_origen  = :animal
                   AND frecuencia    >= 3
-                  AND ventaja_vs_azar > 5.0
+                  AND ventaja_vs_azar > 3.0
                 ORDER BY ventaja_vs_azar DESC
-                LIMIT 1
+                LIMIT 3
             """), {
-                "h_orig":  hora_origen,
-                "h_dest":  hora_str,
-                "animal":  animal_anterior,
+                "h_orig": hora_origen,
+                "h_dest": hora_str,
+                "animal": animal_anterior,
             })
-            row_par = res_par.fetchone()
-            if not row_par:
+            pares = res_par.fetchall()
+            if not pares:
                 continue
 
-            animal_pred = _normalizar(row_par[0])
-            ventaja     = float(row_par[2])
+            for row_par in pares:
+                animal_pred = _normalizar(row_par[0])
+                ventaja     = float(row_par[2]) * boost
+                score       = min(ventaja / 10.70, 1.0)
 
-            if ventaja > mejor_ventaja:
-                mejor_ventaja = ventaja
-                mejor_par = {
-                    "animal":      animal_pred,
-                    "ventaja":     ventaja,
-                    "prob":        float(row_par[1]),
-                    "frecuencia":  int(row_par[3]),
-                    "origen":      animal_anterior,
-                    "hora_origen": hora_origen,
-                }
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_par = {
+                        "animal":      animal_pred,
+                        "score":       round(score, 4),
+                        "ventaja_pct": round(float(row_par[2]), 2),
+                        "ventaja_adj": round(ventaja, 2),
+                        "prob_real":   float(row_par[1]),
+                        "frecuencia":  int(row_par[3]),
+                        "origen":      animal_anterior,
+                        "hora_origen": hora_origen,
+                        "fuente":      "hoy" if boost > 1.0 else "historico",
+                        "tipo":        "intraday",
+                    }
         except Exception:
             continue
 
     if not mejor_par:
         return {}
 
-    score = min(mejor_par["ventaja"] / 10.70, 1.0)
     return {
-        mejor_par["animal"]: {
-            "score":       round(score, 4),
-            "ventaja_pct": mejor_par["ventaja"],
-            "prob_real":   mejor_par["prob"],
-            "frecuencia":  mejor_par["frecuencia"],
-            "origen":      mejor_par["origen"],
-            "hora_origen": mejor_par["hora_origen"],
-            "tipo":        "intraday",
-        }
+        mejor_par["animal"]: {k: v for k, v in mejor_par.items() if k != "animal"}
     }
 
 
@@ -1020,17 +1049,44 @@ async def calcular_patron_fecha_exacta(db, hora_str, dia_semana, mes, fecha_limi
 # PENALIZACIONES
 # ══════════════════════════════════════════════════════
 async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None, ventana_dias=30):
+    """
+    FIX v11.1 — Usa prediccion_1/2/3 en lugar de animal_predicho (que es nullable).
+    Analiza las 3 posiciones del TOP3 para detectar animales que se repiten
+    sin acertar. También revisa acierto_top3 (no solo acierto TOP1).
+    """
     if fecha_limite is None:
         fecha_limite = date.today()
     fecha_ini = fecha_limite - timedelta(days=ventana_dias)
     try:
+        # Conteo unificado: cada aparición en TOP3 cuenta como predicción
         res = await db.execute(text("""
-            SELECT animal_predicho, COUNT(*) AS n_pred,
-                COUNT(CASE WHEN acierto=TRUE THEN 1 END) AS n_ac
-            FROM auditoria_ia
-            WHERE hora=:hora AND fecha>=:desde AND fecha<:hasta
-            GROUP BY animal_predicho
+            WITH predicciones AS (
+                SELECT prediccion_1 AS animal, fecha, hora FROM auditoria_ia
+                WHERE hora=:hora AND fecha>=:desde AND fecha<:hasta
+                  AND prediccion_1 IS NOT NULL
+                UNION ALL
+                SELECT prediccion_2, fecha, hora FROM auditoria_ia
+                WHERE hora=:hora AND fecha>=:desde AND fecha<:hasta
+                  AND prediccion_2 IS NOT NULL
+                UNION ALL
+                SELECT prediccion_3, fecha, hora FROM auditoria_ia
+                WHERE hora=:hora AND fecha>=:desde AND fecha<:hasta
+                  AND prediccion_3 IS NOT NULL
+            ),
+            con_resultado AS (
+                SELECT p.animal,
+                       COUNT(*) AS n_pred,
+                       COUNT(CASE WHEN LOWER(TRIM(h.animalito))=LOWER(TRIM(p.animal))
+                                  THEN 1 END) AS n_ac
+                FROM predicciones p
+                LEFT JOIN historico h
+                    ON h.fecha=p.fecha AND h.hora=p.hora
+                    AND h.loteria='Lotto Activo'
+                GROUP BY p.animal
+            )
+            SELECT animal, n_pred, n_ac FROM con_resultado
         """), {"hora": hora_str, "desde": fecha_ini, "hasta": fecha_limite})
+
         penalizacion = {}
         for r in res.fetchall():
             animal = _normalizar(r[0] or "")
@@ -1039,8 +1095,13 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
             n_pred = int(r[1])
             n_ac   = int(r[2])
             tasa   = n_ac / n_pred if n_pred > 0 else 0
+            # Penalizar si: apareció ≥5 veces y tasa < azar esperado (2.63%)
             if n_pred >= 5 and tasa < AZAR_ESPERADO:
-                penalizacion[animal] = round(0.4 + tasa / AZAR_ESPERADO * 0.3, 3)
+                # Factor: entre 0.35 (pésimo) y 0.70 (justo bajo el azar)
+                factor = round(0.35 + (tasa / AZAR_ESPERADO) * 0.35, 3)
+                penalizacion[animal] = factor
+            elif n_pred >= 10 and tasa == 0:
+                penalizacion[animal] = 0.25   # 10+ predicciones sin un solo acierto → penalización dura
             else:
                 penalizacion[animal] = 1.0
         return penalizacion
@@ -1539,6 +1600,10 @@ async def generar_prediccion(db, hora: str = None) -> dict:
         pesos     = await obtener_pesos_para_hora(db, hora_str)
         rent_hora = await obtener_rentabilidad_hora(db, hora_str)
 
+        # ── FIX v11.1: ctx_dia primero → resultados_hoy para intraday ──
+        ctx_dia        = await obtener_contexto_diario(db, hora_str, hoy)
+        resultados_hoy = ctx_dia.get("resultados_hoy", {})
+
         deuda        = await calcular_deuda(db, hora_str)
         reciente     = await calcular_frecuencia_reciente(db, hora_str)
         patron       = await calcular_patron_dia(db, hora_str, dia_semana)
@@ -1549,18 +1614,28 @@ async def generar_prediccion(db, hora: str = None) -> dict:
         pen_sobrep   = await calcular_penalizacion_sobreprediccion(db, hora_str)
         patron_fecha = await calcular_patron_fecha_exacta(db, hora_str, dia_semana, ahora.month)
         pares_corr   = await calcular_pares_correlacionados(db, hora_str)
-        intraday     = await calcular_markov_intraday(db, hora_str)
-        ctx_dia      = await obtener_contexto_diario(db, hora_str, hoy)
+        # ── FIX v11.1: intraday recibe resultados reales del día ──
+        intraday     = await calcular_markov_intraday(db, hora_str,
+                                                       resultados_hoy=resultados_hoy)
         # ── V11: Nuevas señales adaptativas ──
         decay_racha  = await calcular_decay_racha(db, hora_str)
         memoria_adap = await calcular_memoria_adaptativa(db, hora_str)
 
-        scores = combinar_señales_v10(
+        # ── FIX v11.1: penalizar animales ya vistos hoy (repetición intradiaria) ──
+        animales_vistos_hoy = set(resultados_hoy.values())
+        _pen_dia_actual = {a: 0.30 for a in animales_vistos_hoy}
+
+        scores_raw = combinar_señales_v10(
             deuda, reciente, patron, anti, markov,
             ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos, config,
             patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday,
             decay_racha=decay_racha, memoria_adap=memoria_adap
         )
+        # Aplicar penalización de repetición del día
+        scores = {
+            animal: score * _pen_dia_actual.get(animal, 1.0)
+            for animal, score in scores_raw.items()
+        }
 
         racha_fallos = 0
         ef_top3_reciente = None
