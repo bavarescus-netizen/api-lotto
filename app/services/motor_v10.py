@@ -1126,16 +1126,131 @@ async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventan
 
 
 # ══════════════════════════════════════════════════════
+# SEÑAL NUEVA: ESTACIONALIDAD MENSUAL — V11.2
+# Detecta qué animales dominan en el mes actual
+# comparando su frecuencia vs el promedio histórico
+# ══════════════════════════════════════════════════════
+async def calcular_estacionalidad_mensual(db, hora_str, mes: int,
+                                           fecha_limite=None) -> dict:
+    """
+    Señal de estacionalidad mensual — V11.2
+
+    Lógica:
+      1. Cuenta apariciones de cada animal en el mes actual (todos los años, esa hora).
+      2. Cuenta apariciones promedio en los demás meses.
+      3. Calcula ratio = freq_mes / freq_promedio → si > 1.2 el animal 'domina' ese mes.
+      4. Score normalizado 0-1 basado en el ratio, con boost si el animal
+         también dominó el mismo mes el año anterior (patrón recurrente).
+
+    Pesos para combinar_señales: peso_estacional = 0.10
+    No reemplaza ninguna señal existente — se suma como señal adicional.
+    """
+    if fecha_limite is None:
+        fecha_limite = date.today()
+    try:
+        res = await db.execute(text("""
+            WITH por_mes AS (
+                SELECT
+                    LOWER(TRIM(animalito)) AS animal,
+                    EXTRACT(MONTH FROM fecha)::int AS mes,
+                    COUNT(*) AS apariciones
+                FROM historico
+                WHERE hora    = :hora
+                  AND fecha   < :hoy
+                  AND loteria = 'Lotto Activo'
+                  AND fecha  >= :desde
+                GROUP BY animal, mes
+            ),
+            total_meses AS (
+                SELECT animal,
+                    SUM(apariciones) AS total,
+                    COUNT(DISTINCT mes) AS n_meses
+                FROM por_mes GROUP BY animal
+            ),
+            mes_actual AS (
+                SELECT animal, apariciones
+                FROM por_mes WHERE mes = :mes
+            )
+            SELECT
+                tm.animal,
+                COALESCE(ma.apariciones, 0)            AS freq_mes,
+                tm.total                               AS freq_total,
+                tm.n_meses                             AS meses_con_datos,
+                ROUND((tm.total::float / NULLIF(tm.n_meses,0))::numeric, 2) AS prom_otros
+            FROM total_meses tm
+            LEFT JOIN mes_actual ma ON tm.animal = ma.animal
+            WHERE tm.total >= 5
+            ORDER BY freq_mes DESC
+        """), {
+            "hora":  hora_str,
+            "hoy":   fecha_limite,
+            "mes":   mes,
+            "desde": fecha_limite - timedelta(days=730),  # 2 años de historia
+        })
+        rows = res.fetchall()
+        if not rows:
+            return {}
+
+        resultado = {}
+        ratios = []
+        raw = {}
+
+        for r in rows:
+            animal      = _normalizar(r[0])
+            freq_mes    = int(r[1])
+            prom_otros  = float(r[4]) if r[4] else 1.0
+            n_meses     = int(r[3])
+
+            if prom_otros < 0.5:
+                prom_otros = 0.5   # evitar divisiones por casi-cero
+
+            ratio = freq_mes / prom_otros
+            raw[animal] = {"freq_mes": freq_mes, "prom": prom_otros,
+                           "ratio": ratio, "n_meses": n_meses}
+            ratios.append(ratio)
+
+        if not ratios:
+            return {}
+
+        max_ratio = max(ratios) or 1.0
+        min_ratio = min(ratios)
+
+        for animal, d in raw.items():
+            ratio = d["ratio"]
+            # Normalizar ratio a score 0-1
+            score = (ratio - min_ratio) / max(max_ratio - min_ratio, 0.01)
+            # Bonus si ratio > 1.3 (animal claramente por encima de su promedio)
+            if ratio >= 1.5:   score = min(score * 1.20, 1.0)
+            elif ratio >= 1.3: score = min(score * 1.10, 1.0)
+            # Penalizar si el animal casi no sale este mes
+            elif ratio < 0.6:  score *= 0.60
+            elif ratio < 0.8:  score *= 0.80
+
+            resultado[animal] = {
+                "score":        round(score, 4),
+                "freq_mes":     d["freq_mes"],
+                "prom_mensual": round(d["prom"], 2),
+                "ratio":        round(ratio, 3),
+                "tendencia":    "+" if ratio >= 1.2 else ("-" if ratio < 0.8 else "="),
+                "tipo":         "estacional",
+            }
+        return resultado
+    except Exception:
+        return {}
+
+
+# ══════════════════════════════════════════════════════
 # COMBINAR SEÑALES V10 — FIX: blindaje de tipos
 # ══════════════════════════════════════════════════════
 def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           ciclo_exacto, pen_reciente, pen_sobreprediccion,
                           hora_str, pesos, config,
                           patron_fecha=None, pares=None, intraday=None,
-                          decay_racha=None, memoria_adap=None):
+                          decay_racha=None, memoria_adap=None,
+                          estacional=None):
     """
-    Combina señales usando config dinámica desde BD — V11
-    Nuevas señales: decay_racha (racha fallos/aciertos) + memoria_adap (70/30 corto/largo)
+    Combina señales usando config dinámica desde BD — V11.2
+    Nueva señal: estacional (frecuencia del animal en este mes vs promedio)
     """
     # ── Blindaje de tipos ──
     patron_fecha = patron_fecha if isinstance(patron_fecha, dict) else {}
@@ -1143,12 +1258,13 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
     intraday     = intraday     if isinstance(intraday,     dict) else {}
     decay_racha  = decay_racha  if isinstance(decay_racha,  dict) else {}
     memoria_adap = memoria_adap if isinstance(memoria_adap, dict) else {}
+    estacional   = estacional   if isinstance(estacional,   dict) else {}
 
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
         list(anti) + list(markov) + list(ciclo_exacto) +
         list(patron_fecha) + list(pares) + list(intraday) +
-        list(decay_racha) + list(memoria_adap)
+        list(decay_racha) + list(memoria_adap) + list(estacional)
     )
 
     mult_hora = config.get("multiplicador_hora", {}).get(hora_str, 0.90)
@@ -1157,18 +1273,19 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         hora_str, pesos.get("anti", 0.22)
     )
 
-    peso_ciclo   = 0.12
-    peso_fecha   = 0.10
-    peso_pares   = 0.06
-    peso_intra   = 0.12
-    peso_decay   = 0.08  # V11: decay por racha
-    peso_memoria = 0.08  # V11: memoria adaptativa
+    peso_ciclo      = 0.12
+    peso_fecha      = 0.10
+    peso_pares      = 0.06
+    peso_intra      = 0.12
+    peso_decay      = 0.08  # V11: decay por racha
+    peso_memoria    = 0.08  # V11: memoria adaptativa
+    peso_estacional = 0.10  # V11.2: estacionalidad mensual
 
     suma_pesos = (
         pesos["deuda"] + pesos["reciente"] + pesos["patron"] +
         peso_anti_hora + pesos["secuencia"] +
         peso_ciclo + peso_fecha + peso_pares + peso_intra +
-        peso_decay + peso_memoria
+        peso_decay + peso_memoria + peso_estacional
     )
 
     scores = {}
@@ -1195,6 +1312,11 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         mem_score = mem_info.get("score", 0)
         mem_contribucion = mem_score * peso_memoria
 
+        # V11.2: estacionalidad mensual
+        est_info  = estacional.get(animal, {})
+        est_score = est_info.get("score", 0.5)   # neutro si no hay dato
+        est_contribucion = est_score * peso_estacional
+
         base = (
             deuda.get(animal,       {}).get("score", 0) * pesos["deuda"]     +
             score_reciente                               * pesos["reciente"]  +
@@ -1206,7 +1328,8 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
             par_contribucion                                                   +
             intra_contribucion                                                 +
             decay_contribucion                                                 +
-            mem_contribucion
+            mem_contribucion                                                   +
+            est_contribucion
         )
         base /= suma_pesos
 
@@ -1620,6 +1743,8 @@ async def generar_prediccion(db, hora: str = None) -> dict:
         # ── V11: Nuevas señales adaptativas ──
         decay_racha  = await calcular_decay_racha(db, hora_str)
         memoria_adap = await calcular_memoria_adaptativa(db, hora_str)
+        # ── V11.2: Estacionalidad mensual ──
+        estacional   = await calcular_estacionalidad_mensual(db, hora_str, ahora.month)
 
         # ── FIX v11.1: penalizar animales ya vistos hoy (repetición intradiaria) ──
         animales_vistos_hoy = set(resultados_hoy.values())
@@ -1629,7 +1754,8 @@ async def generar_prediccion(db, hora: str = None) -> dict:
             deuda, reciente, patron, anti, markov,
             ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos, config,
             patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday,
-            decay_racha=decay_racha, memoria_adap=memoria_adap
+            decay_racha=decay_racha, memoria_adap=memoria_adap,
+            estacional=estacional
         )
         # Aplicar penalización de repetición del día
         scores = {
