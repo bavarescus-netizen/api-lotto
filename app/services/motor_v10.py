@@ -1126,6 +1126,191 @@ async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventan
 
 
 # ══════════════════════════════════════════════════════
+# SEÑAL NUEVA: PATRONES INTRADAY CONFIRMADOS — V11.2
+# Consulta patrones aprendidos automáticamente.
+# La tabla crece sola con descubrir_patrones_nuevos().
+# ══════════════════════════════════════════════════════
+async def calcular_patrones_confirmados(db, hora_str, fecha_hoy=None,
+                                         resultados_hoy: dict = None,
+                                         resultado_ayer: dict = None) -> dict:
+    """
+    Consulta patrones_intraday_confirmados y devuelve boost para
+    animales que tienen señal activa basada en lo que ya salió hoy
+    o ayer (para patrones tipo 'dia_siguiente').
+
+    Score = ventaja_vs_azar normalizada → 0.0–1.0
+    Se suma con peso_patrones_conf = 0.08 en combinar_señales.
+    """
+    if fecha_hoy is None:
+        fecha_hoy = date.today()
+    if resultados_hoy is None:
+        resultados_hoy = {}
+    if resultado_ayer is None:
+        resultado_ayer = {}
+
+    try:
+        res = await db.execute(text("""
+            SELECT trigger_hora, trigger_animal,
+                   resultado_hora, resultado_animal,
+                   tipo, pct_confirmado, ventaja_vs_azar
+            FROM patrones_intraday_confirmados
+            WHERE activo = true
+              AND resultado_hora = :hora
+            ORDER BY ventaja_vs_azar DESC
+        """), {"hora": hora_str})
+        patrones = res.fetchall()
+        if not patrones:
+            return {}
+
+        boost = {}
+        for p in patrones:
+            t_hora   = p[0]
+            t_animal = _normalizar(p[1])
+            r_animal = _normalizar(p[3])
+            tipo     = p[4]
+            pct      = float(p[5])
+            ventaja  = float(p[6])
+
+            triggered = False
+            if tipo == 'mismo_dia':
+                # El trigger debe haber salido HOY en una hora anterior
+                animal_en_hora = _normalizar(resultados_hoy.get(t_hora, ""))
+                if animal_en_hora == t_animal:
+                    triggered = True
+            elif tipo == 'dia_siguiente':
+                # El trigger debe haber salido AYER en esa hora
+                animal_ayer = _normalizar(resultado_ayer.get(t_hora, ""))
+                if animal_ayer == t_animal:
+                    triggered = True
+
+            if triggered:
+                score = min(ventaja / 15.0, 1.0)   # normalizar: 15x = score 1.0
+                if r_animal not in boost or score > boost[r_animal]["score"]:
+                    boost[r_animal] = {
+                        "score":        round(score, 4),
+                        "pct":          pct,
+                        "ventaja":      ventaja,
+                        "trigger":      t_animal,
+                        "trigger_hora": t_hora,
+                        "tipo":         tipo,
+                    }
+        return boost
+    except Exception:
+        return {}
+
+
+async def descubrir_patrones_nuevos(db, min_casos: int = 4,
+                                     min_pct: float = 18.0,
+                                     ventana_dias: int = 365) -> int:
+    """
+    Job semanal que analiza el historico buscando pares nuevos
+    con pct_real >= min_pct y los inserta en patrones_intraday_confirmados
+    si no existen ya.
+
+    Retorna el número de patrones nuevos insertados.
+    Llamar desde scheduler cada lunes a las 06:00 AM.
+    """
+    fecha_desde = date.today() - timedelta(days=ventana_dias)
+    try:
+        # Contar total de apariciones por (hora, animal) como denominador
+        res_total = await db.execute(text("""
+            SELECT hora, LOWER(TRIM(animalito)) as animal, COUNT(*) as total
+            FROM historico
+            WHERE loteria = 'Lotto Activo'
+              AND fecha >= :desde
+            GROUP BY hora, animal
+        """), {"desde": fecha_desde})
+        totales = {(r[0], r[1]): int(r[2]) for r in res_total.fetchall()}
+
+        # Contar pares (trigger_hora, trigger_animal) → (resultado_hora, resultado_animal)
+        res_pares = await db.execute(text("""
+            SELECT
+                h1.hora        AS t_hora,
+                LOWER(TRIM(h1.animalito)) AS t_animal,
+                h2.hora        AS r_hora,
+                LOWER(TRIM(h2.animalito)) AS r_animal,
+                COUNT(*)       AS coincidencias
+            FROM historico h1
+            JOIN historico h2
+                ON h1.fecha    = h2.fecha
+                AND h1.loteria = h2.loteria
+                AND h1.hora   != h2.hora
+            WHERE h1.loteria = 'Lotto Activo'
+              AND h1.fecha   >= :desde
+            GROUP BY t_hora, t_animal, r_hora, r_animal
+            HAVING COUNT(*) >= :min_casos
+        """), {"desde": fecha_desde, "min_casos": min_casos})
+
+        # Patrones ya existentes en la tabla
+        res_exist = await db.execute(text("""
+            SELECT trigger_hora, trigger_animal, resultado_hora, resultado_animal
+            FROM patrones_intraday_confirmados
+        """))
+        existentes = {
+            (r[0], _normalizar(r[1]), r[2], _normalizar(r[3]))
+            for r in res_exist.fetchall()
+        }
+
+        HORAS_ORDEN = ["08:00 AM","09:00 AM","10:00 AM","11:00 AM","12:00 PM",
+                       "01:00 PM","02:00 PM","03:00 PM","04:00 PM","05:00 PM",
+                       "06:00 PM","07:00 PM"]
+
+        nuevos = 0
+        for row in res_pares.fetchall():
+            t_hora   = row[0]
+            t_animal = _normalizar(row[1])
+            r_hora   = row[2]
+            r_animal = _normalizar(row[3])
+            n_casos  = int(row[4])
+
+            total = totales.get((t_hora, t_animal), 0)
+            if total == 0:
+                continue
+            pct = round(n_casos * 100.0 / total, 2)
+            if pct < min_pct:
+                continue
+
+            # Ignorar pares ya existentes
+            key = (t_hora, t_animal, r_hora, r_animal)
+            if key in existentes:
+                continue
+
+            # Determinar tipo: mismo_dia si r_hora > t_hora, sino dia_siguiente
+            try:
+                idx_t = HORAS_ORDEN.index(t_hora)
+                idx_r = HORAS_ORDEN.index(r_hora)
+                tipo  = 'mismo_dia' if idx_r > idx_t else 'dia_siguiente'
+            except ValueError:
+                tipo = 'mismo_dia'
+
+            ventaja = round(pct / 2.63, 2)   # vs azar esperado 2.63%
+
+            await db.execute(text("""
+                INSERT INTO patrones_intraday_confirmados
+                (trigger_hora, trigger_animal, resultado_hora, resultado_animal,
+                 tipo, n_casos, total_trigger, pct_confirmado, ventaja_vs_azar,
+                 activo, fecha_actualizacion)
+                VALUES
+                (:t_hora, :t_animal, :r_hora, :r_animal,
+                 :tipo, :n_casos, :total, :pct, :ventaja,
+                 true, CURRENT_DATE)
+            """), {
+                "t_hora":  t_hora,  "t_animal": t_animal,
+                "r_hora":  r_hora,  "r_animal": r_animal,
+                "tipo":    tipo,    "n_casos":  n_casos,
+                "total":   total,   "pct":      pct,
+                "ventaja": ventaja,
+            })
+            existentes.add(key)
+            nuevos += 1
+
+        await db.commit()
+        return nuevos
+    except Exception as e:
+        return 0
+
+
+# ══════════════════════════════════════════════════════
 # SEÑAL NUEVA: ESTACIONALIDAD MENSUAL — V11.2
 # Detecta qué animales dominan en el mes actual
 # comparando su frecuencia vs el promedio histórico
@@ -1247,10 +1432,10 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
                           hora_str, pesos, config,
                           patron_fecha=None, pares=None, intraday=None,
                           decay_racha=None, memoria_adap=None,
-                          estacional=None):
+                          estacional=None, pat_conf=None):
     """
     Combina señales usando config dinámica desde BD — V11.2
-    Nueva señal: estacional (frecuencia del animal en este mes vs promedio)
+    Nueva señal: estacional + patrones intraday confirmados (auto-aprendizaje)
     """
     # ── Blindaje de tipos ──
     patron_fecha = patron_fecha if isinstance(patron_fecha, dict) else {}
@@ -1259,12 +1444,14 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
     decay_racha  = decay_racha  if isinstance(decay_racha,  dict) else {}
     memoria_adap = memoria_adap if isinstance(memoria_adap, dict) else {}
     estacional   = estacional   if isinstance(estacional,   dict) else {}
+    pat_conf     = pat_conf     if isinstance(pat_conf,     dict) else {}
 
     todos = set(
         list(deuda) + list(reciente) + list(patron) +
         list(anti) + list(markov) + list(ciclo_exacto) +
         list(patron_fecha) + list(pares) + list(intraday) +
-        list(decay_racha) + list(memoria_adap) + list(estacional)
+        list(decay_racha) + list(memoria_adap) + list(estacional) +
+        list(pat_conf)
     )
 
     mult_hora = config.get("multiplicador_hora", {}).get(hora_str, 0.90)
@@ -1279,13 +1466,14 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
     peso_intra      = 0.12
     peso_decay      = 0.08  # V11: decay por racha
     peso_memoria    = 0.08  # V11: memoria adaptativa
-    peso_estacional = 0.10  # V11.2: estacionalidad mensual
+    peso_estacional = 0.08  # V11.2: estacionalidad mensual
+    peso_pat_conf   = 0.10  # V11.2: patrones confirmados auto-aprendizaje
 
     suma_pesos = (
         pesos["deuda"] + pesos["reciente"] + pesos["patron"] +
         peso_anti_hora + pesos["secuencia"] +
         peso_ciclo + peso_fecha + peso_pares + peso_intra +
-        peso_decay + peso_memoria + peso_estacional
+        peso_decay + peso_memoria + peso_estacional + peso_pat_conf
     )
 
     scores = {}
@@ -1317,6 +1505,11 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
         est_score = est_info.get("score", 0.5)   # neutro si no hay dato
         est_contribucion = est_score * peso_estacional
 
+        # V11.2: patrones confirmados auto-aprendizaje
+        pc_info  = pat_conf.get(animal, {})
+        pc_score = pc_info.get("score", 0.0)     # 0 si no hay patrón activo
+        pc_contribucion = pc_score * peso_pat_conf
+
         base = (
             deuda.get(animal,       {}).get("score", 0) * pesos["deuda"]     +
             score_reciente                               * pesos["reciente"]  +
@@ -1329,7 +1522,8 @@ def combinar_señales_v10(deuda, reciente, patron, anti, markov,
             intra_contribucion                                                 +
             decay_contribucion                                                 +
             mem_contribucion                                                   +
-            est_contribucion
+            est_contribucion                                                   +
+            pc_contribucion
         )
         base /= suma_pesos
 
@@ -1727,6 +1921,15 @@ async def generar_prediccion(db, hora: str = None) -> dict:
         ctx_dia        = await obtener_contexto_diario(db, hora_str, hoy)
         resultados_hoy = ctx_dia.get("resultados_hoy", {})
 
+        # ── V11.2: resultado_ayer para patrones dia_siguiente ──
+        ayer = hoy - timedelta(days=1)
+        res_ayer = await db.execute(text("""
+            SELECT hora, LOWER(TRIM(animalito))
+            FROM historico
+            WHERE fecha = :ayer AND loteria = 'Lotto Activo'
+        """), {"ayer": ayer})
+        resultado_ayer = {r[0]: r[1] for r in res_ayer.fetchall()}
+
         deuda        = await calcular_deuda(db, hora_str)
         reciente     = await calcular_frecuencia_reciente(db, hora_str)
         patron       = await calcular_patron_dia(db, hora_str, dia_semana)
@@ -1745,6 +1948,12 @@ async def generar_prediccion(db, hora: str = None) -> dict:
         memoria_adap = await calcular_memoria_adaptativa(db, hora_str)
         # ── V11.2: Estacionalidad mensual ──
         estacional   = await calcular_estacionalidad_mensual(db, hora_str, ahora.month)
+        # ── V11.2: Patrones intraday confirmados (auto-aprendizaje) ──
+        pat_conf     = await calcular_patrones_confirmados(
+                           db, hora_str,
+                           fecha_hoy=hoy,
+                           resultados_hoy=resultados_hoy,
+                           resultado_ayer=resultado_ayer)
 
         # ── FIX v11.1: penalizar animales ya vistos hoy (repetición intradiaria) ──
         animales_vistos_hoy = set(resultados_hoy.values())
@@ -1755,7 +1964,7 @@ async def generar_prediccion(db, hora: str = None) -> dict:
             ciclo_exacto, pen_rec, pen_sobrep, hora_str, pesos, config,
             patron_fecha=patron_fecha, pares=pares_corr, intraday=intraday,
             decay_racha=decay_racha, memoria_adap=memoria_adap,
-            estacional=estacional
+            estacional=estacional, pat_conf=pat_conf
         )
         # Aplicar penalización de repetición del día
         scores = {
