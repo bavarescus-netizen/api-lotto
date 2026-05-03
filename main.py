@@ -9,7 +9,7 @@ from sqlalchemy import text
 from db import get_db, AsyncSessionLocal
 from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
 from app.core.scheduler import ciclo_infinito
-# En main.py — al iniciar
+# En main.py — al iniciarz
 from app.core.scheduler import startup
 async with AsyncSessionLocal() as db:
     await startup(db)
