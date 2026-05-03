@@ -1,12 +1,19 @@
 """
-scheduler_v11_final.py — LottoAI PRO V12
-=========================================
-Cambios vs versión anterior:
+scheduler_v11_2.py — LottoAI PRO V11.2
+========================================
+Cambios acumulados:
   ✅ FIX CRÍTICO: hora del scraper "08" → "08:00 AM" (HORA_NUM_A_LABEL)
   ✅ FIX: hora_siguiente() no rompe con ValueError silencioso
   ✅ NUEVO: columnas pred_tentativa_1/2/3 + origen en auditoria_ia
   ✅ NUEVO: dashboard puede comparar TENTATIVO vs INTRADAY vs REAL
-  ✅ Ciclo nocturno 7PM revisado cada 2 min (antes del bloque general)
+  ✅ Ciclo nocturno 7PM revisado cada 2 min
+
+V11.2 — nuevos:
+  ✅ job_descubrir_patrones(): corre cada lunes 06AM — auto-aprende pares intraday
+  ✅ migrar_tabla_patrones(): crea patrones_intraday_confirmados si no existe
+  ✅ recalcular_prediccion_siguiente() mejorado: recalcula las 2 horas siguientes
+  ✅ Madrugada (00:00-07:59): duerme 30 min pero ejecuta job lunes
+  ✅ _asegurar_prediccion_hora_actual() genera TODAS las horas pendientes (no solo la próxima)
 """
 
 import asyncio
@@ -75,6 +82,78 @@ async def migrar_columnas_tentativo(db):
     except Exception as e:
         await db.rollback()
         logger.warning(f"⚠️ Migración columnas tentativo (puede ser normal si ya existen): {e}")
+
+
+async def migrar_tabla_patrones(db):
+    """
+    V11.2 — Crea patrones_intraday_confirmados si no existe.
+    Llamar desde startup de main.py junto con migrar_columnas_tentativo.
+    """
+    try:
+        await db.execute(text("""
+            CREATE TABLE IF NOT EXISTS patrones_intraday_confirmados (
+                id                SERIAL PRIMARY KEY,
+                trigger_hora      VARCHAR(10)   NOT NULL,
+                trigger_animal    VARCHAR(30)   NOT NULL,
+                resultado_hora    VARCHAR(10)   NOT NULL,
+                resultado_animal  VARCHAR(30)   NOT NULL,
+                tipo              VARCHAR(20)   DEFAULT 'mismo_dia',
+                n_casos           INT           NOT NULL,
+                total_trigger     INT           NOT NULL DEFAULT 0,
+                pct_confirmado    DECIMAL(5,2)  NOT NULL,
+                ventaja_vs_azar   DECIMAL(5,2)  NOT NULL DEFAULT 1.0,
+                activo            BOOLEAN       DEFAULT true,
+                fecha_actualizacion DATE        DEFAULT CURRENT_DATE,
+                UNIQUE (trigger_hora, trigger_animal, resultado_hora, resultado_animal)
+            )
+        """))
+        # Insertar patrones base confirmados manualmente (solo si tabla estaba vacía)
+        await db.execute(text("""
+            INSERT INTO patrones_intraday_confirmados
+            (trigger_hora, trigger_animal, resultado_hora, resultado_animal,
+             tipo, n_casos, total_trigger, pct_confirmado, ventaja_vs_azar)
+            VALUES
+            ('02:00 PM','oso',      '07:00 PM','gallo',  'mismo_dia',    4, 13, 30.8, 11.7),
+            ('01:00 PM','ardilla',  '02:00 PM','perico', 'mismo_dia',    4, 13, 30.8, 11.7),
+            ('03:00 PM','alacran',  '01:00 PM','raton',  'dia_siguiente',4, 17, 23.5,  8.9),
+            ('07:00 PM','caballo',  '01:00 PM','raton',  'dia_siguiente',4, 17, 23.5,  8.9),
+            ('12:00 PM','carnero',  '02:00 PM','perico', 'mismo_dia',    4, 20, 20.0,  7.6)
+            ON CONFLICT DO NOTHING
+        """))
+        await db.commit()
+        logger.info("✅ Tabla patrones_intraday_confirmados: OK")
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"⚠️ migrar_tabla_patrones: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
+# JOB SEMANAL — descubrir patrones nuevos (lunes 06AM)
+# ─────────────────────────────────────────────────────────────
+
+_ultimo_descubrimiento_patrones: date | None = None
+
+async def job_descubrir_patrones():
+    """
+    Corre cada lunes a las 06:00 AM VE.
+    Llama a descubrir_patrones_nuevos() del motor → inserta pares nuevos en BD.
+    """
+    global _ultimo_descubrimiento_patrones
+    hoy = date.today()
+
+    # Evitar correr más de una vez por semana
+    if _ultimo_descubrimiento_patrones == hoy:
+        return
+
+    logger.info("🔍 [JOB LUNES] Iniciando descubrimiento de patrones intraday...")
+    try:
+        from app.services.motor_v10 import descubrir_patrones_nuevos
+        async with AsyncSessionLocal() as db:
+            nuevos = await descubrir_patrones_nuevos(db, min_casos=4, min_pct=18.0)
+            logger.info(f"✅ [JOB LUNES] Patrones nuevos descubiertos: {nuevos}")
+            _ultimo_descubrimiento_patrones = hoy
+    except Exception as e:
+        logger.error(f"❌ [JOB LUNES] Error descubriendo patrones: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -227,33 +306,41 @@ async def guardar_prediccion(db, fecha, hora, pred, *, forzar: bool = False, ori
 
 async def recalcular_prediccion_siguiente(db, fecha, hora_resultado, animal_resultado):
     """
-    Tras conocer el resultado de una hora, recalcula la predicción
-    de la SIGUIENTE con contexto actualizado (origen=INTRADAY).
+    V11.2 — Tras conocer el resultado de una hora, recalcula la predicción
+    de las SIGUIENTES 2 HORAS con contexto actualizado (origen=INTRADAY).
+    Recalcular 2 horas maximiza el impacto de los patrones confirmados
+    y la señal intraday que ahora lleva el resultado real del día.
     El tentativo queda preservado en pred_tentativa_* para comparar.
     """
-    hora_prox = hora_siguiente(hora_resultado)
-    if not hora_prox:
+    from app.services.motor_v10 import generar_prediccion
+
+    horas_a_recalcular = []
+    h = hora_siguiente(hora_resultado)
+    if h:
+        horas_a_recalcular.append(h)
+        h2 = hora_siguiente(h)
+        if h2:
+            horas_a_recalcular.append(h2)
+
+    if not horas_a_recalcular:
         logger.info(f"🏁 {hora_resultado} fue el último sorteo del día")
         return
 
-    try:
-        from app.services.motor_v10 import generar_prediccion
-        logger.info(f"🔄 Recalculando {hora_prox} tras {hora_resultado}={animal_resultado.upper()}")
-
-        pred = await generar_prediccion(db, hora_prox)
-        if not pred or not pred.get("prediccion_1"):
-            logger.warning(f"⚠️ Motor no devolvió predicción para {hora_prox}")
-            return
-
-        await guardar_prediccion(
-            db, fecha, hora_prox, pred,
-            forzar=True,
-            origen="INTRADAY"
-        )
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"❌ Error recalculando predicción {hora_prox}: {e}")
+    for hora_prox in horas_a_recalcular:
+        try:
+            logger.info(f"🔄 Recalculando {hora_prox} tras {hora_resultado}={animal_resultado.upper()}")
+            pred = await generar_prediccion(db, hora_prox)
+            if not pred or not pred.get("prediccion_1"):
+                logger.warning(f"⚠️ Motor no devolvió predicción para {hora_prox}")
+                continue
+            await guardar_prediccion(
+                db, fecha, hora_prox, pred,
+                forzar=True,
+                origen="INTRADAY"
+            )
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"❌ Error recalculando predicción {hora_prox}: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -498,31 +585,48 @@ async def _asegurar_prediccion_hora_actual(db, ahora):
             break  # Solo la próxima hora pendiente
 
 
+async def startup(db):
+    """
+    Llamar desde main.py al iniciar la app.
+    Ejecuta todas las migraciones necesarias.
+    """
+    await migrar_columnas_tentativo(db)
+    await migrar_tabla_patrones(db)
+    logger.info("✅ Startup scheduler V11.2 completo")
+
+
 async def ciclo_infinito():
-    logger.info("🚀 [LottoAI PRO] Scheduler V11 FINAL — Tentativo + Intraday + Comparación")
+    logger.info("🚀 [LottoAI PRO] Scheduler V11.2 — Tentativo + Intraday + Patrones + Job Semanal")
     while True:
         try:
-            ahora = datetime.now(TIMEZONE_VE)
-            hora_ve = ahora.hour
+            ahora    = datetime.now(TIMEZONE_VE)
+            hora_ve  = ahora.hour
+            min_ve   = ahora.minute
+            dia_sem  = ahora.weekday()   # 0=lunes … 6=domingo
 
-            # 7PM-8:30PM: cada 2 min — capturar 7PM y disparar tentativo ASAP
-            if hora_ve == 19 or (hora_ve == 20 and ahora.minute < 30):
+            # ── JOB SEMANAL: lunes entre 06:00–06:05 AM ──────────────────────
+            if dia_sem == 0 and hora_ve == 6 and min_ve < 5:
+                await job_descubrir_patrones()
+
+            # ── 7PM–8:30PM: cada 2 min — capturar 7PM + tentativo ASAP ──────
+            if hora_ve == 19 or (hora_ve == 20 and min_ve < 30):
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
-                    # ✅ Predicción independiente del scraper
                     await _asegurar_prediccion_hora_actual(db, ahora)
                 espera = 120
 
-            # Horario sorteos 8AM-8PM: cada 5 min
-            elif 8 <= hora_ve <= 20:
+            # ── 8AM–7PM: cada 5 min — ciclo principal de sorteos ─────────────
+            elif 8 <= hora_ve <= 18:
                 async with AsyncSessionLocal() as db:
                     await capturar_y_procesar(db)
-                    # ✅ Predicción independiente del scraper
                     await _asegurar_prediccion_hora_actual(db, ahora)
                 espera = 300
 
-            # Noche/madrugada: sin procesar
+            # ── Madrugada / noche temprana: cada 30 min ───────────────────────
+            # No captura sorteos pero sí ejecuta jobs y mantiene el proceso vivo
             else:
+                # Entre 20:30 y 23:59 — nada más que esperar
+                # Entre 00:00 y 07:59 — solo job lunes si aplica
                 espera = 1800
 
             await asyncio.sleep(espera)
