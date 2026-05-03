@@ -1565,15 +1565,23 @@ def calcular_indice_confianza_v10(scores, config, hora_str,
     if len(valores) < 3:
         return 10, "🔴 DATOS INSUFICIENTES", False
 
+    # ── FIX V11.2: escala de confianza recalibrada ──
+    # La fórmula anterior dividía por 20 → multiplicaba x5 la efectividad real
+    # Con ef_top3 = 8% → base = 40 (muy alto para solo 8% de aciertos)
+    # AHORA: escala lineal honesta. 8% efectividad = ~11 de base (cerca del azar)
+    # Techo en 50 solo si efectividad > 25% (excelente)
     if ef_top3_reciente is not None and ef_top3_reciente > 0:
-        base_reciente = min(int((ef_top3_reciente / 20.0) * 100), 80)
+        # Azar = 7.5% TOP3. Solo dar crédito por encima del azar.
+        sobre_azar = max(ef_top3_reciente - 7.5, 0)
+        base_reciente = min(int(15 + sobre_azar * 2.5), 55)
     elif total_sorteos_hora >= 20 and aciertos_top3_hora > 0:
         wilson = wilson_lower(aciertos_top3_hora, total_sorteos_hora)
-        base_reciente = min(int(wilson * 400), 60)
+        base_reciente = min(int(wilson * 300), 45)
     elif efectividad_hora_top3 is not None:
-        base_reciente = min(int((efectividad_hora_top3 / 20.0) * 100), 50)
+        sobre_azar = max(efectividad_hora_top3 - 7.5, 0)
+        base_reciente = min(int(12 + sobre_azar * 2.0), 40)
     else:
-        base_reciente = 20
+        base_reciente = 15  # neutro conservador
 
     mult_hora  = config.get("multiplicador_hora", {}).get(hora_str or "", 0.90)
     bonus_hora = int((mult_hora - 0.90) * 100)
