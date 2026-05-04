@@ -11,8 +11,11 @@ from app.routes import entrenar, stats, historico, metricas, prediccion, cargarh
 from app.core.scheduler import ciclo_infinito
 # En main.py — al iniciarz
 from app.core.scheduler import startup
-async with AsyncSessionLocal() as db:
-    await startup(db)
+@app.on_event("startup")
+async def on_startup():
+    async with AsyncSessionLocal() as db:
+        await startup(db)
+    asyncio.create_task(ciclo_infinito())
 from app.services.motor_v10 import (
     generar_prediccion, obtener_estadisticas, obtener_bitacora,
     entrenar_modelo, backtest, calibrar_predicciones,
