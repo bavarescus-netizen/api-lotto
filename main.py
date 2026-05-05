@@ -8,14 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from db import get_db, AsyncSessionLocal
 from app.routes import entrenar, stats, historico, metricas, prediccion, cargarhist
-from app.core.scheduler import ciclo_infinito
-# En main.py — al iniciarz
-from app.core.scheduler import startup
-@app.on_event("startup")
-async def on_startup():
-    async with AsyncSessionLocal() as db:
-        await startup(db)
-    asyncio.create_task(ciclo_infinito())
+from app.core.scheduler import ciclo_infinito, startup
 from app.services.motor_v10 import (
     generar_prediccion, obtener_estadisticas, obtener_bitacora,
     entrenar_modelo, backtest, calibrar_predicciones,
@@ -189,8 +182,11 @@ async def iniciar_bot():
             print(f"Warning aprendizaje_sorteo: {e}")
 
         break
+    # ✅ V11.2: inicializar scheduler (migra tabla patrones + inserta patrones base)
+    async with AsyncSessionLocal() as db_startup:
+        await startup(db_startup)
     asyncio.create_task(ciclo_infinito())
-    print("🚀 LOTTOAI PRO V10 — Markov + Decay + Gap + Pesos por hora")
+    print("🚀 LOTTOAI PRO V11.2 — Markov + Decay + Patrón + Estacional + Patrones confirmados")
 
 
 # ═══════════════════════════════════════════════════════════
