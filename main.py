@@ -18,6 +18,13 @@ from app.services.motor_v10 import (
     # ── PASO 2: Aprendizaje por sorteo ──
     aprender_sorteo, aprender_ultimos_n, obtener_historial_aprendizaje,
 )
+# ── V12: motor autónomo con diversidad forzada y anti-congelamiento ──
+from app.services.motor_v12 import (
+    generar_prediccion_v12,
+    analizar_dia_completo,
+    reentrenar_v12,
+    corregir_campo_acierto,
+)
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
 _tarea = {
@@ -186,7 +193,7 @@ async def iniciar_bot():
     async with AsyncSessionLocal() as db_startup:
         await startup(db_startup)
     asyncio.create_task(ciclo_infinito())
-    print("🚀 LOTTOAI PRO V11.2 — Markov + Decay + Patrón + Estacional + Patrones confirmados")
+    print("🚀 LOTTOAI PRO V10 — Markov + Decay + Patrón + Estacional + Patrones confirmados")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2167,3 +2174,53 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
         "con_filtro": {"total": int(con_filtro.total), "aciertos": int(con_filtro.top1), "ef_pct": round(con_filtro.top1 / con_filtro.total * 100, 2), "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)},
         "conclusion": "filtro_mejora" if (con_filtro.top1 / con_filtro.total) > (sin_filtro.top1 / sin_filtro.total) else "filtro_no_mejora"
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# V12 — MOTOR AUTÓNOMO
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/predecir/v12")
+async def predecir_v12(hora: str = None, db: AsyncSession = Depends(get_db)):
+    """
+    Motor V12: top3 con 3 animales distintos garantizados + anti-congelamiento.
+    Si el mismo animal lleva 3+ días como pred1 sin acertar → se le baja el score
+    y el motor rota automáticamente a otro candidato.
+    """
+    resultado = await generar_prediccion_v12(db, hora)
+    return resultado
+
+
+@app.get("/analizar/dia")
+async def analizar_dia(db: AsyncSession = Depends(get_db)):
+    """
+    El motor decide autónomamente cuáles sorteos vale la pena apostar hoy.
+    Devuelve: horas recomendadas, animales, inversión sugerida y retorno esperado.
+    Con $100 por apuesta: si recomienda 4 horas → inversión $1200, retorno esperado según ef histórica.
+    """
+    resultado = await analizar_dia_completo(db)
+    return resultado
+
+
+@app.post("/entrenar/v12")
+async def endpoint_entrenar_v12(db: AsyncSession = Depends(get_db)):
+    """
+    Reentrenamiento V12:
+    1. Corrige campo acierto (usa prediccion_1/2/3 en lugar de animal_predicho)
+    2. Recalcula rentabilidad_hora con datos limpios
+    3. Devuelve efectividad real corregida
+    EJECUTAR UNA VEZ para corregir los registros de marzo-abril 2026.
+    """
+    resultado = await reentrenar_v12(db)
+    return resultado
+
+
+@app.post("/fix/acierto")
+async def endpoint_fix_acierto(db: AsyncSession = Depends(get_db)):
+    """
+    Corrige el campo acierto en auditoria_ia.
+    Bug: se comparaba contra animal_predicho (viejo) en vez de prediccion_1/2/3.
+    Esto hacía que abril mostrara 3.27% cuando la efectividad real era ~10%.
+    """
+    resultado = await corregir_campo_acierto(db)
+    return resultado
