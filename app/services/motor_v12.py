@@ -223,48 +223,86 @@ async def analizar_dia_completo(db) -> dict:
     }
     
     try:
-        # Cargar efectividad histórica por hora — usar tabla rentabilidad_hora
-        # que tiene datos de TODO el historial, no solo 60 días
+        # ══════════════════════════════════════════════════
+        # EFECTIVIDAD PONDERADA POR TIEMPO
+        # Ventanas: 30d × 3.0 | 90d × 2.0 | 365d × 1.5 | histórico × 1.0
+        # El último mes pesa 3x más que datos de 8 años atrás
+        # ══════════════════════════════════════════════════
         res_ef = await db.execute(text("""
-            SELECT 
-                hora,
-                efectividad_top3,
-                total_sorteos
-            FROM rentabilidad_hora
-            WHERE hora IS NOT NULL
-            ORDER BY hora
+            SELECT
+                a.hora,
+                -- Ventana 30 días
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 30 THEN 1 END) as tot_30,
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 30
+                    AND LOWER(TRIM(h.animalito)) IN (
+                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                    ) THEN 1 END) as ac_30,
+                -- Ventana 90 días
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 90 THEN 1 END) as tot_90,
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 90
+                    AND LOWER(TRIM(h.animalito)) IN (
+                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                    ) THEN 1 END) as ac_90,
+                -- Ventana 365 días
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 365 THEN 1 END) as tot_365,
+                COUNT(CASE WHEN a.fecha >= CURRENT_DATE - 365
+                    AND LOWER(TRIM(h.animalito)) IN (
+                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                    ) THEN 1 END) as ac_365,
+                -- Histórico completo
+                COUNT(*) as tot_hist,
+                COUNT(CASE WHEN LOWER(TRIM(h.animalito)) IN (
+                    LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                    LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                    LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                ) THEN 1 END) as ac_hist
+            FROM auditoria_ia a
+            JOIN historico h ON h.fecha = a.fecha AND h.hora = a.hora
+                AND h.loteria = 'Lotto Activo'
+            WHERE a.prediccion_1 IS NOT NULL
+            GROUP BY a.hora
+            HAVING COUNT(*) >= 30
+            ORDER BY a.hora
         """))
+
         ef_por_hora = {}
         for r in res_ef.fetchall():
-            ef_por_hora[r[0]] = {
-                "total": int(r[2] or 0),
-                "ef_top3": float(r[1] or 0),
-            }
+            hora = r[0]
+            tot_30, ac_30 = int(r[1] or 0), int(r[2] or 0)
+            tot_90, ac_90 = int(r[3] or 0), int(r[4] or 0)
+            tot_365, ac_365 = int(r[5] or 0), int(r[6] or 0)
+            tot_hist, ac_hist = int(r[7] or 0), int(r[8] or 0)
 
-        # Si rentabilidad_hora está vacía, calcular desde auditoria_ia histórica completa
-        if not ef_por_hora:
-            res_ef2 = await db.execute(text("""
-                SELECT 
-                    a.hora,
-                    COUNT(*) as total,
-                    ROUND(
-                        COUNT(CASE WHEN LOWER(TRIM(h.animalito)) IN (
-                            LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
-                            LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
-                            LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
-                        ) THEN 1 END)::numeric / NULLIF(COUNT(*),0) * 100, 2
-                    ) as ef_top3
-                FROM auditoria_ia a
-                JOIN historico h ON h.fecha = a.fecha AND h.hora = a.hora 
-                    AND h.loteria = 'Lotto Activo'
-                WHERE a.prediccion_1 IS NOT NULL
-                  AND a.fecha < '2026-03-01'
-                GROUP BY a.hora
-                HAVING COUNT(*) >= 30
-                ORDER BY a.hora
-            """))
-            ef_por_hora = {r[0]: {"total": int(r[1]), "ef_top3": float(r[2] or 0)}
-                           for r in res_ef2.fetchall()}
+            # Calcular ef por ventana (evitar división por cero)
+            ef_30  = (ac_30  / tot_30  * 100) if tot_30  >= 5  else None
+            ef_90  = (ac_90  / tot_90  * 100) if tot_90  >= 15 else None
+            ef_365 = (ac_365 / tot_365 * 100) if tot_365 >= 30 else None
+            ef_hist= (ac_hist/ tot_hist* 100) if tot_hist >= 30 else None
+
+            # Promedio ponderado — más peso a lo reciente
+            peso_total = 0
+            ef_ponderada = 0.0
+            for ef, peso in [(ef_30, 3.0), (ef_90, 2.0), (ef_365, 1.5), (ef_hist, 1.0)]:
+                if ef is not None:
+                    ef_ponderada += ef * peso
+                    peso_total   += peso
+
+            ef_final = round(ef_ponderada / peso_total, 2) if peso_total > 0 else 0.0
+
+            ef_por_hora[hora] = {
+                "total": tot_hist,
+                "ef_top3": ef_final,
+                "ef_30d": round(ef_30, 2) if ef_30 else None,
+                "ef_90d": round(ef_90, 2) if ef_90 else None,
+                "ef_365d": round(ef_365, 2) if ef_365 else None,
+                "ef_hist": round(ef_hist, 2) if ef_hist else None,
+            }
 
         # Racha de fallos — solo últimos 5 días con resultado real confirmado
         # Usar historico como fuente de verdad, no auditoria_ia
@@ -330,7 +368,11 @@ async def analizar_dia_completo(db) -> dict:
             if razon_descarte:
                 resultado["horas_descartadas"].append({
                     "hora": hora,
-                    "ef_top3_historica": ef_top3,
+                    "ef_top3_ponderada": ef_top3,
+                    "ef_30d": ef_data.get("ef_30d"),
+                    "ef_90d": ef_data.get("ef_90d"),
+                    "ef_365d": ef_data.get("ef_365d"),
+                    "ef_hist": ef_data.get("ef_hist"),
                     "racha_fallos": fallos,
                     "pred1_hoy": pred1,
                     "razon": razon_descarte,
@@ -356,7 +398,11 @@ async def analizar_dia_completo(db) -> dict:
                     "pred1": pred1,
                     "pred2": pred_hoy.get("pred2", "—"),
                     "pred3": pred_hoy.get("pred3", "—"),
-                    "ef_top3_historica": ef_top3,
+                    "ef_top3_ponderada": ef_top3,
+                    "ef_30d": ef_data.get("ef_30d"),
+                    "ef_90d": ef_data.get("ef_90d"),
+                    "ef_365d": ef_data.get("ef_365d"),
+                    "ef_hist": ef_data.get("ef_hist"),
                     "racha_fallos": fallos,
                     "confianza": confianza,
                     "inversion_hora": inversion_hora,
