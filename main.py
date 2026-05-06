@@ -2202,7 +2202,7 @@ async def analizar_dia(db: AsyncSession = Depends(get_db)):
     return resultado
 
 
-@app.post("/entrenar/v12")
+@app.get("/entrenar/v12")
 async def endpoint_entrenar_v12(db: AsyncSession = Depends(get_db)):
     """
     Reentrenamiento V12:
@@ -2215,7 +2215,7 @@ async def endpoint_entrenar_v12(db: AsyncSession = Depends(get_db)):
     return resultado
 
 
-@app.post("/fix/acierto")
+@app.get("/fix/acierto")
 async def endpoint_fix_acierto(db: AsyncSession = Depends(get_db)):
     """
     Corrige el campo acierto en auditoria_ia.
