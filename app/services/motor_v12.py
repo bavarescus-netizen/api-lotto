@@ -223,66 +223,77 @@ async def analizar_dia_completo(db) -> dict:
     }
     
     try:
-        # Cargar efectividad histórica por hora
+        # Cargar efectividad histórica por hora — usar tabla rentabilidad_hora
+        # que tiene datos de TODO el historial, no solo 60 días
         res_ef = await db.execute(text("""
             SELECT 
+                hora,
+                efectividad_top3,
+                total_sorteos
+            FROM rentabilidad_hora
+            WHERE hora IS NOT NULL
+            ORDER BY hora
+        """))
+        ef_por_hora = {}
+        for r in res_ef.fetchall():
+            ef_por_hora[r[0]] = {
+                "total": int(r[2] or 0),
+                "ef_top3": float(r[1] or 0),
+            }
+
+        # Si rentabilidad_hora está vacía, calcular desde auditoria_ia histórica completa
+        if not ef_por_hora:
+            res_ef2 = await db.execute(text("""
+                SELECT 
+                    a.hora,
+                    COUNT(*) as total,
+                    ROUND(
+                        COUNT(CASE WHEN LOWER(TRIM(h.animalito)) IN (
+                            LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
+                            LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
+                            LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
+                        ) THEN 1 END)::numeric / NULLIF(COUNT(*),0) * 100, 2
+                    ) as ef_top3
+                FROM auditoria_ia a
+                JOIN historico h ON h.fecha = a.fecha AND h.hora = a.hora 
+                    AND h.loteria = 'Lotto Activo'
+                WHERE a.prediccion_1 IS NOT NULL
+                  AND a.fecha < '2026-03-01'
+                GROUP BY a.hora
+                HAVING COUNT(*) >= 30
+                ORDER BY a.hora
+            """))
+            ef_por_hora = {r[0]: {"total": int(r[1]), "ef_top3": float(r[2] or 0)}
+                           for r in res_ef2.fetchall()}
+
+        # Racha de fallos — solo últimos 5 días con resultado real confirmado
+        # Usar historico como fuente de verdad, no auditoria_ia
+        res_racha = await db.execute(text("""
+            SELECT 
                 a.hora,
-                COUNT(*) as total,
-                COUNT(CASE WHEN LOWER(TRIM(h.animalito)) IN (
+                SUM(CASE WHEN LOWER(TRIM(h.animalito)) IN (
                     LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
                     LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
                     LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
-                ) THEN 1 END) as aciertos_top3,
-                ROUND(
-                    COUNT(CASE WHEN LOWER(TRIM(h.animalito)) IN (
-                        LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
-                        LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
-                        LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
-                    ) THEN 1 END)::numeric / NULLIF(COUNT(*),0) * 100, 2
-                ) as ef_top3
-            FROM auditoria_ia a
-            JOIN historico h ON h.fecha = a.fecha AND h.hora = a.hora 
-                AND h.loteria = 'Lotto Activo'
-            WHERE a.fecha >= CURRENT_DATE - INTERVAL '60 days'
-              AND a.prediccion_1 IS NOT NULL
-            GROUP BY a.hora
-            HAVING COUNT(*) >= 10
-            ORDER BY a.hora
-        """))
-        ef_por_hora = {r[0]: {"total": int(r[1]), "aciertos": int(r[2]), 
-                               "ef_top3": float(r[3] or 0)} 
-                       for r in res_ef.fetchall()}
-        
-        # Cargar racha de fallos por hora (últimos 5 sorteos)
-        res_racha = await db.execute(text("""
-            SELECT a.hora,
-                   ARRAY_AGG(
-                       (LOWER(TRIM(h.animalito)) IN (
-                           LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
-                           LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
-                           LOWER(TRIM(COALESCE(a.prediccion_3,'__')))
-                       ))
-                       ORDER BY a.fecha DESC
-                   ) as resultados
+                ) THEN 1 ELSE 0 END) as aciertos_recientes,
+                COUNT(*) as total_recientes
             FROM auditoria_ia a
             JOIN historico h ON h.fecha = a.fecha AND h.hora = a.hora
                 AND h.loteria = 'Lotto Activo'
-            WHERE a.fecha >= CURRENT_DATE - INTERVAL '10 days'
+            WHERE a.fecha >= CURRENT_DATE - INTERVAL '7 days'
+              AND a.fecha < CURRENT_DATE
               AND a.prediccion_1 IS NOT NULL
             GROUP BY a.hora
         """))
         racha_por_hora = {}
         for r in res_racha.fetchall():
             hora = r[0]
-            resultados = r[1][:5] if r[1] else []
-            fallos_consec = 0
-            for acerto in resultados:
-                if not acerto:
-                    fallos_consec += 1
-                else:
-                    break
-            racha_por_hora[hora] = fallos_consec
-        
+            aciertos = int(r[1] or 0)
+            total = int(r[2] or 1)
+            # Si 0 aciertos en últimos 7 días → racha de fallos = total
+            # Si al menos 1 acierto → racha = 0
+            racha_por_hora[hora] = total if aciertos == 0 else 0
+
         # Cargar predicciones de hoy (si ya existen)
         res_hoy = await db.execute(text("""
             SELECT hora, prediccion_1, prediccion_2, prediccion_3, confianza_pct
