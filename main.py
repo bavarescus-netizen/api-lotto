@@ -25,6 +25,13 @@ from app.services.motor_v12 import (
     reentrenar_v12,
     corregir_campo_acierto,
 )
+# ── V13: motor adaptativo intradiario ──
+from app.services.motor_v13 import (
+    generar_plan_dia,
+    ajustar_tras_sorteo,
+    dashboard_dia,
+    reentrenar_v13,
+)
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
 _tarea = {
@@ -2220,7 +2227,58 @@ async def endpoint_fix_acierto(db: AsyncSession = Depends(get_db)):
     """
     Corrige el campo acierto en auditoria_ia.
     Bug: se comparaba contra animal_predicho (viejo) en vez de prediccion_1/2/3.
-    Esto hacía que abril mostrara 3.27% cuando la efectividad real era ~10%.
     """
     resultado = await corregir_campo_acierto(db)
+    return resultado
+
+
+# ═══════════════════════════════════════════════════════════
+# V13 — MOTOR ADAPTATIVO INTRADIARIO
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/entrenar/v13")
+async def endpoint_entrenar_v13(db: AsyncSession = Depends(get_db)):
+    """Inicializa V13 — crea tabla plan_dia."""
+    resultado = await reentrenar_v13(db)
+    return resultado
+
+
+@app.get("/plan/dia")
+async def endpoint_plan_dia(db: AsyncSession = Depends(get_db)):
+    """
+    Genera el plan del día siguiente — ejecutar noche anterior.
+    Llama V12 para cada hora y guarda predicciones en plan_dia.
+    """
+    resultado = await generar_plan_dia(db)
+    return resultado
+
+
+@app.get("/ajustar/{hora}")
+async def endpoint_ajustar(
+    hora: str,
+    resultado: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Llamar después de cada sorteo real.
+    Ejemplo: /ajustar/08:00+AM?resultado=gallo
+    El motor ajusta automáticamente las horas siguientes.
+    """
+    hora_decoded = hora.replace("+", " ")
+    resultado_data = await ajustar_tras_sorteo(db, hora_decoded, resultado)
+    return resultado_data
+
+
+@app.get("/dashboard/dia")
+async def endpoint_dashboard_dia(
+    fecha: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Estado del día en tiempo real.
+    Predicción original vs ajustada, resultados, aciertos y ganancia acumulada.
+    """
+    from datetime import date as date_type
+    f = date_type.fromisoformat(fecha) if fecha else None
+    resultado = await dashboard_dia(db, f)
     return resultado
