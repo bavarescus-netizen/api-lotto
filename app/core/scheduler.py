@@ -537,9 +537,27 @@ async def capturar_y_procesar(db):
                     # 2. Corrección INTRADAY de la siguiente hora
                     await recalcular_prediccion_siguiente(db, fecha_hoy, hora_nuevo, animal_nuevo)
 
-                    # 3. Si es el último sorteo → TENTATIVO de mañana
+                    # 3. V13: ajuste adaptativo tras cada sorteo real
+                    try:
+                        from app.services.motor_v13 import ajustar_tras_sorteo
+                        ajuste = await ajustar_tras_sorteo(db, hora_nuevo, animal_nuevo)
+                        n_aj = ajuste.get("ajustes_aplicados", 0)
+                        pos  = ajuste.get("acierto_pos", "ninguna")
+                        logger.info(f"🔄 V13 {hora_nuevo}: {pos} | {n_aj} horas ajustadas")
+                    except Exception as e_v13:
+                        logger.warning(f"⚠️ V13 ajuste_tras_sorteo {hora_nuevo}: {e_v13}")
+
+                    # 4. Si es el último sorteo → TENTATIVO de mañana + plan V13
                     if hora_nuevo == "07:00 PM":
                         await generar_tentativo_manana(db, fecha_hoy, animal_nuevo)
+                        try:
+                            from app.services.motor_v13 import generar_plan_dia
+                            manana = fecha_hoy + timedelta(days=1)
+                            plan = await generar_plan_dia(db, manana)
+                            hrs = len(plan.get("horas_rentables", []))
+                            logger.info(f"📋 V13 plan mañana: {hrs} horas rentables")
+                        except Exception as e_plan:
+                            logger.warning(f"⚠️ V13 generar_plan_dia: {e_plan}")
 
                 _sorteos_desde_ultimo_recalculo += len(nuevos_insertados)
 
@@ -592,7 +610,14 @@ async def startup(db):
     """
     await migrar_columnas_tentativo(db)
     await migrar_tabla_patrones(db)
-    logger.info("✅ Startup scheduler V11.2 completo")
+    # V13: crear tabla plan_dia si no existe
+    try:
+        from app.services.motor_v13 import migrar_tabla_plan_dia
+        await migrar_tabla_plan_dia(db)
+        logger.info("✅ Tabla plan_dia V13: OK")
+    except Exception as e:
+        logger.warning(f"⚠️ migrar_tabla_plan_dia: {e}")
+    logger.info("✅ Startup scheduler V13 completo")
 
 
 async def ciclo_infinito():
