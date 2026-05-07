@@ -2282,3 +2282,95 @@ async def endpoint_dashboard_dia(
     f = date_type.fromisoformat(fecha) if fecha else None
     resultado = await dashboard_dia(db, f)
     return resultado
+
+
+@app.get("/historial/plan")
+async def endpoint_historial_plan(
+    limit: int = 50,
+    offset: int = 0,
+    acierto_pos: str = None,
+    fue_ajustada: str = None,
+    hora: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Historial de plan_dia con filtros para el dashboard.
+    Filtros: acierto_pos (pred1/pred2/pred3/ninguna), fue_ajustada (true/false), hora.
+    Incluye stats agregadas para mostrar en el dashboard.
+    """
+    try:
+        condiciones = []
+        params = {"limit": limit, "offset": offset}
+
+        if acierto_pos:
+            condiciones.append("acierto_pos = :acierto_pos")
+            params["acierto_pos"] = acierto_pos
+        if fue_ajustada is not None and fue_ajustada != "":
+            condiciones.append("fue_ajustada = :fue_ajustada")
+            params["fue_ajustada"] = fue_ajustada.lower() == "true"
+        if hora:
+            condiciones.append("hora = :hora")
+            params["hora"] = hora
+
+        where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
+        where_resultado = where + (" AND " if condiciones else "WHERE ") + "resultado_real IS NOT NULL"
+
+        # Stats agregadas
+        res_stats = await db.execute(text(f"""
+            SELECT
+                COUNT(*) as total,
+                COUNT(CASE WHEN acierto_pos IN ('pred1','pred2','pred3') THEN 1 END) as aciertos,
+                COUNT(CASE WHEN acierto_pos = 'pred1' THEN 1 END) as pred1,
+                COUNT(CASE WHEN acierto_pos = 'pred2' THEN 1 END) as pred2,
+                COUNT(CASE WHEN acierto_pos = 'pred3' THEN 1 END) as pred3,
+                COUNT(CASE WHEN fue_ajustada = true
+                    AND acierto_pos IN ('pred1','pred2','pred3') THEN 1 END) as ajustadas_acertaron,
+                ROUND(
+                    COUNT(CASE WHEN acierto_pos IN ('pred1','pred2','pred3') THEN 1 END)::numeric
+                    / NULLIF(COUNT(CASE WHEN acierto_pos IS NOT NULL THEN 1 END),0) * 100, 1
+                ) as ef_pct
+            FROM plan_dia
+            {where_resultado}
+        """), params))
+        stats_row = res_stats.fetchone()
+        stats = {
+            "total": int(stats_row[0] or 0),
+            "aciertos": int(stats_row[1] or 0),
+            "pred1": int(stats_row[2] or 0),
+            "pred2": int(stats_row[3] or 0),
+            "pred3": int(stats_row[4] or 0),
+            "ajustadas_acertaron": int(stats_row[5] or 0),
+            "ef_pct": float(stats_row[6] or 0),
+        }
+
+        # Filas paginadas
+        res = await db.execute(text(f"""
+            SELECT fecha, hora,
+                   pred1_original, pred2_original, pred3_original,
+                   pred1_ajustada, pred2_ajustada, pred3_ajustada,
+                   resultado_real, acierto_pos, fue_ajustada,
+                   motivo_ajuste, ef_hora_ponderada
+            FROM plan_dia
+            {where}
+            ORDER BY fecha DESC, hora
+            LIMIT :limit OFFSET :offset
+        """), params))
+
+        rows = []
+        for r in res.fetchall():
+            rows.append({
+                "fecha": str(r[0]),
+                "hora": r[1],
+                "pred1_original": r[2], "pred2_original": r[3], "pred3_original": r[4],
+                "pred1_ajustada": r[5], "pred2_ajustada": r[6], "pred3_ajustada": r[7],
+                "resultado_real": r[8],
+                "acierto_pos": r[9],
+                "fue_ajustada": bool(r[10]),
+                "motivo_ajuste": r[11],
+                "ef_hora_ponderada": float(r[12] or 0),
+            })
+
+        return {"rows": rows, "stats": stats}
+
+    except Exception as e:
+        return {"rows": [], "stats": {}, "error": str(e)}
