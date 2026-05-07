@@ -1,5 +1,5 @@
 """
-scheduler_v11_2.py — LottoAI PRO V11.2
+scheduler_v11_2.py — LottoAI PRO V11.2 
 ========================================
 Cambios acumulados:
   ✅ FIX CRÍTICO: hora del scraper "08" → "08:00 AM" (HORA_NUM_A_LABEL)
