@@ -111,6 +111,7 @@ tbody tr:last-child td{border-bottom:none}
 <div class="tabs">
   <div class="tab active" onclick="showTab('dashboard',this)">📊 Dashboard</div>
   <div class="tab" onclick="showTab('prediccion',this)">🎯 Predicción V10</div>
+  <div class="tab" onclick="showTab('plandi',this)">📋 Plan del Día</div>
   <div class="tab" onclick="showTab('horas',this)">⏱ Rentabilidad Horas</div>
   <div class="tab" onclick="showTab('markov',this)">🔗 Markov</div>
   <div class="tab" onclick="showTab('historial',this)">📋 Historial</div>
@@ -230,6 +231,93 @@ tbody tr:last-child td{border-bottom:none}
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- HORAS -->
+<div class="page" id="page-plandi">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    <div class="sh" style="margin:0">📋 Plan del Día V13 — Adaptativo Intradiario</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="date" class="inp" id="planFecha" onchange="cargarPlanDia()">
+      <button class="btn bg2" onclick="cargarPlanDia()">↻ ACTUALIZAR</button>
+      <button class="btn by2" onclick="generarPlanManana()">⚡ GENERAR PLAN MAÑANA</button>
+    </div>
+  </div>
+
+  <!-- Resumen del día -->
+  <div class="g4" style="margin-bottom:16px" id="planResumen">
+    <div class="card"><div class="ca" style="background:var(--g)"></div><div class="kn" id="planAciertos" style="color:var(--g)">—</div><div class="kl">Aciertos</div></div>
+    <div class="card"><div class="ca" style="background:var(--r)"></div><div class="kn" id="planFallos" style="color:var(--r)">—</div><div class="kl">Fallos</div></div>
+    <div class="card"><div class="ca" style="background:var(--b)"></div><div class="kn" id="planEf" style="color:var(--b)">—</div><div class="kl">Ef. Hoy %</div></div>
+    <div class="card"><div class="ca" style="background:var(--y)"></div><div class="kn" id="planGanancia">—</div><div class="kl">Ganancia $</div></div>
+  </div>
+
+  <!-- Tabla de las 12 horas -->
+  <div class="card" style="padding:0;margin-bottom:16px">
+    <div class="tbl">
+      <table>
+        <thead><tr>
+          <th>HORA</th>
+          <th>PRED ORIGINAL</th>
+          <th>PRED ACTIVA</th>
+          <th>RESULTADO</th>
+          <th>ESTADO</th>
+          <th>AJUSTADA</th>
+          <th>EF%</th>
+          <th>MOTIVO AJUSTE</th>
+        </tr></thead>
+        <tbody id="planTabla"><tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted);font-family:var(--mono);font-size:12px">Cargando plan...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Historial de planes con filtros -->
+  <div style="margin-top:24px">
+    <div class="sh">📊 Historial de Planes — Análisis de Aciertos</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+      <select class="inp" id="filtroPos" onchange="cargarHistorialPlan()">
+        <option value="">Todos los estados</option>
+        <option value="pred1">✅ Acertó en Pred1</option>
+        <option value="pred2">✅ Acertó en Pred2</option>
+        <option value="pred3">✅ Acertó en Pred3</option>
+        <option value="ninguna">❌ Falló</option>
+      </select>
+      <select class="inp" id="filtroAjustada" onchange="cargarHistorialPlan()">
+        <option value="">Con y sin ajuste</option>
+        <option value="true">Solo ajustadas</option>
+        <option value="false">Solo originales</option>
+      </select>
+      <select class="inp" id="filtroHoraP" onchange="cargarHistorialPlan()">
+        <option value="">Todas las horas</option>
+        <option>08:00 AM</option><option>09:00 AM</option><option>10:00 AM</option>
+        <option>11:00 AM</option><option>12:00 PM</option><option>01:00 PM</option>
+        <option>02:00 PM</option><option>03:00 PM</option><option>04:00 PM</option>
+        <option>05:00 PM</option><option>06:00 PM</option><option>07:00 PM</option>
+      </select>
+      <button class="btn bb2" onclick="cargarHistorialPlan()">FILTRAR</button>
+      <button class="btn" onclick="limpiarFiltrosPlan()">LIMPIAR</button>
+    </div>
+
+    <!-- Stats de filtro -->
+    <div id="planStats" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;font-family:var(--mono);font-size:11px;color:var(--muted)"></div>
+
+    <div class="card" style="padding:0">
+      <div class="tbl">
+        <table>
+          <thead><tr>
+            <th>FECHA</th><th>HORA</th>
+            <th>PRED ORIG</th><th>PRED AJUSTADA</th>
+            <th>RESULTADO</th><th>POSICIÓN</th>
+            <th>AJUSTADA</th><th>EF%</th><th>MOTIVO</th>
+          </tr></thead>
+          <tbody id="histPlanTabla"><tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-size:12px;font-family:var(--mono)">Selecciona filtros y presiona FILTRAR</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:10px">
+      <button class="btn bb2" id="btnMasPlan" onclick="cargarHistorialPlan(true)" style="display:none">CARGAR MÁS</button>
     </div>
   </div>
 </div>
@@ -1680,6 +1768,193 @@ async function lanzarRetroactivo2018(){
   // Cargar análisis automáticamente
   setTimeout(()=>cargarScoreSeñales(3000),1500);
 }
+
+// ═══════════════════════════════════════════════════════════
+// V13 — PLAN DEL DÍA
+// ═══════════════════════════════════════════════════════════
+
+let _planOffset = 0;
+
+async function cargarPlanDia() {
+  const fechaEl = document.getElementById('planFecha');
+  const fecha = fechaEl.value || new Date().toISOString().slice(0,10);
+
+  const tbody = document.getElementById('planTabla');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);font-family:var(--mono);font-size:12px">Cargando...</td></tr>';
+
+  try {
+    const d = await fetch(`/dashboard/dia?fecha=${fecha}`).then(r=>r.json());
+
+    if (d.status === 'sin_plan') {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted);font-family:var(--mono);font-size:12px">
+        No hay plan para ${fecha}. <button class="btn bg2" onclick="generarPlanManana()" style="margin-left:10px">⚡ GENERAR</button>
+      </td></tr>`;
+      return;
+    }
+
+    // Resumen
+    const r = d.resumen || {};
+    document.getElementById('planAciertos').textContent = r.aciertos ?? '—';
+    document.getElementById('planFallos').textContent = r.fallos ?? '—';
+    document.getElementById('planEf').textContent = r.ef_real_hoy ? r.ef_real_hoy + '%' : '—';
+    const gan = r.ganancia_acumulada ?? 0;
+    const ganEl = document.getElementById('planGanancia');
+    ganEl.textContent = (gan >= 0 ? '+' : '') + '$' + gan;
+    ganEl.style.color = gan >= 0 ? 'var(--g)' : 'var(--r)';
+
+    // Tabla de horas
+    const horas = d.horas || [];
+    if (!horas.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">Sin datos</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = horas.map(h => {
+      const esAcierto = h.estado && h.estado.includes('✅');
+      const esFallo   = h.estado && h.estado.includes('❌');
+      const esPend    = h.resultado_real === '—';
+      const rowColor  = esAcierto ? 'rgba(0,232,122,.05)' : esFallo ? 'rgba(255,51,85,.04)' : '';
+      const estadoBadge = esAcierto
+        ? `<span class="badge bg">${h.estado}</span>`
+        : esFallo
+          ? `<span class="badge br">❌ FALLO</span>`
+          : `<span class="badge bb">⏳ PENDIENTE</span>`;
+      const ajBadge = h.ajustada
+        ? `<span class="badge by">✏ SÍ</span>`
+        : `<span class="badge" style="opacity:.4">—</span>`;
+      const efColor = (h.ef_ponderada||0) >= 10 ? 'var(--g)' : (h.ef_ponderada||0) >= 8 ? 'var(--y)' : 'var(--r)';
+
+      return `<tr style="background:${rowColor}">
+        <td style="font-family:var(--mono);font-size:12px;font-weight:700">${h.hora}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${h.pred_original||'—'}</td>
+        <td style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--b)">${h.pred_activa||'—'}</td>
+        <td style="font-family:var(--mono);font-size:12px;font-weight:700;text-transform:uppercase">${h.resultado_real||'—'}</td>
+        <td>${estadoBadge}</td>
+        <td>${ajBadge}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:${efColor}">${(h.ef_ponderada||0).toFixed(1)}%</td>
+        <td style="font-family:var(--mono);font-size:10px;color:var(--muted);max-width:200px;white-space:normal">${h.motivo_ajuste||'—'}</td>
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--r);font-family:var(--mono)">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function generarPlanManana() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '⏳ GENERANDO...';
+  try {
+    const d = await fetch('/plan/dia').then(r=>r.json());
+    const hrs = d.horas_rentables?.length || 0;
+    btn.textContent = `✅ Plan generado — ${hrs} horas rentables`;
+    setTimeout(() => { btn.disabled=false; btn.textContent='⚡ GENERAR PLAN MAÑANA'; }, 3000);
+    // Establecer fecha de mañana y recargar
+    const manana = new Date(); manana.setDate(manana.getDate()+1);
+    document.getElementById('planFecha').value = manana.toISOString().slice(0,10);
+    cargarPlanDia();
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+  }
+}
+
+// ── HISTORIAL CON FILTROS ──────────────────────────────────
+
+let _histPlanOffset = 0;
+
+async function cargarHistorialPlan(mas=false) {
+  if (!mas) _histPlanOffset = 0;
+  const pos       = document.getElementById('filtroPos').value;
+  const ajustada  = document.getElementById('filtroAjustada').value;
+  const hora      = document.getElementById('filtroHoraP').value;
+  const limit     = 50;
+
+  const tbody = document.getElementById('histPlanTabla');
+  if (!mas) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-family:var(--mono);font-size:12px">Cargando...</td></tr>';
+
+  try {
+    // Construir query SQL directo via endpoint historial plan
+    let params = `limit=${limit}&offset=${_histPlanOffset}`;
+    if (pos)      params += `&acierto_pos=${encodeURIComponent(pos)}`;
+    if (ajustada) params += `&fue_ajustada=${ajustada}`;
+    if (hora)     params += `&hora=${encodeURIComponent(hora)}`;
+
+    const d = await fetch(`/historial/plan?${params}`).then(r=>r.json());
+    const rows = Array.isArray(d) ? d : (d.rows || []);
+
+    // Stats
+    const statsEl = document.getElementById('planStats');
+    if (!mas && d.stats) {
+      const s = d.stats;
+      statsEl.innerHTML = `
+        <span>Total: <b style="color:var(--text)">${s.total||0}</b></span>
+        <span>Aciertos: <b style="color:var(--g)">${s.aciertos||0}</b></span>
+        <span>En pred1: <b style="color:var(--g)">${s.pred1||0}</b></span>
+        <span>En pred2: <b style="color:var(--y)">${s.pred2||0}</b></span>
+        <span>En pred3: <b style="color:var(--b)">${s.pred3||0}</b></span>
+        <span>Ajustadas acertaron: <b style="color:var(--p)">${s.ajustadas_acertaron||0}</b></span>
+        <span>Ef%: <b style="color:var(--text)">${s.ef_pct||0}%</b></span>
+      `;
+    }
+
+    if (!rows.length) {
+      if (!mas) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Sin resultados con esos filtros</td></tr>';
+      document.getElementById('btnMasPlan').style.display = 'none';
+      return;
+    }
+
+    const html = rows.map(r => {
+      const esAc = r.acierto_pos && r.acierto_pos !== 'ninguna';
+      const posBadge = r.acierto_pos === 'pred1'
+        ? `<span class="badge bg">PRED1 ✅</span>`
+        : r.acierto_pos === 'pred2'
+          ? `<span class="badge by">PRED2 ✅</span>`
+          : r.acierto_pos === 'pred3'
+            ? `<span class="badge bb">PRED3 ✅</span>`
+            : r.acierto_pos === 'ninguna'
+              ? `<span class="badge br">FALLO</span>`
+              : `<span class="badge" style="opacity:.4">PEND</span>`;
+      const ajBadge = r.fue_ajustada
+        ? `<span class="badge by">✏ SÍ</span>`
+        : '—';
+      const efColor = (r.ef_hora_ponderada||0) >= 10 ? 'var(--g)' : (r.ef_hora_ponderada||0) >= 8 ? 'var(--y)' : 'var(--muted)';
+      return `<tr style="background:${esAc?'rgba(0,232,122,.04)':r.acierto_pos==='ninguna'?'rgba(255,51,85,.03)':''}">
+        <td style="font-family:var(--mono);font-size:11px">${r.fecha||''}</td>
+        <td style="font-family:var(--mono);font-size:11px;font-weight:700">${r.hora||''}</td>
+        <td style="font-family:var(--mono);font-size:10px;color:var(--muted)">${r.pred1_original||''}/${r.pred2_original||''}/${r.pred3_original||''}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--b)">${r.pred1_ajustada||''}/${r.pred2_ajustada||''}/${r.pred3_ajustada||''}</td>
+        <td style="font-family:var(--mono);font-size:12px;font-weight:700;text-transform:uppercase">${r.resultado_real||'—'}</td>
+        <td>${posBadge}</td>
+        <td>${ajBadge}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${efColor}">${(r.ef_hora_ponderada||0).toFixed(1)}%</td>
+        <td style="font-family:var(--mono);font-size:10px;color:var(--muted);max-width:180px;white-space:normal">${r.motivo_ajuste||'—'}</td>
+      </tr>`;
+    }).join('');
+
+    if (!mas) tbody.innerHTML = html;
+    else tbody.innerHTML += html;
+
+    _histPlanOffset += rows.length;
+    document.getElementById('btnMasPlan').style.display = rows.length >= limit ? 'inline-block' : 'none';
+
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--r);font-family:var(--mono)">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function limpiarFiltrosPlan() {
+  document.getElementById('filtroPos').value = '';
+  document.getElementById('filtroAjustada').value = '';
+  document.getElementById('filtroHoraP').value = '';
+  document.getElementById('planStats').innerHTML = '';
+  document.getElementById('histPlanTabla').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-size:12px;font-family:var(--mono)">Selecciona filtros y presiona FILTRAR</td></tr>';
+  document.getElementById('btnMasPlan').style.display = 'none';
+}
+
+// Inicializar fecha de hoy al abrir la tab Plan del Día
+document.getElementById('planFecha').value = new Date().toISOString().slice(0,10);
 </script>
 </body>
 </html>
