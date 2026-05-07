@@ -1779,6 +1779,7 @@ async def recalcular_markov_intraday(db) -> dict:
                         })
                         insertados += 1
                     except Exception:
+                        await db.rollback()  # ← FIX: limpiar transacción inválida antes de continuar
                         continue
 
         await db.commit()
