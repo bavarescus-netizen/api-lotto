@@ -2316,7 +2316,7 @@ async def endpoint_historial_plan(
         where_resultado = where + (" AND " if condiciones else "WHERE ") + "resultado_real IS NOT NULL"
 
         # Stats agregadas
-        res_stats = await db.execute(text(f"""
+        sql_stats = """
             SELECT
                 COUNT(*) as total,
                 COUNT(CASE WHEN acierto_pos IN ('pred1','pred2','pred3') THEN 1 END) as aciertos,
@@ -2330,8 +2330,8 @@ async def endpoint_historial_plan(
                     / NULLIF(COUNT(CASE WHEN acierto_pos IS NOT NULL THEN 1 END),0) * 100, 1
                 ) as ef_pct
             FROM plan_dia
-            {where_resultado}
-        """), params))
+        """ + where_resultado
+        res_stats = await db.execute(text(sql_stats), params)
         stats_row = res_stats.fetchone()
         stats = {
             "total": int(stats_row[0] or 0),
@@ -2344,17 +2344,15 @@ async def endpoint_historial_plan(
         }
 
         # Filas paginadas
-        res = await db.execute(text(f"""
+        sql_rows = """
             SELECT fecha, hora,
                    pred1_original, pred2_original, pred3_original,
                    pred1_ajustada, pred2_ajustada, pred3_ajustada,
                    resultado_real, acierto_pos, fue_ajustada,
                    motivo_ajuste, ef_hora_ponderada
             FROM plan_dia
-            {where}
-            ORDER BY fecha DESC, hora
-            LIMIT :limit OFFSET :offset
-        """), params))
+        """ + where + " ORDER BY fecha DESC, hora LIMIT :limit OFFSET :offset"
+        res = await db.execute(text(sql_rows), params)
 
         rows = []
         for r in res.fetchall():
