@@ -1,5 +1,5 @@
 """
-MOTOR V101 — LOTTOAI PRO
+MOTOR V101 — LOTTOAI PRO 
 ========================
 VERSIÓN DINÁMICA COMPLETA
 Todo se lee desde la BD — sin diccionarios hardcodeados.
