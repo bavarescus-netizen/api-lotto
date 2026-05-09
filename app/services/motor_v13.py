@@ -384,22 +384,23 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str) -> dict
                                       f" → {animal_patron}@{hora_sig} ({pct:.0f}%)")
                         break
 
-            # --- REGLA C: Animal caliente hoy (salió 2+ veces) → boost ---
-            if motivo is None:
-                animales_calientes = [a for a, v in frecuencia_hoy.items() if v >= 2]
+            # --- REGLA C: Animal caliente hoy (salió 3+ veces) → solo en pred3 de hora inmediata ---
+            # Solo aplica a la hora inmediata siguiente, no a todas
+            if motivo is None and hora_sig == horas_siguientes[0]:
+                animales_calientes = [a for a, v in frecuencia_hoy.items() if v >= 3]
                 if animales_calientes:
                     caliente = animales_calientes[0]
                     if caliente not in (nuevo_p1, nuevo_p2, nuevo_p3):
                         nuevo_p3 = caliente
                         motivo = f"Animal caliente hoy ({caliente} salió {frecuencia_hoy[caliente]}x) → en pred3"
 
-            # --- REGLA D: 3+ fallos consecutivos hoy → rotar top3 ---
-            if fallos_hoy >= 3 and acierto_pos == "ninguna" and motivo is None:
-                # Rotar: el que era pred2 pasa a pred1
-                nuevo_p1 = s2
-                nuevo_p2 = s3
-                nuevo_p3 = s1
-                motivo = f"Rotación forzada — {fallos_hoy} fallos consecutivos hoy"
+            # --- REGLA D: 5+ fallos consecutivos → rotar solo la hora inmediata siguiente ---
+            if fallos_hoy >= 5 and acierto_pos == "ninguna" and motivo is None:
+                if hora_sig == horas_siguientes[0]:
+                    nuevo_p1 = s2
+                    nuevo_p2 = s3
+                    nuevo_p3 = s1
+                    motivo = f"Rotación forzada — {fallos_hoy} fallos consecutivos hoy"
 
             # Guardar ajuste si hubo cambio
             if motivo:
@@ -469,9 +470,12 @@ async def dashboard_dia(db, fecha: date = None) -> dict:
                 confianza, ef_hora_ponderada
             FROM plan_dia
             WHERE fecha = :f
-            ORDER BY hora
         """), {"f": fecha})
-        rows = res.fetchall()
+        rows_raw = res.fetchall()
+
+        # Ordenar por el orden real de sorteos del día
+        orden_horas = {h: i for i, h in enumerate(HORAS_SORTEO_STR)}
+        rows = sorted(rows_raw, key=lambda r: orden_horas.get(r[0], 99))
 
         if not rows:
             return {
