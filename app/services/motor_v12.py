@@ -465,82 +465,77 @@ async def corregir_campo_acierto(db) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# WRAPPER: generar_prediccion_v12
-# Agrega al motor V10 existente:
-# 1. Penalización por congelamiento
-# 2. Diversidad forzada en top3
-# 3. Fix del campo acierto
-# Llama al motor V10 internamente y postprocesa el resultado
+# WRAPPER: generar_prediccion_v12  (CORREGIDO)
+# BUGS CORREGIDOS:
+#   BUG 1: importaba _normalizar y NUMERO_POR_ANIMAL de V10 — innecesario,
+#           ya están definidos en V12. Si el import fallaba, toda la función
+#           explotaba silenciosamente devolviendo {}.
+#   BUG 2: V10 ya escribe en auditoria_ia internamente. V12 intentaba
+#           escribir de nuevo → conflicto de transacción → rollback() →
+#           el scheduler recibía respuesta vacía.
+#           FIX: V12 NO escribe en BD — solo postprocesa y devuelve el dict.
+#           El scheduler (guardar_prediccion) es el único que escribe.
+#   BUG 3: pred_base.get("hora") → V10 no devuelve ese campo.
+#           hora_str quedaba "" y todo fallaba.
+#           FIX: usar el parámetro `hora` directamente.
 # ══════════════════════════════════════════════════════
 async def generar_prediccion_v12(db, hora: str = None) -> dict:
     """
-    Motor V12 — wrapper sobre el motor V10 con 3 mejoras críticas.
+    Motor V12 — wrapper sobre V10 con diversidad forzada + anti-congelamiento.
     
-    No reemplaza el motor V10 — lo llama y mejora su output.
-    Esto minimiza el riesgo de romper algo.
+    NO escribe en BD — solo postprocesa el output de V10.
+    La escritura la hace el scheduler via guardar_prediccion().
     """
-    from app.services.motor_v10 import (
-        generar_prediccion as _pred_v10,
-        _normalizar,
-        NUMERO_POR_ANIMAL,
-        HORAS_SORTEO_STR,
-    )
-    
+    from app.services.motor_v10 import generar_prediccion as _pred_v10
+
     # 1. Obtener predicción base del motor V10
-    pred_base = await _pred_v10(db, hora)
-    
+    try:
+        pred_base = await _pred_v10(db, hora)
+    except Exception as e:
+        return {}
+
     if not pred_base or not pred_base.get("top3"):
+        return pred_base or {}
+
+    # FIX BUG 3: V10 no devuelve "hora" en el dict — usar el parámetro directo
+    hora_str = hora or ""
+    if not hora_str:
         return pred_base
-    
-    hora_str = pred_base.get("hora", hora or "")
-    
-    # 2. Reconstruir scores desde el top3 base para aplicar mejoras
-    # El motor V10 ya calculó los scores — los recuperamos del top3
+
+    # 2. Reconstruir scores desde el top3 base
     top3_base = pred_base["top3"]
     scores_base = {}
     for item in top3_base:
         animal = _normalizar(item.get("animal", ""))
         score = float(item.get("score_raw", 0))
-        if animal:
+        if animal and score > 0:
             scores_base[animal] = score
-    
-    # También necesitamos los scores de todos los animales, no solo top3
-    # Los obtenemos haciendo una query directa de auditoria_señales
-    try:
-        res_all = await db.execute(text("""
-            SELECT prediccion_1, prediccion_2, prediccion_3
-            FROM auditoria_ia
-            WHERE fecha = CURRENT_DATE AND hora = :hora
-            LIMIT 1
-        """), {"hora": hora_str})
-        row_all = res_all.fetchone()
-        if row_all:
-            for i, animal_raw in enumerate(row_all):
-                if animal_raw:
-                    animal = _normalizar(animal_raw)
-                    # Asignar score decreciente si no está en scores_base
-                    if animal not in scores_base:
-                        scores_base[animal] = max(scores_base.values(), default=0.1) * (0.8 ** (i+1))
-    except Exception:
-        pass
-    
+
+    if not scores_base:
+        return pred_base
+
     # 3. Aplicar penalización por congelamiento
-    pen_congelamiento = await _calcular_penalizacion_congelamiento(db, hora_str)
-    scores_ajustados = {}
-    for animal, score in scores_base.items():
-        factor = pen_congelamiento.get(animal, 1.0)
-        scores_ajustados[animal] = score * factor
-    
+    try:
+        pen_congelamiento = await _calcular_penalizacion_congelamiento(db, hora_str)
+    except Exception:
+        pen_congelamiento = {}
+
+    scores_ajustados = {
+        animal: score * pen_congelamiento.get(animal, 1.0)
+        for animal, score in scores_base.items()
+    }
+
     # 4. Forzar diversidad en top3
     top3_diverso = _forzar_diversidad_top3(scores_ajustados, n=3)
-    
+
     if not top3_diverso:
         return pred_base  # fallback al motor original
-    
+
     # 5. Construir nuevo top3 con metadatos
     total_score = sum(s for _, s in top3_diverso) or 1
+    pred1 = pred2 = pred3 = None
     nuevo_top3 = []
-    for animal, score in top3_diverso:
+    for i, (animal, score) in enumerate(top3_diverso):
         nombre = _normalizar(animal)
         num = NUMERO_POR_ANIMAL.get(nombre, "--")
         pct = round(score / total_score * 100, 1)
@@ -559,41 +554,22 @@ async def generar_prediccion_v12(db, hora: str = None) -> dict:
             "penalizado_congelamiento": penalizado,
             "dias_como_pred1": pen_congelamiento.get(nombre, 0) if penalizado else 0,
         })
-    
-    # 6. Guardar predicción mejorada en auditoria_ia
-    hoy = datetime.now(ZoneInfo('America/Caracas')).date()
-    try:
-        pred1 = nuevo_top3[0]["animal"].lower() if len(nuevo_top3) > 0 else None
-        pred2 = nuevo_top3[1]["animal"].lower() if len(nuevo_top3) > 1 else None
-        pred3 = nuevo_top3[2]["animal"].lower() if len(nuevo_top3) > 2 else None
-        await db.execute(text("""
-            INSERT INTO auditoria_ia
-                (fecha, hora, animal_predicho, prediccion_1, prediccion_2, prediccion_3,
-                 confianza_pct, confianza_hora, es_hora_rentable, resultado_real)
-            VALUES (:f, :h, :a, :p1, :p2, :p3, :c, :ch, :rent, 'PENDIENTE')
-            ON CONFLICT (fecha, hora) DO UPDATE SET
-                animal_predicho  = EXCLUDED.animal_predicho,
-                prediccion_1     = EXCLUDED.prediccion_1,
-                prediccion_2     = EXCLUDED.prediccion_2,
-                prediccion_3     = EXCLUDED.prediccion_3,
-                confianza_pct    = EXCLUDED.confianza_pct,
-                confianza_hora   = EXCLUDED.confianza_hora,
-                es_hora_rentable = EXCLUDED.es_hora_rentable
-        """), {
-            "f": hoy, "h": hora_str, "a": pred1,
-            "p1": pred1, "p2": pred2, "p3": pred3,
-            "c": float(pred_base.get("confianza_idx", 0)),
-            "ch": float(pred_base.get("efectividad_hora_top3", 0)),
-            "rent": bool(pred_base.get("hora_premium", False)),
-        })
-        await db.commit()
-    except Exception:
-        await db.rollback()
-    
-    # 7. Construir respuesta final
+        if i == 0: pred1 = nombre
+        if i == 1: pred2 = nombre
+        if i == 2: pred3 = nombre
+
+    # FIX BUG 2: NO escribir en auditoria_ia aquí.
+    # V10 ya lo hizo internamente. El scheduler sobreescribirá con
+    # guardar_prediccion() usando forzar=True. Doble escritura = conflicto.
+
+    # 6. Construir respuesta final con las claves que el scheduler espera
     respuesta = {
         **pred_base,
         "top3": nuevo_top3,
+        # Claves que guardar_prediccion() necesita
+        "prediccion_1": pred1,
+        "prediccion_2": pred2,
+        "prediccion_3": pred3,
         "version": "V12",
         "mejoras_aplicadas": {
             "diversidad_forzada": len(set(a for a, _ in top3_diverso)) == len(top3_diverso),
@@ -606,7 +582,7 @@ async def generar_prediccion_v12(db, hora: str = None) -> dict:
             f"Ef.Hora(top3): {pred_base.get('efectividad_hora_top3',0)}% | "
             f"{'✅ OPERAR' if pred_base.get('operar') else '🚫 NO OPERAR'} | "
             f"Top3 diverso: {pred1}/{pred2}/{pred3} | "
-            f"Animales penalizados: {list(pen_congelamiento.keys()) or 'ninguno'}"
+            f"Penalizados: {list(pen_congelamiento.keys()) or 'ninguno'}"
         ),
     }
     return respuesta
