@@ -61,7 +61,7 @@ async def _verificar_sorteos(db_factory):
                         WHERE fecha = CURRENT_DATE
                           AND hora = :hora
                           AND loteria = 'Lotto Activo'
-                        ORDER BY id DESC LIMIT 1
+                        ORDER BY fecha DESC LIMIT 1
                     """), {"hora": hora_actual_str})
                     row = res.fetchone()
 
