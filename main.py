@@ -200,8 +200,8 @@ async def iniciar_bot():
         break
     # ✅ V11.2: inicializar scheduler (migra tabla patrones + inserta patrones base)
     async with AsyncSessionLocal() as db_startup:
-        await startup(db_startup)
-    asyncio.create_task(ciclo_infinito())
+        await startup(AsyncSessionLocal)
+    asyncio.create_task(ciclo_infinito(AsyncSessionLocal))
     print("🚀 LOTTOAI PRO V10 — Markov + Decay + Patrón + Estacional + Patrones confirmados")
 
 
