@@ -1,4 +1,4 @@
-import os, re, asyncio, datetime
+import os, re, asyncio, datetime, logging
 from fastapi import FastAPI, Request, Depends, Query, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -32,6 +32,8 @@ from app.services.motor_v13 import (
     dashboard_dia,
     reentrenar_v13,
 )
+
+logger = logging.getLogger(__name__)
 
 # ── Estado global de tareas largas (no bloquean el servidor) ──
 _tarea = {
@@ -94,12 +96,12 @@ async def iniciar_bot():
             await db.commit()
         except Exception:
             await db.rollback()
-        # ✅ V11: migrar columnas tentativo para comparación TENTATIVO vs INTRADAY vs REAL
+
+        # ✅ V11: migrar_columnas_tentativo eliminada en V13 — no es necesaria
         try:
-            from app.core.scheduler import migrar_columnas_tentativo
-            await migrar_columnas_tentativo(db)
+            pass
         except Exception as e_mig:
-            logger.warning(f"⚠️ migrar_columnas_tentativo: {e_mig}")
+            print(f"⚠️ migrar_columnas_tentativo skip: {e_mig}")
 
         # motor_pesos original
         try:
@@ -259,7 +261,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         ))).fetchone()
 
         # ── Predicción para el PRÓXIMO sorteo ──
-        # Calcular hora del próximo sorteo (Venezuela UTC-4)
         _mn = ahora.minute
         _h  = ahora.hour
         _slots = [8,9,10,11,12,13,14,15,16,17,18,19]
@@ -276,7 +277,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         else:
             _hora_prox = _lbls.get(_h, _lbls[8])
 
-        # Buscar predicción de hoy para esa hora
         p = (await db.execute(text(
             "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
             "prediccion_1,prediccion_2,prediccion_3,"
@@ -286,13 +286,11 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             "ORDER BY fecha DESC LIMIT 1"
         ), {"hoy": ahora.date(), "hora": _hora_prox})).fetchone()
 
-        # Si no hay predicción guardada para la próxima hora → generarla en vivo y GUARDARLA
         if not p:
             try:
                 from app.core.motor_v10 import generar_prediccion
                 _pred_live = await generar_prediccion(db)
                 if _pred_live and _pred_live.get("prediccion_1"):
-                    # ── GUARDAR en BD para que no se duplique mañana ──
                     try:
                         await db.execute(text("""
                             INSERT INTO auditoria_ia
@@ -314,7 +312,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                         await db.commit()
                     except Exception:
                         await db.rollback()
-                    # Construir tupla compatible
                     p = (
                         ahora.date(),
                         _pred_live.get("hora", _hora_prox),
@@ -328,7 +325,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                         _pred_live.get("es_hora_rentable", False),
                     )
             except Exception:
-                # Fallback: última predicción de la BD
                 p = (await db.execute(text(
                     "SELECT fecha,hora,animal_predicho,confianza_pct,resultado_real,acierto,"
                     "prediccion_1,prediccion_2,prediccion_3,"
@@ -336,7 +332,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                     "FROM auditoria_ia ORDER BY fecha DESC LIMIT 1"
                 ))).fetchone()
 
-        # ── Métricas desde rentabilidad_hora (sin JOINs pesados) ──
         rh = (await db.execute(text("""
             SELECT
                 COALESCE(SUM(total_sorteos),0)  AS total,
@@ -350,13 +345,11 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
         ef1     = round(ac1 / max(total_s, 1) * 100, 2)
         ef3     = round(ac3 / max(total_s, 1) * 100, 2)
 
-        # ── Horas rentables ──
         rent = (await db.execute(text(
             "SELECT hora,efectividad_top3 FROM rentabilidad_hora "
             "WHERE es_rentable=TRUE ORDER BY efectividad_top3 DESC"
         ))).fetchall()
 
-        # Si rentabilidad_hora no tiene datos actualizados, calcular desde auditoria_ia
         if not rent:
             rent_raw = (await db.execute(text("""
                 SELECT hora,
@@ -378,22 +371,18 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
             """))).fetchall()
             rent = rent_raw
 
-        # ── Total historico ──
         hist = (await db.execute(text(
             "SELECT COUNT(*),MIN(fecha),MAX(fecha) FROM historico WHERE loteria='Lotto Activo'"
         ))).fetchone()
 
-        # ── Markov ──
         markov_total = (await db.execute(text(
             "SELECT COUNT(*) FROM markov_transiciones"
         ))).scalar() or 0
 
-        # ── Total auditoria ──
         total_audit = (await db.execute(text(
             "SELECT COUNT(*) FROM auditoria_ia"
         ))).scalar() or 0
 
-        # ── Generación motor ──
         gen = (await db.execute(text(
             "SELECT COALESCE(MAX(generacion),1) FROM motor_pesos"
         ))).scalar() or 1
@@ -430,7 +419,6 @@ async def estado_sistema(db: AsyncSession = Depends(get_db)):
                 "desde": str(hist[1]), "hasta": str(hist[2]),
             },
             "horas_rentables": [{"hora": r[0], "ef_top3": float(r[1])} for r in rent],
-            # ── Aliases planos para el dashboard JS ──
             "total_db":          int(total_audit),
             "total_calibrados":  total_s,
             "aciertos_top1":     ac1,
@@ -500,7 +488,6 @@ async def ultimos(limit: int = Query(default=15), db: AsyncSession = Depends(get
                 "es_hora_rentable":   bool(r[8]) if r[8] is not None else False,
                 "acierto":            bool(r[9]) if r[9] is not None else None,
                 "resultado_real":     r[10],
-                # ✅ NUEVO: tentativo original para comparar en dashboard
                 "pred_tentativa_1":   r[11],
                 "pred_tentativa_2":   r[12],
                 "pred_tentativa_3":   r[13],
@@ -534,18 +521,15 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             ORDER BY fecha DESC LIMIT 1
         """), {"hora": hora})).fetchone()
 
-        # Normalizar hora: "10:00 AM", "10:00AM", "10:00 am" → formato estándar
         try:
             from datetime import datetime as _dt
             _h = hora.strip().upper().replace("  ", " ")
-            # Asegurar formato "HH:MM AM/PM"
             if " " not in _h:
                 _h = _h[:-2] + " " + _h[-2:]
             hora = _dt.strptime(_h, "%I:%M %p").strftime("%I:%M %p")
         except Exception:
             pass
 
-        # rent PRIMERO — pw lo necesita
         rent = (await db.execute(text("""
             SELECT efectividad_top1, efectividad_top3, es_rentable, total_sorteos
             FROM rentabilidad_hora WHERE TRIM(hora) = TRIM(:hora)
@@ -558,7 +542,6 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             ORDER BY generacion DESC LIMIT 1
         """), {"hora": hora})).fetchone()
 
-        # Si no hay pesos diferenciados, calcular adaptativos
         if not pw or (pw[0]==pw[1]==pw[2]==pw[3]):
             top3_prob = (await db.execute(text("""
                 SELECT animalito, probabilidad FROM probabilidades_hora
@@ -574,7 +557,6 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
             p_rec    = round(1.0 - p_decay - p_markov - p_gap, 2)
             pw = (round(p_decay,2), round(p_markov,2), round(p_gap,2), p_rec, ef3)
 
-        # Animal previo Markov (penúltimo sorteo de esa hora)
         prev = (await db.execute(text("""
             SELECT animalito FROM historico
             WHERE loteria='Lotto Activo' AND hora=:hora
@@ -625,11 +607,6 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
 # ═══════════════════════════════════════════════════════════
 @app.get("/generar-predicciones-dia")
 async def generar_predicciones_dia(db: AsyncSession = Depends(get_db)):
-    """
-    Genera y guarda predicciones V10 para todas las horas del día actual.
-    Solo inserta si no existe predicción para esa fecha+hora.
-    Llamar al inicio del día o cuando se detecten predicciones faltantes.
-    """
     from zoneinfo import ZoneInfo
     from datetime import datetime
     ahora = datetime.now(ZoneInfo('America/Caracas'))
@@ -642,7 +619,6 @@ async def generar_predicciones_dia(db: AsyncSession = Depends(get_db)):
     try:
         from app.services.motor_v10 import generar_prediccion
         for hora in horas:
-            # Verificar si ya existe predicción V10 para hoy+hora
             existe = (await db.execute(text("""
                 SELECT 1 FROM auditoria_ia
                 WHERE fecha = :fecha AND hora = :hora
@@ -700,7 +676,6 @@ async def get_historial(
     animal: str = Query(default=None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Historial paginado de predicciones con filtros."""
     try:
         conditions = []
         params: dict = {"limit": limit, "offset": offset}
@@ -770,11 +745,7 @@ async def markov_top(limit: int = Query(default=20), db: AsyncSession = Depends(
             WHERE frecuencia >= 5
         """))).fetchall()
 
-        # Filtrar: solo pares con muestra suficiente (>= 20 ocurrencias del animal previo)
-        # Esto evita que pares con n=2 muestren 50% inflado
         filtrados = [r for r in rows if (r[5] or 0) >= 20]
-
-        # Ordenar por probabilidad y tomar top N
         filtrados.sort(key=lambda r: float(r[4] or 0), reverse=True)
         filtrados = filtrados[:limit]
 
@@ -797,7 +768,6 @@ async def markov_buscar(
     animal: str = Query(default=""),
     db: AsyncSession = Depends(get_db)
 ):
-    """Busca transiciones Markov para un animal+hora específicos."""
     try:
         animal_norm = animal.lower().strip()
         if not animal_norm:
@@ -833,13 +803,8 @@ async def markov_buscar(
 # ═══════════════════════════════════════════════════════════
 @app.get("/diagnostico-markov")
 async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
-    """
-    Diagnóstico completo de markov_transiciones.
-    Muestra: estructura real, constraints, conteos, muestra de datos corruptos.
-    """
     resultado = {}
     try:
-        # 1. Estructura de la tabla (columnas y tipos)
         r = await db.execute(text("""
             SELECT column_name, data_type, is_nullable
             FROM information_schema.columns
@@ -851,7 +816,6 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
             for row in r.fetchall()
         ]
 
-        # 2. Constraints (PRIMARY KEY, UNIQUE, etc.)
         r = await db.execute(text("""
             SELECT conname, contype, pg_get_constraintdef(oid)
             FROM pg_constraint
@@ -862,7 +826,6 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
             for row in r.fetchall()
         ]
 
-        # 3. Conteos generales
         r = await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))
         resultado["total_filas"] = r.scalar() or 0
 
@@ -878,7 +841,6 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
         resultado["prob_min"]  = float(row[1]) if row[1] else None
         resultado["prob_avg"]  = round(float(row[2]), 2) if row[2] else None
 
-        # 4. Muestra de las 5 filas más corruptas
         r = await db.execute(text("""
             SELECT hora, animal_previo, animal_sig, frecuencia, probabilidad
             FROM markov_transiciones
@@ -891,7 +853,6 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
             for row in r.fetchall()
         ]
 
-        # 5. Filas por hora
         r = await db.execute(text("""
             SELECT hora, COUNT(*), MAX(probabilidad), AVG(probabilidad)
             FROM markov_transiciones
@@ -904,7 +865,6 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
             for row in r.fetchall()
         ]
 
-        # 6. Verificar si la tabla viene de un schema diferente
         r = await db.execute(text("""
             SELECT schemaname, tablename
             FROM pg_tables WHERE tablename = 'markov_transiciones'
@@ -925,13 +885,7 @@ async def diagnostico_markov(db: AsyncSession = Depends(get_db)):
 
 @app.get("/fix-markov-directo")
 async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
-    """
-    Normaliza probabilidades corruptas DIRECTAMENTE con UPDATE.
-    No borra ni reconstruye — solo divide las probs > 100 para dejarlas en rango correcto.
-    Más rápido y seguro que el fix completo.
-    """
     try:
-        # Ver cuántas están corruptas antes
         antes = (await db.execute(text(
             "SELECT COUNT(*), MAX(probabilidad) FROM markov_transiciones WHERE probabilidad > 100"
         ))).fetchone()
@@ -947,7 +901,6 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
                 "prob_max": prob_max_antes,
             }
 
-        # Recalcular probabilidades correctas directamente
         await db.execute(text("""
             UPDATE markov_transiciones m
             SET probabilidad = ROUND(
@@ -965,13 +918,11 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
-        # Verificar resultado
         despues = (await db.execute(text(
             "SELECT COUNT(*), MAX(probabilidad), AVG(probabilidad) FROM markov_transiciones WHERE probabilidad > 100"
         ))).fetchone()
         n_restantes = int(despues[0] or 0)
 
-        # Si aún quedan, eliminarlos
         if n_restantes > 0:
             await db.execute(text("DELETE FROM markov_transiciones WHERE probabilidad > 100"))
             await db.commit()
@@ -993,10 +944,8 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "mensaje": str(e)}
 
 
-
 @app.get("/fix-markov")
 async def fix_markov(db: AsyncSession = Depends(get_db)):
-    """Reconstruye markov_transiciones hora por hora para evitar timeout de Render"""
     HORAS = [
         '08:00 AM','09:00 AM','10:00 AM','11:00 AM',
         '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
@@ -1033,18 +982,14 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
             probabilidad = EXCLUDED.probabilidad
     """
     try:
-        # PASO 1: limpiar tabla con DELETE (más compatible con transacciones que TRUNCATE)
         await db.execute(text("DELETE FROM markov_transiciones"))
         await db.commit()
 
-        # Verificar que quedó vacía
         n_antes = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
         if n_antes > 0:
-            # Forzar con TRUNCATE si DELETE no alcanzó
             await db.execute(text("TRUNCATE TABLE markov_transiciones RESTART IDENTITY"))
             await db.commit()
 
-        # PASO 2: INSERT por hora (12 queries pequeños, cada uno < 3s)
         total = 0
         errores = []
         for hora in HORAS:
@@ -1059,12 +1004,10 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
                 await db.rollback()
                 errores.append(f"{hora}: {e_hora}")
 
-        # PASO 3: verificar sanidad — prob > 100 es corrupto
         bad = (await db.execute(text(
             "SELECT COUNT(*) FROM markov_transiciones WHERE probabilidad > 100"
         ))).scalar() or 0
 
-        # Si todavía hay corruptos, eliminarlos
         if bad > 0:
             await db.execute(text("DELETE FROM markov_transiciones WHERE probabilidad > 100"))
             await db.commit()
@@ -1085,17 +1028,12 @@ async def fix_markov(db: AsyncSession = Depends(get_db)):
         return {"status": "error", "message": str(e)}
 
 
-
 @app.get("/backtest")
 async def backtest_motor(
     año_corte: int = Query(default=2025, description="Año donde empieza el test set"),
     hora_filtro: str = Query(default="todas"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Walk-forward backtest por hora individual.
-    Evalúa SOLO el año indicado (año_corte) — train = todo lo anterior.
-    """
     from datetime import date as _date
     from collections import Counter, defaultdict as _dd
     HORAS_BT = [
@@ -1104,7 +1042,6 @@ async def backtest_motor(
         "04:00 PM","05:00 PM","06:00 PM","07:00 PM",
     ]
     fecha_corte = _date(año_corte, 1, 1)
-    # Limitar test a UN solo año para que no haga timeout en Render
     fecha_fin   = _date(año_corte + 1, 1, 1)
     t0 = datetime.datetime.now()
     horas_a_evaluar = [hora_filtro] if hora_filtro != "todas" else HORAS_BT
@@ -1112,14 +1049,12 @@ async def backtest_motor(
     total_test = total_top3 = total_top1 = 0
 
     for hora in horas_a_evaluar:
-        # ── TRAIN: todo antes del corte ──
         train_rows = (await db.execute(text("""
             SELECT animalito FROM historico
             WHERE hora=:hora AND loteria='Lotto Activo' AND fecha < :corte
             ORDER BY fecha ASC
         """), {"hora": hora, "corte": fecha_corte})).fetchall()
 
-        # ── TEST: solo el año seleccionado (no todos los años siguientes) ──
         test_rows = (await db.execute(text("""
             SELECT fecha, animalito FROM historico
             WHERE hora=:hora AND loteria='Lotto Activo'
@@ -1134,9 +1069,6 @@ async def backtest_motor(
         animales_train = [r[0] for r in train_rows]
         n_train = len(animales_train)
 
-        # ── TEST: usar predicciones ya guardadas en auditoria_ia ──
-        # Esto refleja el motor V10 REAL con todas sus señales
-        # Walk-forward real: cada predicción fue hecha con datos hasta ese día
         res_audit = (await db.execute(text("""
             SELECT
                 a.fecha,
@@ -1159,7 +1091,6 @@ async def backtest_motor(
         """), {"hora": hora, "corte": fecha_corte, "fin": fecha_fin})).fetchall()
 
         if len(res_audit) < 10:
-            # Fallback: motor simplificado si no hay datos en auditoria_ia
             acum = list(animales_train)
             top1_ok = top3_ok = n_test = 0
             freq = Counter(animales_train)
@@ -1191,7 +1122,6 @@ async def backtest_motor(
                 markov_c[prev][real] += 1
                 ultima_vez[real] = n_train + idx_t
         else:
-            # Motor V10 REAL — predicciones reales guardadas
             top1_ok = top3_ok = n_test = 0
             for row in res_audit:
                 fecha_t, pred1, pred2, pred3, real, conf = row
@@ -1244,11 +1174,6 @@ async def optimizar_pesos_hora(
     año_corte: int = Query(default=2025),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Grid search: prueba 125 combinaciones de pesos para UNA hora.
-    Devuelve los 5 mejores combos con su EF.TOP3 real (walk-forward).
-    Guarda el mejor en motor_pesos_hora.
-    """
     from datetime import date as _date
     from collections import Counter, defaultdict as _dd
     import itertools
@@ -1274,7 +1199,6 @@ async def optimizar_pesos_hora(
     animales_train = [r[0] for r in train_rows]
     test_animales  = [r[0] for r in test_rows]
 
-    # Pre-calcular señales base (se recalculan igual para todos los pesos)
     freq = Counter(animales_train)
     total_f = len(animales_train)
     markov_c = _dd(lambda: _dd(int))
@@ -1282,7 +1206,6 @@ async def optimizar_pesos_hora(
         markov_c[animales_train[i-1]][animales_train[i]] += 1
     ultima_vez = {a: i for i, a in enumerate(animales_train)}
 
-    # Grid de pesos a probar (suman ~1.0)
     VALS = [0.10, 0.20, 0.30, 0.40, 0.50]
     mejores = []
 
@@ -1314,7 +1237,6 @@ async def optimizar_pesos_hora(
             mc[prev][real]+=1; uv[real]=total_f+idx_t
         return round(top3_ok/len(test_animales)*100, 2)
 
-    # Reducir el grid a 125 combos relevantes
     combos_testados = 0
     for w1, w2, w3 in itertools.product(VALS, VALS, VALS):
         w4 = round(1.0 - w1 - w2 - w3, 2)
@@ -1322,12 +1244,11 @@ async def optimizar_pesos_hora(
         ef = evaluar_pesos(w1, w2, w3, w4)
         mejores.append({"w_deuda":w1,"w_freq":w2,"w_mk":w3,"w_patron":w4,"ef_top3":ef})
         combos_testados += 1
-        if combos_testados >= 100: break  # límite por tiempo
+        if combos_testados >= 100: break
 
     mejores.sort(key=lambda x: -x["ef_top3"])
     top5 = mejores[:5]
 
-    # Guardar el mejor en motor_pesos_hora
     if top5:
         mejor = top5[0]
         try:
@@ -1368,10 +1289,6 @@ async def retroactivo(
     background_tasks: BackgroundTasks,
     desde: str = None, hasta: str = None, dias: int = 30,
 ):
-    """
-    Lanza el retroactivo en BACKGROUND — no bloquea el servidor.
-    Llama /tarea para ver progreso.
-    """
     if _tarea["estado"] == "running":
         return {"status": "ya_corriendo", "tarea": _tarea["nombre"],
                 "progreso": _tarea["progreso"]}
@@ -1391,9 +1308,7 @@ async def retroactivo(
 
 @app.get("/tarea")
 async def ver_tarea():
-    """Estado de la tarea larga en curso (aprender o retroactivo)."""
     t = dict(_tarea)
-    # No devolver resultado completo si es muy grande
     if t.get("resultado") and isinstance(t["resultado"], dict):
         r = t["resultado"]
         t["resultado_resumen"] = {
@@ -1414,10 +1329,6 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 @app.get("/contexto-dia")
 async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
-    """
-    Retorna la memoria completa del día actual:
-    resultados de hoy, pares intra-día activos, cadenas, animales no vistos.
-    """
     try:
         import datetime as _dt
         from zoneinfo import ZoneInfo
@@ -1443,11 +1354,6 @@ async def endpoint_contexto_dia(db: AsyncSession = Depends(get_db)):
 
 @app.get("/diagnostico-animales")
 async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
-    """
-    Compara animales en la BD (historico) vs catálogo del motor.
-    Detecta inconsistencias que causan predicciones perdidas.
-    """
-    # Catálogo oficial del motor
     MOTOR = {
         "1":"carnero",  "2":"toro",     "3":"ciempies", "4":"alacran",
         "5":"leon",     "6":"rana",     "7":"perico",   "8":"raton",
@@ -1463,7 +1369,6 @@ async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
     animales_motor = set(MOTOR.values())
 
     try:
-        # Animales únicos en historico
         res = await db.execute(text("""
             SELECT LOWER(TRIM(animalito)) as animal, COUNT(*) as veces
             FROM historico
@@ -1474,11 +1379,9 @@ async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
         rows = res.fetchall()
         animales_bd = {r[0]: int(r[1]) for r in rows}
 
-        # Comparar
         en_bd_no_motor = {a: v for a, v in animales_bd.items() if a not in animales_motor}
         en_motor_no_bd = {a for a in animales_motor if a not in animales_bd}
 
-        # Animales en auditoria_ia
         res2 = await db.execute(text("""
             SELECT LOWER(TRIM(resultado_real)) as animal, COUNT(*) as veces
             FROM auditoria_ia
@@ -1512,13 +1415,7 @@ async def diagnostico_animales(db: AsyncSession = Depends(get_db)):
 
 @app.get("/auto-pesos")
 async def auto_pesos(db: AsyncSession = Depends(get_db)):
-    """
-    Calcula pesos óptimos desde auditoria_señales y los guarda en motor_pesos.
-    Basado en efectividad real de cada señal cuando fue dominante.
-    Requiere mínimo 500 registros en auditoria_señales para ser confiable.
-    """
     try:
-        # Verificar muestra disponible
         n = (await db.execute(text(
             "SELECT COUNT(*) FROM auditoria_señales WHERE acierto_top3 IS NOT NULL"
         ))).scalar() or 0
@@ -1527,10 +1424,9 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
             return {
                 "status": "insuficiente",
                 "registros": n,
-                "message": f"Solo {n} registros con resultado. Necesita mínimo 200. Corre CARGAR 2018→HOY primero."
+                "message": f"Solo {n} registros con resultado. Necesita mínimo 200."
             }
 
-        # Calcular efectividad por señal dominante
         res = await db.execute(text("""
             SELECT
                 CASE
@@ -1559,7 +1455,6 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
         """))
         rows = res.fetchall()
 
-        # Calcular efectividad por señal
         ef_señal = {}
         total_general = 0
         for r in rows:
@@ -1570,30 +1465,23 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
             ef_señal[señal] = {"ef": ef, "total": total, "aciertos": ac}
             total_general += total
 
-        azar = 3 / 38  # 7.89%
-
-        # Convertir efectividad a pesos proporcionales
-        # Señal que rinde más que azar → más peso, menos → menos peso
+        azar = 3 / 38
         señales_motor = ["reciente", "deuda", "anti", "patron", "secuencia"]
         pesos_raw = {}
         for s in señales_motor:
             if s in ef_señal:
-                # Peso proporcional a qué tan por encima del azar está
                 ratio = ef_señal[s]["ef"] / azar
-                pesos_raw[s] = max(ratio, 0.5)  # mínimo 0.5× para no eliminar señales
+                pesos_raw[s] = max(ratio, 0.5)
             else:
-                pesos_raw[s] = 1.0  # sin datos → peso neutro
+                pesos_raw[s] = 1.0
 
-        # Normalizar para que sumen ~1.0
         total_raw = sum(pesos_raw.values())
         pesos_norm = {s: round(v / total_raw, 4) for s, v in pesos_raw.items()}
 
-        # Calcular EF global actual
         total_ac = sum(d["aciertos"] for d in ef_señal.values())
         total_tot = sum(d["total"] for d in ef_señal.values())
         ef_global = round(total_ac / total_tot * 100, 2) if total_tot > 0 else 0
 
-        # Guardar en motor_pesos
         res_gen = await db.execute(text("SELECT COALESCE(MAX(generacion),0) FROM motor_pesos"))
         gen = (res_gen.scalar() or 0) + 1
 
@@ -1614,7 +1502,6 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
             "gen": gen,
         })
 
-        # Actualizar también motor_pesos_hora con los mismos pesos base
         for hora in ["08:00 AM","09:00 AM","10:00 AM","11:00 AM",
                      "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
                      "04:00 PM","05:00 PM","06:00 PM","07:00 PM"]:
@@ -1647,7 +1534,6 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
             "status": "success",
             "registros_analizados": n,
             "ef_top3_global": ef_global,
-            "pesos_anteriores": {"reciente": 0.25, "deuda": 0.28, "anti": 0.22, "patron": 0.15, "secuencia": 0.10},
             "pesos_nuevos": pesos_norm,
             "detalle_señales": {
                 s: {
@@ -1658,24 +1544,18 @@ async def auto_pesos(db: AsyncSession = Depends(get_db)):
                 for s in señales_motor
             },
             "generacion": gen,
-            "message": f"✅ Pesos actualizados en generación {gen} | EF.TOP3: {ef_global}% | {n:,} predicciones analizadas",
+            "message": f"✅ Pesos actualizados en generación {gen} | EF.TOP3: {ef_global}%",
         }
     except Exception as e:
         await db.rollback()
         return {"status": "error", "message": str(e)}
 
 
-
 @app.get("/aprender-sql")
 async def aprender_sql(db: AsyncSession = Depends(get_db)):
-    """
-    Entrenamiento masivo en SQL puro — sin tablas TEMP (incompatibles con Neon pool).
-    Usa CTEs en memoria. Tiempo esperado: 5-20 segundos.
-    """
     import time
     t0 = time.time()
     try:
-        # PASO 1: Reconstruir probabilidades_hora
         await db.execute(text("DELETE FROM probabilidades_hora"))
         await db.execute(text("""
             INSERT INTO probabilidades_hora
@@ -1700,7 +1580,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
-        # PASO 2: Upsert masivo en auditoria_ia usando CTE (sin tablas TEMP)
         r = await db.execute(text("""
             WITH top3_hora AS (
                 SELECT hora,
@@ -1738,7 +1617,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         insertados = r.rowcount
         await db.commit()
 
-        # PASO 3: Actualizar rentabilidad_hora
         await db.execute(text("""
             INSERT INTO rentabilidad_hora
                 (hora, total_sorteos, aciertos_top1, aciertos_top3,
@@ -1790,7 +1668,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
         """))
         await db.commit()
 
-        # PASO 4: Reconstruir markov_transiciones HORA POR HORA (evita timeout Render)
         _HORAS_MK = [
             '08:00 AM','09:00 AM','10:00 AM','11:00 AM',
             '12:00 PM','01:00 PM','02:00 PM','03:00 PM',
@@ -1836,7 +1713,6 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
             logger.error(f"PASO 4 markov TRUNCATE ERROR: {e_mk}")
         markov_n = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
-        # Métricas finales
         res = (await db.execute(text("""
             SELECT
                 COUNT(*),
@@ -1882,14 +1758,12 @@ async def aprender_sql(db: AsyncSession = Depends(get_db)):
 
 @app.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
-    """Keep-alive para cron-job.org — llámalo cada 5 min"""
     from zoneinfo import ZoneInfo
     from datetime import datetime
     try:
         ahora = datetime.now(ZoneInfo('America/Caracas'))
         mk = (await db.execute(text("SELECT COUNT(*) FROM markov_transiciones"))).scalar() or 0
 
-        # Recovery automática: si hay sorteos sin predecir de hoy → calibrar + predecir
         recovery_msg = None
         try:
             pendientes = (await db.execute(text("""
@@ -1927,34 +1801,19 @@ async def health(db: AsyncSession = Depends(get_db)):
         return {"status": "ok", "awake": True}
 
 
-# ══════════════════════════════════════════════════════
-# SCORE POR SEÑAL — qué señal aporta valor real
-# ══════════════════════════════════════════════════════
 @app.get("/score-señales")
 async def endpoint_score_señales(dias: int = 90, db: AsyncSession = Depends(get_db)):
-    """
-    Analiza auditoria_señales y muestra qué señal es realmente útil.
-    Parámetro: dias=90 (por defecto últimos 90 días)
-    """
     return await obtener_score_señales(db, dias=dias)
 
 
 @app.post("/actualizar-señales")
 async def endpoint_actualizar_señales(db: AsyncSession = Depends(get_db)):
-    """
-    Sincroniza resultado_real y aciertos en auditoria_señales.
-    Llamar después de /entrenar o /calibrar.
-    """
     resultado = await actualizar_resultados_señales(db)
     return {"status": "ok", **resultado}
 
 
 @app.post("/migrar-señales")
 async def endpoint_migrar_señales(db: AsyncSession = Depends(get_db)):
-    """
-    Crea la tabla auditoria_señales si no existe.
-    Ejecutar una sola vez tras el deploy.
-    """
     sqls = [
         """
         CREATE TABLE IF NOT EXISTS auditoria_señales (
@@ -2012,11 +1871,6 @@ async def endpoint_retroactivo_bloque(
     hasta: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Procesa UN bloque de máximo 30 días y retorna.
-    El dashboard llama esto en loop hasta cubrir 2018→hoy.
-    Así nunca supera el timeout de Render gratuito (~25s por bloque).
-    """
     from datetime import date as _date, timedelta
     try:
         fecha_desde = _date.fromisoformat(desde)
@@ -2031,7 +1885,6 @@ async def endpoint_retroactivo_bloque(
     else:
         fecha_hasta = fecha_desde + timedelta(days=30)
 
-    # Nunca pasar de ayer
     tope = _date.today() - timedelta(days=1)
     if fecha_hasta > tope:
         fecha_hasta = tope
@@ -2041,15 +1894,6 @@ async def endpoint_retroactivo_bloque(
     )
 
 
-# ══════════════════════════════════════════════════════
-# RENTABILIDAD POR HORA — Tab "Rentabilidad Horas"
-# Lee de rentabilidad_hora + calcula en vivo desde auditoria_ia
-# ══════════════════════════════════════════════════════
-
-# ═══════════════════════════════════════════════════════════
-# PASO 2 — APRENDIZAJE POR SORTEO
-# ═══════════════════════════════════════════════════════════
-
 @app.get("/aprender-sorteo")
 async def endpoint_aprender_sorteo(
     fecha: str = Query(description="Fecha YYYY-MM-DD"),
@@ -2057,11 +1901,6 @@ async def endpoint_aprender_sorteo(
     real:  str = Query(description="Animal real que salió"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Micro-ajusta los pesos del motor para una hora específica
-    basándose en el resultado real de ese sorteo.
-    Se llama automáticamente al cargar cada resultado.
-    """
     from datetime import date as _date
     try:
         fecha_d = _date.fromisoformat(fecha)
@@ -2077,10 +1916,6 @@ async def endpoint_aprender_ultimos(
     n: int = Query(default=50, description="Cuántos sorteos procesar"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Procesa los últimos N sorteos con resultado real que aún
-    no tienen micro-ajuste registrado. Ideal para puesta al día.
-    """
     resultado = await aprender_ultimos_n(db, n)
     status_code = 200 if resultado.get("status") in ("success", "ok") else 500
     return JSONResponse(resultado, status_code=status_code)
@@ -2091,16 +1926,12 @@ async def endpoint_historial_aprendizaje(
     limit: int = Query(default=30),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Historial de micro-ajustes de pesos realizados.
-    Muestra qué señal fue dominante y cómo evolucionaron los pesos.
-    """
     return await obtener_historial_aprendizaje(db, limit)
+
 
 @app.get("/rentabilidad")
 async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
     try:
-        # Leer tabla rentabilidad_hora (actualizada por /entrenar)
         rows = (await db.execute(text("""
             SELECT hora, total_sorteos, aciertos_top1, aciertos_top3,
                    efectividad_top1, efectividad_top3, es_rentable
@@ -2123,7 +1954,6 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
                 for r in rows
             ]
 
-        # Fallback: calcular en vivo desde auditoria_ia si la tabla está vacía
         rows2 = (await db.execute(text("""
             SELECT a.hora,
                 COUNT(*) AS total,
@@ -2158,27 +1988,38 @@ async def get_rentabilidad(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+
 @app.get("/ver-columnas")
 async def ver_columnas(db=Depends(get_db)):
     res = await db.execute(text("""
-        SELECT column_name 
-        FROM information_schema.columns 
+        SELECT column_name
+        FROM information_schema.columns
         WHERE table_name = 'predicciones'
         ORDER BY ordinal_position
     """))
     columnas = [row[0] for row in res.fetchall()]
     return {"tabla": "predicciones", "columnas": columnas}
-    
+
+
 @app.get("/backtest-confianza")
 async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
-    res_filtrado = await db.execute(text("SELECT COUNT(*) as total, SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1 FROM predicciones WHERE score >= :confianza_min"), {"confianza_min": confianza_min})
+    res_filtrado = await db.execute(text(
+        "SELECT COUNT(*) as total, SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1 "
+        "FROM predicciones WHERE score >= :confianza_min"
+    ), {"confianza_min": confianza_min})
     con_filtro = res_filtrado.fetchone()
-    res_total = await db.execute(text("SELECT COUNT(*) as total, SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1 FROM predicciones"))
+    res_total = await db.execute(text(
+        "SELECT COUNT(*) as total, SUM(CASE WHEN acertado THEN 1 ELSE 0 END) as top1 "
+        "FROM predicciones"
+    ))
     sin_filtro = res_total.fetchone()
     return {
         "confianza_min": confianza_min,
-        "sin_filtro": {"total": int(sin_filtro.total), "aciertos": int(sin_filtro.top1), "ef_pct": round(sin_filtro.top1 / sin_filtro.total * 100, 2)},
-        "con_filtro": {"total": int(con_filtro.total), "aciertos": int(con_filtro.top1), "ef_pct": round(con_filtro.top1 / con_filtro.total * 100, 2), "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)},
+        "sin_filtro": {"total": int(sin_filtro.total), "aciertos": int(sin_filtro.top1),
+                       "ef_pct": round(sin_filtro.top1 / sin_filtro.total * 100, 2)},
+        "con_filtro": {"total": int(con_filtro.total), "aciertos": int(con_filtro.top1),
+                       "ef_pct": round(con_filtro.top1 / con_filtro.total * 100, 2),
+                       "pct_sorteos_cubiertos": round(con_filtro.total / sin_filtro.total * 100, 1)},
         "conclusion": "filtro_mejora" if (con_filtro.top1 / con_filtro.total) > (sin_filtro.top1 / sin_filtro.total) else "filtro_no_mejora"
     }
 
@@ -2189,45 +2030,24 @@ async def backtest_confianza(confianza_min: int = 19, db=Depends(get_db)):
 
 @app.get("/predecir/v12")
 async def predecir_v12(hora: str = None, db: AsyncSession = Depends(get_db)):
-    """
-    Motor V12: top3 con 3 animales distintos garantizados + anti-congelamiento.
-    Si el mismo animal lleva 3+ días como pred1 sin acertar → se le baja el score
-    y el motor rota automáticamente a otro candidato.
-    """
     resultado = await generar_prediccion_v12(db, hora)
     return resultado
 
 
 @app.get("/analizar/dia")
 async def analizar_dia(db: AsyncSession = Depends(get_db)):
-    """
-    El motor decide autónomamente cuáles sorteos vale la pena apostar hoy.
-    Devuelve: horas recomendadas, animales, inversión sugerida y retorno esperado.
-    Con $100 por apuesta: si recomienda 4 horas → inversión $1200, retorno esperado según ef histórica.
-    """
     resultado = await analizar_dia_completo(db)
     return resultado
 
 
 @app.get("/entrenar/v12")
 async def endpoint_entrenar_v12(db: AsyncSession = Depends(get_db)):
-    """
-    Reentrenamiento V12:
-    1. Corrige campo acierto (usa prediccion_1/2/3 en lugar de animal_predicho)
-    2. Recalcula rentabilidad_hora con datos limpios
-    3. Devuelve efectividad real corregida
-    EJECUTAR UNA VEZ para corregir los registros de marzo-abril 2026.
-    """
     resultado = await reentrenar_v12(db)
     return resultado
 
 
 @app.get("/fix/acierto")
 async def endpoint_fix_acierto(db: AsyncSession = Depends(get_db)):
-    """
-    Corrige el campo acierto en auditoria_ia.
-    Bug: se comparaba contra animal_predicho (viejo) en vez de prediccion_1/2/3.
-    """
     resultado = await corregir_campo_acierto(db)
     return resultado
 
@@ -2238,17 +2058,12 @@ async def endpoint_fix_acierto(db: AsyncSession = Depends(get_db)):
 
 @app.get("/entrenar/v13")
 async def endpoint_entrenar_v13(db: AsyncSession = Depends(get_db)):
-    """Inicializa V13 — crea tabla plan_dia."""
     resultado = await reentrenar_v13(db)
     return resultado
 
 
 @app.get("/plan/dia")
 async def endpoint_plan_dia(db: AsyncSession = Depends(get_db)):
-    """
-    Genera el plan del día siguiente — ejecutar noche anterior.
-    Llama V12 para cada hora y guarda predicciones en plan_dia.
-    """
     resultado = await generar_plan_dia(db)
     return resultado
 
@@ -2259,11 +2074,6 @@ async def endpoint_ajustar(
     resultado: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Llamar después de cada sorteo real.
-    Ejemplo: /ajustar/08:00+AM?resultado=gallo
-    El motor ajusta automáticamente las horas siguientes.
-    """
     hora_decoded = hora.replace("+", " ")
     resultado_data = await ajustar_tras_sorteo(db, hora_decoded, resultado)
     return resultado_data
@@ -2274,10 +2084,6 @@ async def endpoint_dashboard_dia(
     fecha: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Estado del día en tiempo real.
-    Predicción original vs ajustada, resultados, aciertos y ganancia acumulada.
-    """
     from datetime import date as date_type
     f = date_type.fromisoformat(fecha) if fecha else None
     resultado = await dashboard_dia(db, f)
@@ -2293,11 +2099,6 @@ async def endpoint_historial_plan(
     hora: str = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Historial de plan_dia con filtros para el dashboard.
-    Filtros: acierto_pos (pred1/pred2/pred3/ninguna), fue_ajustada (true/false), hora.
-    Incluye stats agregadas para mostrar en el dashboard.
-    """
     try:
         condiciones = []
         params = {"limit": limit, "offset": offset}
@@ -2315,7 +2116,6 @@ async def endpoint_historial_plan(
         where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
         where_resultado = where + (" AND " if condiciones else "WHERE ") + "resultado_real IS NOT NULL"
 
-        # Stats agregadas
         sql_stats = """
             SELECT
                 COUNT(*) as total,
@@ -2343,7 +2143,6 @@ async def endpoint_historial_plan(
             "ef_pct": float(stats_row[6] or 0),
         }
 
-        # Filas paginadas
         sql_rows = """
             SELECT fecha, hora,
                    pred1_original, pred2_original, pred3_original,
