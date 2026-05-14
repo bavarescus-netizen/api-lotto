@@ -79,13 +79,13 @@ async def _procesar_hora(db_factory, hora_str: str) -> bool:
 
     try:
         async with db_factory() as db:
-            # FIX: ORDER BY id DESC — fecha ya está filtrada por WHERE
+            # historico no tiene columna id — ordenar por fecha y hora
             res = await db.execute(text("""
                 SELECT animalito FROM historico
                 WHERE fecha = CURRENT_DATE
                   AND hora = :hora
                   AND loteria = 'Lotto Activo'
-                ORDER BY id DESC LIMIT 1
+                ORDER BY fecha DESC, hora DESC LIMIT 1
             """), {"hora": hora_str})
             row = res.fetchone()
 
