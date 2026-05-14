@@ -585,6 +585,11 @@ async function actualizarTodo(){
   const btn=document.querySelector('button[onclick*="actualizarTodo"]');
   if(btn){btn.disabled=true;btn.textContent='⏳...';}
   try{
+     // 1) Traer último resultado real desde fuente externa
+    await fetch('/cargar-ultimo');
+    // 2) Sincronizar señales pendientes
+    await fetch('/actualizar-señales',{method:'POST'});
+    // 3) Refrescar estado y tabla audit
     await cargarEstado();
     await cargarAudit();
   }finally{
