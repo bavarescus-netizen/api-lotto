@@ -245,7 +245,7 @@ async def generar_plan_dia(db, fecha_objetivo: date = None) -> dict:
 # AJUSTE INTRADIARIO — se llama después de cada sorteo
 # Esta es la función central del motor V13
 # ══════════════════════════════════════════════════════
-async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str) -> dict:
+async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_override=None) -> dict:
     """
     Después de cada sorteo real:
     1. Registra el resultado en plan_dia
@@ -260,7 +260,10 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str) -> dict
     - 3+ fallos consecutivos hoy → recalcular horas restantes desde cero
     """
     tz = ZoneInfo('America/Caracas')
-    hoy = datetime.now(tz).date()
+    hoy = fecha_override if fecha_override else datetime.now(tz).date()
+    if isinstance(hoy, str):
+        from datetime import date
+        hoy = date.fromisoformat(hoy)
     resultado = _norm(resultado_real)
     ajustes_aplicados = []
 
