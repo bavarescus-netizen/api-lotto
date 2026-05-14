@@ -1081,7 +1081,7 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
                 FROM predicciones p
                 LEFT JOIN historico h
                     ON h.fecha=p.fecha AND h.hora=p.hora
-                    AND h.loteria='Lotto Activo'
+                     
                 GROUP BY p.animal
             )
             SELECT animal, n_pred, n_ac FROM con_resultado
@@ -1630,7 +1630,7 @@ async def calcular_rentabilidad_horas(db) -> dict:
                         ) THEN 1 END) AS ac_top3
                 FROM auditoria_ia a
                 JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora
-                    AND h.loteria='Lotto Activo'
+                     
                 WHERE a.hora=:hora AND a.acierto IS NOT NULL
             """), {"hora": hora})
             r = res.fetchone()
@@ -2005,7 +2005,7 @@ async def generar_prediccion(db, hora: str = None) -> dict:
                     ) THEN 1 ELSE 0 END)
                 FROM auditoria_ia a
                 JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora
-                    AND h.loteria='Lotto Activo'
+                     
                 WHERE a.hora=:hora
                   AND a.fecha >= CURRENT_DATE - INTERVAL '28 days'
                   AND a.acierto IS NOT NULL
@@ -2198,7 +2198,7 @@ async def entrenar_modelo(db) -> dict:
             SET acierto        = (LOWER(TRIM(a.animal_predicho))=LOWER(TRIM(h.animalito))),
                 resultado_real = h.animalito
             FROM historico h
-            WHERE a.fecha=h.fecha AND a.hora=h.hora AND h.loteria='Lotto Activo'
+            WHERE a.fecha=h.fecha AND a.hora=h.hora  
               AND (a.acierto IS NULL OR a.resultado_real='PENDIENTE' OR a.resultado_real IS NULL)
         """))
 
@@ -2260,7 +2260,7 @@ async def entrenar_modelo(db) -> dict:
         ac   = res3.scalar() or 0
         res4 = await db.execute(text("""
             SELECT COUNT(*) FROM auditoria_ia a
-            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
+            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora  
             WHERE LOWER(TRIM(h.animalito)) IN (
                 LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
                 LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
@@ -2585,7 +2585,7 @@ async def calibrar_predicciones(db) -> dict:
             SET acierto        = (LOWER(TRIM(a.animal_predicho))=LOWER(TRIM(h.animalito))),
                 resultado_real = h.animalito
             FROM historico h
-            WHERE a.fecha=h.fecha AND a.hora=h.hora AND h.loteria='Lotto Activo'
+            WHERE a.fecha=h.fecha AND a.hora=h.hora  
               AND (a.acierto IS NULL OR a.resultado_real='PENDIENTE' OR a.resultado_real IS NULL)
         """))
         cal = r.rowcount
@@ -2615,7 +2615,7 @@ async def actualizar_resultados_señales(db) -> dict:
                     )
                 )
             FROM historico h
-            WHERE s.fecha=h.fecha AND s.hora=h.hora AND h.loteria='Lotto Activo'
+            WHERE s.fecha=h.fecha AND s.hora=h.hora  
               AND (s.resultado_real='PENDIENTE' OR s.resultado_real IS NULL)
         """))
         actualizados = r.rowcount
@@ -2677,7 +2677,7 @@ async def obtener_estadisticas(db) -> dict:
 
         res_ef3 = await db.execute(text("""
             SELECT COUNT(*) FROM auditoria_ia a
-            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora AND h.loteria='Lotto Activo'
+            JOIN historico h ON h.fecha=a.fecha AND h.hora=a.hora  
             WHERE LOWER(TRIM(h.animalito)) IN (
                 LOWER(TRIM(COALESCE(a.prediccion_1,'__'))),
                 LOWER(TRIM(COALESCE(a.prediccion_2,'__'))),
