@@ -39,67 +39,77 @@ def _hora_str_a_dt(hora_str: str, fecha=None) -> datetime:
     )
 
 
-async def _horas_sin_resultado(db_factory) -> list[str]:
+async def _horas_sin_resultado(db_factory) -> list[tuple[str, str]]:
     """
-    Al arrancar, detecta qué horas del día ya pasaron pero no tienen
-    resultado_real en plan_dia. Las devuelve para procesarlas de inmediato.
+    Al arrancar, detecta filas en plan_dia sin resultado_real
+    que tienen datos disponibles en historico.
+    Busca en los últimos 7 días para recuperar días anteriores pendientes.
+    Retorna lista de (fecha_str, hora_str).
     """
     from sqlalchemy import text
-    ahora = datetime.now(tz)
-    horas_pasadas_sin_resultado = []
 
+    pendientes = []
     try:
         async with db_factory() as db:
-            for hora_str in HORAS_SORTEO:
-                sorteo_dt = _hora_str_a_dt(hora_str)
-                # Solo las que ya pasaron (con al menos 1 min de margen)
-                if ahora > sorteo_dt + timedelta(minutes=1):
-                    # ¿Tiene resultado en plan_dia?
-                    res = await db.execute(text("""
-                        SELECT resultado_real FROM plan_dia
-                        WHERE fecha = CURRENT_DATE AND hora = :hora
-                    """), {"hora": hora_str})
-                    row = res.fetchone()
-                    # Sin fila o sin resultado → incluir
-                    if not row or not row[0]:
-                        horas_pasadas_sin_resultado.append(hora_str)
+            res = await db.execute(text("""
+                SELECT p.fecha::text, p.hora
+                FROM plan_dia p
+                JOIN historico h
+                  ON h.fecha = p.fecha
+                 AND h.hora  = p.hora
+                 AND h.loteria = 'Lotto Activo'
+                WHERE p.resultado_real IS NULL
+                  AND p.fecha >= CURRENT_DATE - INTERVAL '7 days'
+                ORDER BY p.fecha, p.hora
+            """))
+            pendientes = res.fetchall()  # lista de (fecha_str, hora_str)
     except Exception as e:
         logger.error(f"Error en _horas_sin_resultado: {e}")
 
-    return horas_pasadas_sin_resultado
+    return pendientes
 
 
-async def _procesar_hora(db_factory, hora_str: str) -> bool:
+async def _procesar_hora(db_factory, hora_str: str, fecha_str: str = None) -> bool:
     """
-    Busca el resultado real de una hora en la tabla historico
-    y llama a ajustar_tras_sorteo si lo encuentra.
-    Retorna True si se procesó con éxito.
+    Busca el resultado real de una hora en historico y llama a ajustar_tras_sorteo.
+    fecha_str: 'YYYY-MM-DD' — si es None usa CURRENT_DATE.
     """
     from sqlalchemy import text
 
+    fecha_filtro = fecha_str if fecha_str else "CURRENT_DATE"
+
     try:
         async with db_factory() as db:
-            # historico no tiene columna id — ordenar por fecha y hora
-            res = await db.execute(text("""
-                SELECT animalito FROM historico
-                WHERE fecha = CURRENT_DATE
-                  AND hora = :hora
-                  AND loteria = 'Lotto Activo'
-                ORDER BY fecha DESC, hora DESC LIMIT 1
-            """), {"hora": hora_str})
+            if fecha_str:
+                res = await db.execute(text("""
+                    SELECT animalito FROM historico
+                    WHERE fecha = :fecha
+                      AND hora = :hora
+                      AND loteria = 'Lotto Activo'
+                    ORDER BY fecha DESC, hora DESC LIMIT 1
+                """), {"hora": hora_str, "fecha": fecha_str})
+            else:
+                res = await db.execute(text("""
+                    SELECT animalito FROM historico
+                    WHERE fecha = CURRENT_DATE
+                      AND hora = :hora
+                      AND loteria = 'Lotto Activo'
+                    ORDER BY fecha DESC, hora DESC LIMIT 1
+                """), {"hora": hora_str})
+
             row = res.fetchone()
 
             if row and row[0]:
                 resultado = row[0]
-                ajuste = await ajustar_tras_sorteo(db, hora_str, resultado)
-                logger.info(f"🔄 Ajuste {hora_str}: {ajuste.get('message')}")
+                ajuste = await ajustar_tras_sorteo(db, hora_str, resultado, fecha_override=fecha_str)
+                logger.info(f"🔄 Ajuste {fecha_filtro} {hora_str}: {ajuste.get('message')}")
                 return True
             else:
-                logger.debug(f"⏳ Sin resultado en historico para {hora_str}")
+                logger.debug(f"⏳ Sin resultado en historico para {fecha_filtro} {hora_str}")
                 return False
 
     except Exception as e:
-        logger.error(f"Error procesando {hora_str}: {e}")
+        logger.error(f"Error procesando {fecha_filtro} {hora_str}: {e}")
         return False
 
 
@@ -180,24 +190,25 @@ async def _ciclo_plan_diario(db_factory):
 
 async def _recuperar_horas_perdidas(db_factory):
     """
-    Al arrancar: detecta horas del día que ya pasaron sin resultado
-    y las procesa de inmediato. Compensa reinicios de Render.
+    Al arrancar: detecta filas en plan_dia sin resultado_real
+    que ya tienen datos en historico (últimos 7 días).
+    Las procesa de inmediato para compensar reinicios de Render.
     """
-    horas_pendientes = await _horas_sin_resultado(db_factory)
+    pendientes = await _horas_sin_resultado(db_factory)
 
-    if not horas_pendientes:
-        logger.info("✅ Startup: todas las horas del día están al día")
+    if not pendientes:
+        logger.info("✅ Startup: todas las filas de plan_dia están al día")
         return
 
-    logger.info(f"🔁 Recuperando {len(horas_pendientes)} horas sin resultado: {horas_pendientes}")
+    logger.info(f"🔁 Recuperando {len(pendientes)} filas pendientes: {pendientes}")
 
-    for hora_str in horas_pendientes:
-        exito = await _procesar_hora(db_factory, hora_str)
+    for fecha_str, hora_str in pendientes:
+        exito = await _procesar_hora(db_factory, hora_str, fecha_str=fecha_str)
         if exito:
-            logger.info(f"✅ Recuperada: {hora_str}")
+            logger.info(f"✅ Recuperada: {fecha_str} {hora_str}")
         else:
-            logger.warning(f"⚠️ Sin datos en historico para recuperar: {hora_str}")
-        await asyncio.sleep(2)  # pequeña pausa entre llamadas
+            logger.warning(f"⚠️ Sin datos en historico para: {fecha_str} {hora_str}")
+        await asyncio.sleep(2)
 
 
 async def ciclo_infinito(db_factory):
