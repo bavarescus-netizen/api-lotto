@@ -260,7 +260,22 @@ async def api_cargar_ultimo(db: AsyncSession = Depends(get_db)):
         "detalle": resultados,
         "message": f"Hoy: {len(resultados)} encontrados, {insertados} nuevos guardados."
     }
-
+@router.get("/debug-historico")
+async def debug_historico():
+    from datetime import date, timedelta
+    hoy = date.today()
+    fecha_fin = hoy - timedelta(days=1)
+    fecha_inicio = fecha_fin - timedelta(days=6)
+    url = "https://lotoven.com/animalito/lottoactivo/historial/"
+    payload = {"fecha": f"{fecha_inicio}/{fecha_fin}"}
+    async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+        r = await client.post(url, data=payload, headers=HEADERS)
+        return {
+            "status_code": r.status_code,
+            "url": str(r.url),
+            "payload": payload,
+            "html_snippet": r.text[2000:4000]
+        }
 
 @router.get("/cargar-semana")
 async def api_cargar_semana(db: AsyncSession = Depends(get_db)):
