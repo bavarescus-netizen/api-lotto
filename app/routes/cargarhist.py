@@ -136,53 +136,85 @@ async def obtener_resultados_hoy() -> list:
 async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date) -> list:
     """
     Scrapea el histórico semanal desde lotoven.com
-    URL: /animalito/lottoactivo/historico/YYYY-MM-DD/YYYY-MM-DD/
+    Usa POST con fecha en formato 'YYYY-MM-DD/YYYY-MM-DD'
+    Extrae animales desde el src de las imágenes: /dist/animals_img/Ardilla_2.webp
     """
-    url = f"{BASE_URL}/historico/{fecha_inicio}/{fecha_fin}/"
+    url = f"{BASE_URL}/historial/"
+    payload = {"fecha": f"{fecha_inicio}/{fecha_fin}"}
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            r = await client.get(url, headers=HEADERS)
-            logger.info(f"Scraper historico — status: {r.status_code} url: {url}")
+            r = await client.post(url, data=payload, headers=HEADERS)
+            logger.info(f"Scraper historico POST — status: {r.status_code} {fecha_inicio}→{fecha_fin}")
             if r.status_code != 200:
-                logger.error(f"Historico falló: HTTP {r.status_code}")
+                logger.error(f"Historico POST falló: HTTP {r.status_code}")
                 return []
 
             soup = BeautifulSoup(r.text, "html.parser")
-            tabla = soup.find("table")
+            tabla = soup.find("table", {"id": "historial"})
             if not tabla:
-                logger.warning(f"No se encontró tabla en {url}")
+                logger.warning(f"No se encontró tabla#historial")
                 return []
 
-            # Extraer fechas de los encabezados
+            # Extraer fechas de los th del thead
             fechas = []
-            for th in tabla.find_all("th")[1:]:
-                texto = th.text.strip()
-                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            thead = tabla.find("thead")
+            if thead:
+                ths = thead.find_all("th")[1:]  # saltar columna "Horario"
+                for th in ths:
+                    texto = th.text.strip()
                     try:
-                        fechas.append(datetime.strptime(texto, fmt).date())
-                        break
+                        fechas.append(datetime.strptime(texto, "%Y-%m-%d").date())
                     except:
                         pass
 
+            if not fechas:
+                logger.warning("No se encontraron fechas en el thead")
+                return []
+
             resultados = []
-            for fila in tabla.find_all("tr")[1:]:
-                th_hora = fila.find("th")
-                if not th_hora:
+            tbody = tabla.find("tbody")
+            if not tbody:
+                return []
+
+            for fila in tbody.find_all("tr"):
+                celdas = fila.find_all("td")
+                if not celdas:
                     continue
-                hora = normalizar_hora(th_hora.text.strip())
+
+                # Primera celda es la hora
+                hora = normalizar_hora(celdas[0].text.strip())
                 if hora not in HORAS_VALIDAS:
                     continue
-                for i, celda in enumerate(fila.find_all("td")):
+
+                # Resto de celdas = una por fecha
+                for i, celda in enumerate(celdas[1:]):
                     if i >= len(fechas):
                         break
-                    animal = normalizar_animal(celda.text.strip())
-                    if animal:
-                        resultados.append({
-                            "fecha": fechas[i],
-                            "hora": hora,
-                            "animalito": animal,
-                            "loteria": LOTERIA
-                        })
+                    # Extraer animal desde src de imagen: /dist/animals_img/Ardilla_2.webp
+                    img = celda.find("img")
+                    if img and img.get("src"):
+                        src = img["src"]
+                        # Extraer nombre: Ardilla_2.webp → ardilla
+                        match = re.search(r'/([A-Za-záéíóúñ]+)_\d+\.webp', src)
+                        if match:
+                            animal = match.group(1).lower()
+                            if animal in ANIMALES_VALIDOS:
+                                resultados.append({
+                                    "fecha": fechas[i],
+                                    "hora": hora,
+                                    "animalito": animal,
+                                    "loteria": LOTERIA
+                                })
+                    else:
+                        # Fallback: texto de la celda
+                        animal = normalizar_animal(celda.text.strip())
+                        if animal:
+                            resultados.append({
+                                "fecha": fechas[i],
+                                "hora": hora,
+                                "animalito": animal,
+                                "loteria": LOTERIA
+                            })
 
             logger.info(f"Historico {fecha_inicio}→{fecha_fin}: {len(resultados)} registros")
             return resultados
