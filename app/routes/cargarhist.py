@@ -135,40 +135,40 @@ async def obtener_resultados_hoy() -> list:
 
 async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date) -> list:
     """
-    Scrapea el histórico semanal desde lotoven.com
-    Usa POST con fecha en formato 'YYYY-MM-DD/YYYY-MM-DD'
-    Extrae animales desde el src de las imágenes: /dist/animals_img/Ardilla_2.webp
+    Scrapea el histórico semanal desde lotoven.com usando GET con semana ISO.
+    Lotoven redirige POST a la semana del lunes — usamos GET directo.
     """
-    url = f"{BASE_URL}/historial/"
-    payload = {"fecha": f"{fecha_inicio}/{fecha_fin}"}
+    # Calcular lunes de la semana ISO
+    lunes = fecha_inicio - timedelta(days=fecha_inicio.weekday())
+    domingo = lunes + timedelta(days=6)
+    url = f"{BASE_URL}/historial/{lunes}/{domingo}/"
+
     try:
         async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            r = await client.post(url, data=payload, headers=HEADERS)
-            logger.info(f"Scraper historico POST — status: {r.status_code} {fecha_inicio}→{fecha_fin}")
+            r = await client.get(url, headers=HEADERS)
+            logger.info(f"Scraper historico GET — status: {r.status_code} {lunes}→{domingo}")
             if r.status_code != 200:
-                logger.error(f"Historico POST falló: HTTP {r.status_code}")
+                logger.error(f"Historico GET falló: HTTP {r.status_code}")
                 return []
 
             soup = BeautifulSoup(r.text, "html.parser")
             tabla = soup.find("table", {"id": "historial"})
             if not tabla:
-                logger.warning(f"No se encontró tabla#historial")
+                logger.warning(f"No se encontró tabla#historial en {url}")
                 return []
 
             # Extraer fechas de los th del thead
             fechas = []
             thead = tabla.find("thead")
             if thead:
-                ths = thead.find_all("th")[1:]  # saltar columna "Horario"
-                for th in ths:
-                    texto = th.text.strip()
+                for th in thead.find_all("th")[1:]:
                     try:
-                        fechas.append(datetime.strptime(texto, "%Y-%m-%d").date())
+                        fechas.append(datetime.strptime(th.text.strip(), "%Y-%m-%d").date())
                     except:
                         pass
 
             if not fechas:
-                logger.warning("No se encontraron fechas en el thead")
+                logger.warning(f"Sin fechas en thead — {url}")
                 return []
 
             resultados = []
@@ -180,22 +180,15 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date) -> list:
                 celdas = fila.find_all("td")
                 if not celdas:
                     continue
-
-                # Primera celda es la hora
                 hora = normalizar_hora(celdas[0].text.strip())
                 if hora not in HORAS_VALIDAS:
                     continue
-
-                # Resto de celdas = una por fecha
                 for i, celda in enumerate(celdas[1:]):
                     if i >= len(fechas):
                         break
-                    # Extraer animal desde src de imagen: /dist/animals_img/Ardilla_2.webp
                     img = celda.find("img")
                     if img and img.get("src"):
-                        src = img["src"]
-                        # Extraer nombre: Ardilla_2.webp → ardilla
-                        match = re.search(r'/([A-Za-záéíóúñ]+)_\d+\.webp', src)
+                        match = re.search(r'/([A-Za-záéíóúñ]+)_\d+\.webp', img["src"])
                         if match:
                             animal = match.group(1).lower()
                             if animal in ANIMALES_VALIDOS:
@@ -206,7 +199,6 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date) -> list:
                                     "loteria": LOTERIA
                                 })
                     else:
-                        # Fallback: texto de la celda
                         animal = normalizar_animal(celda.text.strip())
                         if animal:
                             resultados.append({
@@ -216,7 +208,7 @@ async def obtener_historico_semana(fecha_inicio: date, fecha_fin: date) -> list:
                                 "loteria": LOTERIA
                             })
 
-            logger.info(f"Historico {fecha_inicio}→{fecha_fin}: {len(resultados)} registros")
+            logger.info(f"Historico {lunes}→{domingo}: {len(resultados)} registros")
             return resultados
 
     except Exception as e:
@@ -260,22 +252,7 @@ async def api_cargar_ultimo(db: AsyncSession = Depends(get_db)):
         "detalle": resultados,
         "message": f"Hoy: {len(resultados)} encontrados, {insertados} nuevos guardados."
     }
-@router.get("/debug-historico")
-async def debug_historico():
-    from datetime import date, timedelta
-    hoy = date.today()
-    fecha_fin = hoy - timedelta(days=1)
-    fecha_inicio = fecha_fin - timedelta(days=6)
-    url = "https://lotoven.com/animalito/lottoactivo/historial/"
-    payload = {"fecha": f"{fecha_inicio}/{fecha_fin}"}
-    async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-        r = await client.post(url, data=payload, headers=HEADERS)
-        return {
-            "status_code": r.status_code,
-            "url": str(r.url),
-            "payload": payload,
-            "html_snippet": r.text[2000:4000]
-        }
+
 
 @router.get("/cargar-semana")
 async def api_cargar_semana(db: AsyncSession = Depends(get_db)):
