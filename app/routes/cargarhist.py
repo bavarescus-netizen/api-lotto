@@ -21,7 +21,17 @@ HEADERS = {
 }
 LOTERIA = "Lotto Activo"
 
-HORAS_VALIDAS = {
+ANIMALES_VALIDOS = {
+    "ballena", "toro", "ciempies", "chivo", "tigre", "leon", "rana", "perico",
+    "gato", "raton", "paloma", "perro", "carnero", "caballo", "gallo", "gallina",
+    "zamuro", "camello", "mono", "oso", "alacran", "iguana", "vaca", "lapa",
+    "ardilla", "cochino", "elefante", "pavo", "aguila", "delfin", "jirafa",
+    "pescado", "caiman", "cebra", "venado", "burro", "zorro", "culebra",
+    "rana", "cangrejo", "pato", "loro", "conejo", "tortuga", "murcielago",
+}
+
+
+
     "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM",
     "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM",
     "04:00 PM", "05:00 PM", "06:00 PM", "07:00 PM",
@@ -33,7 +43,12 @@ def normalizar_animal(texto: str) -> str:
         return ""
     limpio = re.sub(r'[^a-zA-ZáéíóúñÁÉÍÓÚÑ\s]', '', texto)
     partes = limpio.strip().split()
-    return partes[-1].lower() if partes else ""
+    # Buscar cualquier palabra que sea un animal válido
+    for palabra in reversed(partes):
+        candidato = palabra.lower()
+        if candidato in ANIMALES_VALIDOS:
+            return candidato
+    return ""
 
 
 def normalizar_hora(hora_texto: str) -> str:
