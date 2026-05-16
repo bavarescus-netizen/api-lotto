@@ -12,6 +12,7 @@ FIXES v2:
 
 import asyncio
 import logging
+import httpx
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,24 @@ from app.services.motor_v13 import generar_plan_dia, ajustar_tras_sorteo
 
 logger = logging.getLogger(__name__)
 tz = ZoneInfo("America/Caracas")
+
+
+async def _cargar_resultado_web():
+    """
+    Jala resultados recientes de lotoven via /cargar-ultimo
+    antes de verificar historico. Garantiza que el scraper corra
+    automáticamente sin depender de llamadas manuales externas.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get("http://localhost:10000/cargar-ultimo")
+            data = r.json()
+            nuevos = data.get("nuevos", 0)
+            if nuevos > 0:
+                logger.info(f"🌐 Scraper auto: {nuevos} nuevos resultados cargados")
+    except Exception as e:
+        logger.warning(f"Scraper auto falló (no crítico): {e}")
+
 
 HORAS_SORTEO = [
     "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM",
@@ -147,6 +166,9 @@ async def _verificar_sorteos(db_factory):
 
                 if ya_procesada:
                     continue
+
+                # Jalar resultado desde lotoven antes de buscar en historico
+                await _cargar_resultado_web()
 
                 # Intentar procesar (el resultado puede tardar en llegar a historico)
                 exito = await _procesar_hora(db_factory, hora_str)
