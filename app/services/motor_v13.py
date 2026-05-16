@@ -1,24 +1,25 @@
 """
 MOTOR V13 — LOTTOAI PRO — ADAPTATIVO INTRADIARIO
 =================================================
-La diferencia fundamental vs V12:
+CAMBIOS v13.1:
 
-El motor ya no es estático. Después de cada sorteo real:
-1. Ve el resultado
-2. Evalúa si acertó y en qué posición (pred1/pred2/pred3/ninguna)
-3. Ajusta las predicciones de las horas siguientes
-4. Registra todo en tabla plan_dia para el dashboard
+REGLA A (reescrita):
+  ANTES: resultado acertó en pred2/pred3 → subía ESE animal a pred1 en TODAS las horas siguientes
+         Problema: el animal ya "se gastó", repetirlo es malo. Además propagaba a todas las horas.
+  AHORA: usa tabla markov_transiciones para buscar qué animal sigue más frecuentemente
+         después del resultado actual en la hora inmediata siguiente.
+         Solo afecta la hora inmediata — no propaga a todas.
 
-Fuentes para el ajuste (en orden de confianza):
-- patrones_intraday_confirmados: pares con n_casos >= 4 y pct confirmado real
-- probabilidades_hora: frecuencia histórica real por animal×hora
-- repetición del día: si X salió hoy 2+ veces → boost para horas siguientes
+REGLA B (mejorada):
+  Igual que antes pero también se activa cuando acierto_pos != "ninguna"
+  si hay patrón con pct_confirmado >= 40%.
 
-Lógica de ajuste después de cada sorteo:
-- resultado en pred1 → confirmar, no cambiar horas siguientes
-- resultado en pred2/pred3 → subir ese animal a pred1 en hora siguiente
-- resultado fuera del top3 → buscar en patrones si ese animal tiene par conocido
-- 3+ fallos consecutivos hoy → recalcular desde cero las horas restantes
+REGLA C (eliminada):
+  "Animal caliente hoy" — causaba que un animal dominara todas las predicciones del día.
+
+REGLA D (mejorada):
+  5+ fallos consecutivos → recalcular hora siguiente desde probabilidades_hora reales
+  en lugar de simplemente rotar pred1/pred2/pred3.
 """
 
 from sqlalchemy import text
@@ -73,7 +74,6 @@ def _norm(nombre: str) -> str:
 # MIGRACIÓN — crear tabla plan_dia si no existe
 # ══════════════════════════════════════════════════════
 async def migrar_tabla_plan_dia(db) -> None:
-    """Crea la tabla plan_dia para el motor adaptativo."""
     await db.execute(text("""
         CREATE TABLE IF NOT EXISTS plan_dia (
             id              SERIAL PRIMARY KEY,
@@ -100,7 +100,6 @@ async def migrar_tabla_plan_dia(db) -> None:
 
 # ══════════════════════════════════════════════════════
 # CARGAR PATRONES INTRADAY CONFIRMADOS
-# Solo los que tienen evidencia real (n_casos >= 4)
 # ══════════════════════════════════════════════════════
 async def _cargar_patrones(db) -> list:
     try:
@@ -118,8 +117,59 @@ async def _cargar_patrones(db) -> list:
 
 
 # ══════════════════════════════════════════════════════
+# MARKOV: buscar mejor animal siguiente
+# ══════════════════════════════════════════════════════
+async def _markov_siguiente(db, animal_previo: str, hora_sig: str) -> str | None:
+    """
+    Busca en markov_transiciones qué animal sigue más frecuentemente
+    después de animal_previo en la hora hora_sig.
+    Retorna el animal o None si no hay datos suficientes.
+    """
+    try:
+        res = await db.execute(text("""
+            SELECT animal_sig, frecuencia, probabilidad
+            FROM markov_transiciones
+            WHERE animal_previo = :prev
+              AND hora = :hora
+              AND frecuencia >= 3
+            ORDER BY frecuencia DESC
+            LIMIT 1
+        """), {"prev": animal_previo, "hora": hora_sig})
+        row = res.fetchone()
+        if row and row[0]:
+            return _norm(row[0])
+        return None
+    except Exception:
+        return None
+
+
+# ══════════════════════════════════════════════════════
+# MEJOR PREDICCIÓN DESDE probabilidades_hora
+# Para recalcular cuando hay muchos fallos
+# ══════════════════════════════════════════════════════
+async def _mejor_animal_hora(db, hora: str, excluir: list = None) -> list:
+    """
+    Retorna los top 3 animales para una hora según probabilidades_hora recientes.
+    Excluye animales que ya salieron hoy (excluir).
+    """
+    excluir = excluir or []
+    try:
+        res = await db.execute(text("""
+            SELECT animalito, probabilidad
+            FROM probabilidades_hora
+            WHERE hora = :hora
+            ORDER BY probabilidad DESC
+            LIMIT 10
+        """), {"hora": hora})
+        animales = [(row[0], row[1]) for row in res.fetchall()
+                    if _norm(row[0]) not in excluir]
+        return [_norm(a[0]) for a in animales[:3]]
+    except Exception:
+        return []
+
+
+# ══════════════════════════════════════════════════════
 # CALCULAR EFECTIVIDAD PONDERADA POR HORA
-# Igual que V12: 30d×3 + 90d×2 + 365d×1.5 + hist×1
 # ══════════════════════════════════════════════════════
 async def _ef_ponderada_hora(db, hora: str) -> float:
     try:
@@ -153,9 +203,9 @@ async def _ef_ponderada_hora(db, hora: str) -> float:
         r = res.fetchone()
         if not r: return 0.0
         t30,a30,t90,a90,th,ah = (int(x or 0) for x in r)
-        ef30  = a30/t30*100  if t30  >= 5  else None
-        ef90  = a90/t90*100  if t90  >= 15 else None
-        efh   = ah/th*100    if th   >= 30 else None
+        ef30 = a30/t30*100  if t30  >= 5  else None
+        ef90 = a90/t90*100  if t90  >= 15 else None
+        efh  = ah/th*100    if th   >= 30 else None
         parts = [(ef30,3.0),(ef90,2.0),(efh,1.0)]
         num = sum(e*p for e,p in parts if e is not None)
         den = sum(p   for e,p in parts if e is not None)
@@ -165,18 +215,9 @@ async def _ef_ponderada_hora(db, hora: str) -> float:
 
 
 # ══════════════════════════════════════════════════════
-# GENERAR PLAN DEL DÍA — se llama la noche anterior
-# Genera predicciones para TODAS las horas del día siguiente
-# y las guarda en plan_dia
+# GENERAR PLAN DEL DÍA
 # ══════════════════════════════════════════════════════
 async def generar_plan_dia(db, fecha_objetivo: date = None) -> dict:
-    """
-    Genera el plan completo del día:
-    - Llama al motor V12 para cada hora
-    - Calcula efectividad ponderada
-    - Guarda en plan_dia como predicciones originales
-    - Marca las horas rentables
-    """
     from app.services.motor_v12 import generar_prediccion_v12
 
     tz = ZoneInfo('America/Caracas')
@@ -206,15 +247,15 @@ async def generar_plan_dia(db, fecha_objetivo: date = None) -> dict:
                      fue_ajustada, confianza, ef_hora_ponderada)
                 VALUES (:f, :h, :p1, :p2, :p3, :p1, :p2, :p3, false, :c, :ef)
                 ON CONFLICT (fecha, hora) DO UPDATE SET
-                    pred1_original   = EXCLUDED.pred1_original,
-                    pred2_original   = EXCLUDED.pred2_original,
-                    pred3_original   = EXCLUDED.pred3_original,
-                    pred1_ajustada   = EXCLUDED.pred1_ajustada,
-                    pred2_ajustada   = EXCLUDED.pred2_ajustada,
-                    pred3_ajustada   = EXCLUDED.pred3_ajustada,
-                    fue_ajustada     = false,
-                    confianza        = EXCLUDED.confianza,
-                    ef_hora_ponderada= EXCLUDED.ef_hora_ponderada
+                    pred1_original    = EXCLUDED.pred1_original,
+                    pred2_original    = EXCLUDED.pred2_original,
+                    pred3_original    = EXCLUDED.pred3_original,
+                    pred1_ajustada    = EXCLUDED.pred1_ajustada,
+                    pred2_ajustada    = EXCLUDED.pred2_ajustada,
+                    pred3_ajustada    = EXCLUDED.pred3_ajustada,
+                    fue_ajustada      = false,
+                    confianza         = EXCLUDED.confianza,
+                    ef_hora_ponderada = EXCLUDED.ef_hora_ponderada
             """), {"f": fecha_objetivo, "h": hora,
                    "p1": p1, "p2": p2, "p3": p3,
                    "c": confianza, "ef": ef})
@@ -242,33 +283,40 @@ async def generar_plan_dia(db, fecha_objetivo: date = None) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# AJUSTE INTRADIARIO — se llama después de cada sorteo
-# Esta es la función central del motor V13
+# AJUSTE INTRADIARIO — núcleo del motor V13
 # ══════════════════════════════════════════════════════
 async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_override=None) -> dict:
     """
-    Después de cada sorteo real:
-    1. Registra el resultado en plan_dia
-    2. Evalúa posición del acierto (pred1/pred2/pred3/ninguna)
-    3. Ajusta las horas siguientes según lo que salió
-    4. Devuelve el resumen del ajuste para el dashboard
+    Después de cada sorteo real aplica 3 reglas en orden de prioridad:
 
-    Lógica de ajuste:
-    - resultado = pred1 → confirmar, horas siguientes sin cambio
-    - resultado = pred2/pred3 → subir ese animal a pred1 en siguientes horas
-    - resultado fuera del top3 → buscar patrón conocido, si existe aplicarlo
-    - 3+ fallos consecutivos hoy → recalcular horas restantes desde cero
+    REGLA A — Markov (solo hora inmediata siguiente):
+      Busca en markov_transiciones qué animal sigue más frecuentemente
+      después del resultado actual. No repite el mismo animal.
+      Solo aplica a la hora +1, no propaga a todo el día.
+
+    REGLA B — Patrones confirmados (todas las horas siguientes):
+      Si existe un patrón intraday confirmado (n_casos>=4, pct>=40%)
+      para el resultado actual, lo aplica en la hora correspondiente.
+
+    REGLA D — Reset por fallos (solo hora inmediata):
+      Si hay 5+ fallos consecutivos, recalcula la hora siguiente
+      usando las probabilidades_hora reales, excluyendo animales
+      que ya salieron hoy.
+
+    REGLA A ya no:
+      - Repite el animal ganador en todas las horas siguientes
+      - Actúa solo cuando acertó en pred2/pred3 (ahora actúa siempre)
     """
     tz = ZoneInfo('America/Caracas')
     hoy = fecha_override if fecha_override else datetime.now(tz).date()
     if isinstance(hoy, str):
-        from datetime import date
         hoy = date.fromisoformat(hoy)
+
     resultado = _norm(resultado_real)
     ajustes_aplicados = []
 
     try:
-        # 1. Obtener predicción actual para esta hora
+        # ── 1. Obtener predicción de la hora actual ──
         res_actual = await db.execute(text("""
             SELECT pred1_ajustada, pred2_ajustada, pred3_ajustada
             FROM plan_dia
@@ -293,7 +341,7 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
         else:
             acierto_pos = "ninguna"
 
-        # Registrar resultado en plan_dia
+        # ── 2. Registrar resultado ──
         await db.execute(text("""
             UPDATE plan_dia SET
                 resultado_real = :r,
@@ -301,7 +349,7 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
             WHERE fecha = :f AND hora = :h
         """), {"r": resultado, "pos": acierto_pos, "f": hoy, "h": hora_actual})
 
-        # 2. Contar fallos consecutivos hoy
+        # ── 3. Contar fallos consecutivos hoy ──
         res_fallos = await db.execute(text("""
             SELECT COUNT(*) FROM plan_dia
             WHERE fecha = :f
@@ -311,7 +359,7 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
         """), {"f": hoy, "h": hora_actual})
         fallos_hoy = int((res_fallos.fetchone() or [0])[0])
 
-        # 3. Determinar horas siguientes a ajustar
+        # ── 4. Horas siguientes ──
         idx_actual = HORAS_SORTEO_STR.index(hora_actual) if hora_actual in HORAS_SORTEO_STR else -1
         horas_siguientes = HORAS_SORTEO_STR[idx_actual + 1:] if idx_actual >= 0 else []
 
@@ -326,28 +374,30 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
                 "message": "Último sorteo del día — no hay horas siguientes"
             }
 
-        # 4. Cargar patrones conocidos para el resultado actual
+        # ── 5. Cargar patrones confirmados para el resultado actual ──
         patrones = await _cargar_patrones(db)
         patrones_activos = [
             p for p in patrones
             if _norm(p["trigger_animal"]) == resultado
             and p["trigger_hora"] == hora_actual
+            and float(p["pct_confirmado"]) >= 40.0
         ]
 
-        # 5. Cargar resultados del día para detectar animales calientes
+        # ── 6. Animales que ya salieron hoy (para excluir en reset) ──
         res_hoy_data = await db.execute(text("""
-            SELECT resultado_real, COUNT(*) as veces
-            FROM plan_dia
+            SELECT resultado_real FROM plan_dia
             WHERE fecha = :f AND resultado_real IS NOT NULL
-            GROUP BY resultado_real
-            ORDER BY veces DESC
         """), {"f": hoy})
-        frecuencia_hoy = {_norm(r[0]): int(r[1]) for r in res_hoy_data.fetchall()}
+        animales_hoy = [_norm(r[0]) for r in res_hoy_data.fetchall() if r[0]]
 
-        # 6. Aplicar ajustes a cada hora siguiente
+        hora_inmediata = horas_siguientes[0]
+
+        # ── 7. REGLA A — Markov (solo hora inmediata) ──
+        animal_markov = await _markov_siguiente(db, resultado, hora_inmediata)
+
+        # ── 8. Aplicar ajustes por hora ──
         for hora_sig in horas_siguientes:
 
-            # Obtener predicción actual de esa hora
             res_sig = await db.execute(text("""
                 SELECT pred1_ajustada, pred2_ajustada, pred3_ajustada
                 FROM plan_dia
@@ -364,48 +414,40 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
             nuevo_p1, nuevo_p2, nuevo_p3 = s1, s2, s3
             motivo = None
 
-            # --- REGLA A: Si acertó en pred2 o pred3 → subir ese animal a pred1 ---
-            if acierto_pos in ("pred2", "pred3"):
-                animal_ganador = resultado
-                if animal_ganador != s1:
-                    nuevo_p1 = animal_ganador
-                    nuevo_p2 = s1
-                    nuevo_p3 = s2
-                    motivo = f"Subido {animal_ganador} a pred1 — acertó como {acierto_pos} en {hora_actual}"
+            # ── REGLA A: Markov — solo hora inmediata siguiente ──
+            if hora_sig == hora_inmediata and animal_markov and animal_markov != s1:
+                nuevo_p1 = animal_markov
+                nuevo_p2 = s1
+                nuevo_p3 = s2
+                motivo = (f"Markov: {resultado}@{hora_actual}"
+                          f" → {animal_markov}@{hora_sig}")
 
-            # --- REGLA B: Si hay patrón confirmado para este resultado → aplicarlo ---
-            elif acierto_pos == "ninguna":
+            # ── REGLA B: Patrones confirmados (cualquier hora siguiente) ──
+            if motivo is None:
                 for patron in patrones_activos:
                     if patron["resultado_hora"] == hora_sig:
                         animal_patron = _norm(patron["resultado_animal"])
-                        pct = patron["pct_confirmado"]
+                        pct = float(patron["pct_confirmado"])
                         if animal_patron != s1:
                             nuevo_p1 = animal_patron
                             nuevo_p2 = s1
                             nuevo_p3 = s2
-                            motivo = (f"Patrón confirmado: {resultado}@{hora_actual}"
-                                      f" → {animal_patron}@{hora_sig} ({pct:.0f}%)")
+                            motivo = (f"Patrón {pct:.0f}%: "
+                                      f"{resultado}@{hora_actual}"
+                                      f" → {animal_patron}@{hora_sig}")
                         break
 
-            # --- REGLA C: Animal caliente hoy (salió 3+ veces) → solo en pred3 de hora inmediata ---
-            # Solo aplica a la hora inmediata siguiente, no a todas
-            if motivo is None and hora_sig == horas_siguientes[0]:
-                animales_calientes = [a for a, v in frecuencia_hoy.items() if v >= 3]
-                if animales_calientes:
-                    caliente = animales_calientes[0]
-                    if caliente not in (nuevo_p1, nuevo_p2, nuevo_p3):
-                        nuevo_p3 = caliente
-                        motivo = f"Animal caliente hoy ({caliente} salió {frecuencia_hoy[caliente]}x) → en pred3"
+            # ── REGLA D: Reset por fallos — solo hora inmediata ──
+            if motivo is None and hora_sig == hora_inmediata and fallos_hoy >= 5:
+                mejores = await _mejor_animal_hora(db, hora_sig, excluir=animales_hoy)
+                if len(mejores) >= 2:
+                    nuevo_p1 = mejores[0]
+                    nuevo_p2 = mejores[1]
+                    nuevo_p3 = mejores[2] if len(mejores) > 2 else s3
+                    motivo = (f"Reset probabilidades — {fallos_hoy} fallos hoy, "
+                              f"excluidos: {', '.join(set(animales_hoy))[:40]}")
 
-            # --- REGLA D: 5+ fallos consecutivos → rotar solo la hora inmediata siguiente ---
-            if fallos_hoy >= 5 and acierto_pos == "ninguna" and motivo is None:
-                if hora_sig == horas_siguientes[0]:
-                    nuevo_p1 = s2
-                    nuevo_p2 = s3
-                    nuevo_p3 = s1
-                    motivo = f"Rotación forzada — {fallos_hoy} fallos consecutivos hoy"
-
-            # Guardar ajuste si hubo cambio
+            # ── Guardar si hubo cambio ──
             if motivo:
                 await db.execute(text("""
                     UPDATE plan_dia SET
@@ -433,13 +475,15 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
             "resultado_real": resultado,
             "acierto_pos": acierto_pos,
             "fallos_hoy": fallos_hoy,
+            "markov_aplicado": animal_markov,
             "ajustes_aplicados": len(ajustes_aplicados),
             "detalle_ajustes": ajustes_aplicados,
             "message": (
                 f"{'✅' if acierto_pos != 'ninguna' else '❌'} "
                 f"{hora_actual}: {resultado} ({acierto_pos}) | "
-                f"Ajustes: {len(ajustes_aplicados)} horas | "
-                f"Fallos hoy: {fallos_hoy}"
+                f"Markov→{animal_markov or 'N/A'} | "
+                f"Ajustes: {len(ajustes_aplicados)} | "
+                f"Fallos: {fallos_hoy}"
             )
         }
 
@@ -449,15 +493,9 @@ async def ajustar_tras_sorteo(db, hora_actual: str, resultado_real: str, fecha_o
 
 
 # ══════════════════════════════════════════════════════
-# DASHBOARD DEL DÍA — estado en tiempo real
+# DASHBOARD DEL DÍA
 # ══════════════════════════════════════════════════════
 async def dashboard_dia(db, fecha: date = None) -> dict:
-    """
-    Devuelve el estado completo del día para el dashboard:
-    - Cada hora: pred original, pred ajustada, resultado real, acierto
-    - Resumen: aciertos, fallos, inversión, ganancia/pérdida
-    - Indicador: qué horas quedan y cuáles son las mejores para apostar
-    """
     tz = ZoneInfo('America/Caracas')
     if fecha is None:
         fecha = datetime.now(tz).date()
@@ -476,7 +514,6 @@ async def dashboard_dia(db, fecha: date = None) -> dict:
         """), {"f": fecha})
         rows_raw = res.fetchall()
 
-        # Ordenar por el orden real de sorteos del día
         orden_horas = {h: i for i, h in enumerate(HORAS_SORTEO_STR)}
         rows = sorted(rows_raw, key=lambda r: orden_horas.get(r[0], 99))
 
@@ -545,10 +582,9 @@ async def dashboard_dia(db, fecha: date = None) -> dict:
 
 
 # ══════════════════════════════════════════════════════
-# REENTRENAR V13 — migración + corrección de datos
+# REENTRENAR V13
 # ══════════════════════════════════════════════════════
 async def reentrenar_v13(db) -> dict:
-    """Migra la tabla plan_dia y devuelve estado."""
     try:
         await migrar_tabla_plan_dia(db)
         return {
