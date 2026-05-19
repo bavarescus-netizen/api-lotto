@@ -2,6 +2,7 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 if not DATABASE_URL:
     raise ValueError("❌ ERROR: DATABASE_URL no configurada en las variables de entorno.")
 
@@ -16,13 +17,16 @@ else:
     DATABASE_URL += "?ssl=require"
 
 # ✅ Configuración del Motor (Optimizado para Neon free tier)
+# FIX: pool_recycle bajado a 240s (4 min) — Neon cierra conexiones a los 5 min.
+# Reciclar ANTES evita errores de conexión muerta en picos de requests.
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_pre_ping=True,      # reconecta si la DB se "durmió"
+    pool_pre_ping=True,       # reconecta si la DB se "durmió"
     pool_size=5,
     max_overflow=10,
-    pool_recycle=300,        # 5 min — Neon cierra conexiones inactivas rápido
+    pool_recycle=240,         # FIX: era 300 — Neon cierra a los ~300s, reciclar antes
+    pool_timeout=30,          # FIX: timeout explícito para no colgar el servidor
     connect_args={
         "command_timeout": 60
     }
@@ -36,7 +40,6 @@ SessionLocal = async_sessionmaker(
 )
 
 # ── Session para tareas en background (aprender, retroactivo) ──
-# Requerido por main.py para _run_aprender y _run_retroactivo
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
