@@ -83,10 +83,11 @@ async def aprender_tras_sorteo(
         # ── 1. Leer predicción guardada para este sorteo ──────────────────────
         pred = (await db.execute(text("""
             SELECT prediccion_1, prediccion_2, prediccion_3,
-                   confianza_pct, id
+                   confianza_pct,
+                   COALESCE(id, 0) AS audit_id
             FROM auditoria_ia
             WHERE fecha = :fecha AND hora = :hora
-            ORDER BY id DESC LIMIT 1
+            ORDER BY fecha DESC LIMIT 1
         """), {"fecha": fecha, "hora": hora})).fetchone()
 
         if not pred:
@@ -215,6 +216,7 @@ async def aprender_tras_sorteo(
               AND fecha < :fecha
             ORDER BY fecha DESC LIMIT 1
         """), {"hora": hora, "fecha": fecha})).fetchone()
+
 
         if previo_row and previo_row[0]:
             animal_previo = previo_row[0].lower().strip()
