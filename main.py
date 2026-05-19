@@ -816,7 +816,32 @@ async def recalibrar_pesos_manual(
 # HISTORIAL, MARKOV y demás endpoints — sin cambios
 # (se mantienen igual que en V10 para no romper el dashboard)
 # ═══════════════════════════════════════════════════════════
-@app.get("/historial")
+@app.get("/diagnostico-historico")
+async def diagnostico_historico(db: AsyncSession = Depends(get_db)):
+    """Muestra las columnas reales de la tabla historico para diagnóstico."""
+    try:
+        cols = (await db.execute(text("""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'historico'
+            ORDER BY ordinal_position
+        """))).fetchall()
+        muestra = (await db.execute(text(
+            "SELECT * FROM historico WHERE loteria='Lotto Activo' ORDER BY fecha DESC LIMIT 3"
+        ))).fetchall()
+        keys = (await db.execute(text(
+            "SELECT * FROM historico WHERE loteria='Lotto Activo' ORDER BY fecha DESC LIMIT 1"
+        ))).keys()
+        return {
+            "columnas": [{"nombre": c[0], "tipo": c[1]} for c in cols],
+            "columnas_keys": list(keys),
+            "muestra": [list(r) for r in muestra]
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
 async def get_historial(
     limit: int = Query(default=50),
     offset: int = Query(default=0),
