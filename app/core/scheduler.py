@@ -116,7 +116,7 @@ async def _capturar_resultado(db: AsyncSession, hora_label: str) -> str | None:
             WHERE loteria = 'Lotto Activo'
               AND fecha = :hoy
               AND hora = :hora
-            ORDER BY id DESC LIMIT 1
+            ORDER BY fecha DESC LIMIT 1
         """), {"hoy": hoy, "hora": hora_label})).fetchone()
 
         if row and row[0]:
