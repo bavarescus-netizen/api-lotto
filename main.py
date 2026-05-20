@@ -292,14 +292,13 @@ async def registrar_resultado(
 ):
     """
     Registra el resultado real de un sorteo y dispara aprendizaje automático.
+    Funciona para sorteos de hoy Y de días anteriores (para corregir/completar).
 
     Body JSON:
-        {"fecha": "2026-05-18", "hora": "11:00 AM", "animal": "Perro"}
-
-    El aprendizaje corre en background para no bloquear la respuesta.
+        {"fecha": "2026-05-18", "hora": "05:00 PM", "animal": "DELFIN"}
     """
     fecha_str = data.get("fecha")
-    hora      = data.get("hora")
+    hora      = data.get("hora", "").strip()
     animal    = data.get("animal", "").strip()
 
     if not all([fecha_str, hora, animal]):
@@ -310,7 +309,7 @@ async def registrar_resultado(
     except ValueError:
         return JSONResponse(status_code=400, content={"error": "Formato fecha inválido (usar YYYY-MM-DD)"})
 
-    # Guardar resultado en historico si no existe
+    # 1. Guardar en historico si no existe
     try:
         await db.execute(text("""
             INSERT INTO historico (fecha, hora, animalito, loteria)
@@ -322,21 +321,40 @@ async def registrar_resultado(
         await db.rollback()
         logger.warning(f"Warning guardando en historico: {e}")
 
-    # Disparar aprendizaje en background (no bloquea la respuesta)
+    # 2. Actualizar auditoria_ia si ya tiene esa fila (resultado pendiente)
+    try:
+        await db.execute(text("""
+            UPDATE auditoria_ia
+            SET resultado_real = :animal,
+                acierto = (LOWER(TRIM(prediccion_1)) = LOWER(TRIM(:animal)))
+            WHERE fecha = :fecha AND hora = :hora
+              AND (resultado_real IS NULL OR resultado_real = 'PENDIENTE')
+        """), {"fecha": fecha, "hora": hora, "animal": animal})
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.warning(f"Warning actualizando auditoria_ia: {e}")
+
+    # 3. Disparar aprendizaje en background
     async def _aprender_bg():
         async with AsyncSessionLocal() as db_bg:
             resultado = await aprender_tras_sorteo(db_bg, fecha, hora, animal)
-            logger.info(f"🧠 BG aprendizaje {hora}: top3={resultado.get('acierto_top3')}")
+            logger.info(
+                f"🧠 Aprendizaje {fecha} {hora}: "
+                f"real={animal} top1={resultado.get('acierto_top1')} "
+                f"top3={resultado.get('acierto_top3')}"
+            )
 
     background.add_task(_aprender_bg)
 
     return {
         "status": "ok",
-        "mensaje": f"✅ Resultado registrado. Aprendizaje automático iniciado para {hora}.",
+        "mensaje": f"✅ Resultado registrado. Aprendizaje automático iniciado.",
         "fecha": str(fecha),
         "hora": hora,
         "animal": animal,
     }
+
 
 
 # ═══════════════════════════════════════════════════════════
@@ -816,6 +834,66 @@ async def recalibrar_pesos_manual(
 # HISTORIAL, MARKOV y demás endpoints — sin cambios
 # (se mantienen igual que en V10 para no romper el dashboard)
 # ═══════════════════════════════════════════════════════════
+@app.get("/historial")
+async def get_historial(
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+    fecha: str = Query(default=None),
+    resultado: str = Query(default=None),
+    animal: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        conditions = []
+        params: dict = {"limit": limit, "offset": offset}
+        if fecha:
+            conditions.append("a.fecha = :fecha")
+            params["fecha"] = fecha
+        if resultado == "true":
+            conditions.append("a.acierto = TRUE")
+        elif resultado == "false":
+            conditions.append("a.acierto = FALSE")
+        if animal:
+            an = animal.lower().strip()
+            conditions.append(
+                "(LOWER(a.prediccion_1)=:an OR LOWER(a.prediccion_2)=:an "
+                "OR LOWER(a.prediccion_3)=:an OR LOWER(a.resultado_real)=:an)"
+            )
+            params["an"] = an
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = (await db.execute(text(f"""
+            SELECT a.fecha, a.hora, a.prediccion_1, a.prediccion_2, a.prediccion_3,
+                   a.resultado_real, a.acierto, a.confianza_pct
+            FROM auditoria_ia a
+            {where}
+            ORDER BY a.fecha DESC, a.hora DESC
+            LIMIT :limit OFFSET :offset
+        """), params)).fetchall()
+        return {
+            "registros": [{
+                "fecha": str(r[0]), "hora": r[1],
+                "prediccion_1": r[2] or "", "prediccion_2": r[3] or "",
+                "prediccion_3": r[4] or "",
+                "resultado_real": r[5] or "PENDIENTE",
+                "acierto": r[6], "confianza_pct": int(r[7] or 0),
+            } for r in rows],
+            "total": len(rows),
+            "offset": offset,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/actualizar-señales")
+async def actualizar_senales(db: AsyncSession = Depends(get_db)):
+    """Recalcula scores de señales — endpoint requerido por el dashboard."""
+    try:
+        res = await actualizar_resultados_señales(db)
+        return {"status": "ok", "resultado": res}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @app.get("/diagnostico-historico")
 async def diagnostico_historico(db: AsyncSession = Depends(get_db)):
     """Muestra las columnas reales de la tabla historico para diagnóstico."""
