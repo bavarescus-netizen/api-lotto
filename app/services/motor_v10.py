@@ -1,4 +1,4 @@
-"""
+  """
 MOTOR V101 — LOTTOAI PRO 
 ========================
 VERSIÓN DINÁMICA COMPLETA
@@ -1096,14 +1096,12 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
             n_ac   = int(r[2])
             tasa   = n_ac / n_pred if n_pred > 0 else 0
             # Penalizar si: apareció ≥5 veces y tasa < azar esperado (2.63%)
-            if n_pred >= 5 and tasa < AZAR_ESPERADO:
-                # Factor: entre 0.35 (pésimo) y 0.70 (justo bajo el azar)
-                factor = round(0.35 + (tasa / AZAR_ESPERADO) * 0.35, 3)
-                penalizacion[animal] = factor
-            elif n_pred >= 10 and tasa == 0:
-                penalizacion[animal] = 0.25   # 10+ predicciones sin un solo acierto → penalización dura
-            else:
-                penalizacion[animal] = 1.0
+     if n_pred >= 20 and n_ac == 0:
+     penalizacion[animal] = 0.15   # 20+ predicciones sin un solo acierto
+    elif n_pred >= 10 and n_ac == 0: 
+    penalizacion[animal] = 0.25   # 10+ predicciones sin un solo acierto
+else:
+    penalizacion[animal] = 1.0    # sin penalización
         return penalizacion
     except Exception:
         return {}
