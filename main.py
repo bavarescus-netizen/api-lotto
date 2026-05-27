@@ -806,7 +806,7 @@ async def predecir_hora(hora: str = Query(default=None), db: AsyncSession = Depe
 
 
 # ═══════════════════════════════════════════════════════════
-# RECALIBRAR MANUAL — fuerza recalibración de pesos ahora
+# RECALIBRAR MANUAL — fuerza recalibración de pesos ahora 
 # ═══════════════════════════════════════════════════════════
 @app.api_route("/recalibrar-pesos", methods=["GET", "POST"])
 async def recalibrar_pesos_manual(
