@@ -1095,7 +1095,7 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
             n_pred = int(r[1])
             n_ac   = int(r[2])
             tasa   = n_ac / n_pred if n_pred > 0 else 0
-            # Penalizar si: apareció ≥5 veces y tasa < azar esperado (2.63%)
+            # Penalizar si: apareció ≥5 veces y tasa < azar esperado (2.63%) 
      if n_pred >= 20 and n_ac == 0:
      penalizacion[animal] = 0.15   # 20+ predicciones sin un solo acierto
     elif n_pred >= 10 and n_ac == 0: 
