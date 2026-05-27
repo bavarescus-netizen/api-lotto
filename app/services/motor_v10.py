@@ -1045,7 +1045,6 @@ async def calcular_patron_fecha_exacta(db, hora_str, dia_semana, mes, fecha_limi
     return resultado
 
 
-# ══════════════════════════════════════════════════════
 # PENALIZACIONES
 # ══════════════════════════════════════════════════════
 async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None, ventana_dias=30):
@@ -1057,6 +1056,7 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
     if fecha_limite is None:
         fecha_limite = date.today()
     fecha_ini = fecha_limite - timedelta(days=ventana_dias)
+    
     try:
         # Conteo unificado: cada aparición en TOP3 cuenta como predicción
         res = await db.execute(text("""
@@ -1081,13 +1081,12 @@ async def calcular_penalizacion_sobreprediccion(db, hora_str, fecha_limite=None,
                 FROM predicciones p
                 LEFT JOIN historico h
                     ON h.fecha=p.fecha AND h.hora=p.hora
-                     
                 GROUP BY p.animal
             )
             SELECT animal, n_pred, n_ac FROM con_resultado
         """), {"hora": hora_str, "desde": fecha_ini, "hasta": fecha_limite})
 
-penalizacion = {}
+        penalizacion = {}
         for r in res.fetchall():
             animal = _normalizar(r[0] or "")
             if not animal:
@@ -1095,9 +1094,8 @@ penalizacion = {}
             
             n_pred = int(r[1])
             n_ac   = int(r[2])
-            tasa   = n_ac / n_pred if n_pred > 0 else 0
             
-            # --- SECCIÓN CORREGIDA: Alineada dentro del for ---
+            # Penalizar si: apareció ≥10-20 veces y no ha acertado nada
             if n_pred >= 20 and n_ac == 0:
                 penalizacion[animal] = 0.15   # 20+ predicciones sin un solo acierto
             elif n_pred >= 10 and n_ac == 0: 
@@ -1105,24 +1103,33 @@ penalizacion = {}
             else:
                 penalizacion[animal] = 1.0    # sin penalización
         
-        return penalizacion  # Alineado con el inicio del 'for'
+        return penalizacion
+
+    except Exception as e:
+        # Importante para que el try no quede huérfano
+        print(f"Error en calcular_penalizacion_sobreprediccion: {e}")
+        return {}
 
 
 async def calcular_penalizacion_reciente(db, hora_str, fecha_limite=None, ventana=5):
     if fecha_limite is None:
         fecha_limite = date.today()
-    res = await db.execute(text("""
-        SELECT animalito FROM historico
-        WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
-        ORDER BY fecha DESC LIMIT :ventana
-    """), {"hora": hora_str, "hoy": fecha_limite, "ventana": ventana})
-    rows = res.fetchall()
-    penalizacion = {}
-    for i, r in enumerate(rows):
-        factor = 1.0 - (0.15 * (ventana - i) / ventana)
-        penalizacion[_normalizar(r[0])] = round(max(factor, 0.3), 3)
-    return penalizacion
-
+    
+    try:
+        res = await db.execute(text("""
+            SELECT animalito FROM historico
+            WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
+            ORDER BY fecha DESC LIMIT :ventana
+        """), {"hora": hora_str, "hoy": fecha_limite, "ventana": ventana})
+        
+        rows = res.fetchall()
+        penalizacion = {}
+        for i, r in enumerate(rows):
+            factor = 1.0 - (0.15 * (ventana - i) / ventana)
+            penalizacion[_normalizar(r[0])] = round(max(factor, 0.3), 3)
+        return penalizacion
+    except Exception:
+        return {}
 
 # ══════════════════════════════════════════════════════
 # SEÑAL NUEVA: PATRONES INTRADAY CONFIRMADOS — V11.2
