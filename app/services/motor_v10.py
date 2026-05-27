@@ -1,4 +1,4 @@
-  """
+"""
 MOTOR V101 — LOTTOAI PRO 
 ========================
 VERSIÓN DINÁMICA COMPLETA
