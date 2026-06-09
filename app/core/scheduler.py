@@ -2,7 +2,7 @@
 scheduler.py — Ciclo automático LOTTOAI PRO
 ============================================
 FIXES aplicados:
-  FIX-1: _capturar_resultado() hace 10 reintentos × 2 min (20 min total)
+  FIX-1: _capturar_resultado() hace 10 reintentos × 2 min (20 min total)z
   FIX-2: Importa aprender_sorteo() desde motor_v10 directamente
   FIX-3: _procesar_sorteo() espera 8 min antes de buscar resultado
   FIX-4: ciclo_infinito() genera predicción T-5 min con importación local
