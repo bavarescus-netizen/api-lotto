@@ -111,7 +111,7 @@ async def _ejecutar_scraper(contexto: str = "") -> int:
     No lanza excepciones — falla silenciosamente con log de error.
     """
     try:
-        from app.routers.scraper import obtener_resultados_hoy, guardar_resultados
+        from app.routes.scraper import obtener_resultados_hoy, guardar_resultados
         async with AsyncSessionLocal() as db_sc:
             resultados = await obtener_resultados_hoy()
             if resultados:
