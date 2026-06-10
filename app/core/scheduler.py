@@ -153,6 +153,8 @@ async def _capturar_resultado(db: AsyncSession, hora_label: str) -> str | None:
 
     for intento in range(MAX_INTENTOS):
         try:
+            # Forzar lectura fresca desde Neon (evita caché de sesión async)
+            await db.rollback()
             row = (await db.execute(text("""
                 SELECT animalito FROM historico
                 WHERE loteria = 'Lotto Activo'
