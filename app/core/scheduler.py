@@ -2,7 +2,7 @@
 scheduler.py — Ciclo automático LOTTOAI PRO
 ============================================
 FIXES aplicados:
-  FIX-1: _capturar_resultado() hace 10 reintentos × 2 min (20 min total)z
+  FIX-1: _capturar_resultado() hace 10 reintentos × 2 min (20 min total)
   FIX-2: Importa aprender_sorteo() desde motor_v10 directamente
   FIX-3: _procesar_sorteo() espera 8 min antes de buscar resultado
   FIX-4: ciclo_infinito() genera predicción T-5 min con importación local
@@ -13,6 +13,7 @@ FIXES aplicados:
 
 import asyncio
 import logging
+import httpx
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -103,26 +104,31 @@ async def startup(db: AsyncSession):
     logger.info("✅ Startup scheduler completado")
 
 
-# ─── FIX-5: Scraper integrado ────────────────────────────────────────────────
+# ─── FIX-5: Scraper integrado vía HTTP interno ───────────────────────────────
 async def _ejecutar_scraper(contexto: str = "") -> int:
     """
-    Llama al scraper de lotoven.com y guarda los resultados en historico.
-    Retorna la cantidad de registros nuevos insertados.
-    No lanza excepciones — falla silenciosamente con log de error.
+    Llama al endpoint /cargar-ultimo vía HTTP localhost.
+    Evita problemas de import entre módulos — el scheduler llama al
+    scraper igual que un cliente externo, sin dependencia de paths.
+    Retorna cantidad de registros nuevos insertados.
     """
     try:
-        from app.routes.scraper import obtener_resultados_hoy, guardar_resultados
-        async with AsyncSessionLocal() as db_sc:
-            resultados = await obtener_resultados_hoy()
-            if resultados:
-                insertados = await guardar_resultados(db_sc, resultados)
+        async with httpx.AsyncClient(timeout=25) as client:
+            r = await client.get(
+                "http://localhost:10000/cargar-ultimo",
+                headers={"User-Agent": "scheduler-interno"}
+            )
+            if r.status_code == 200:
+                data = r.json()
+                insertados  = data.get("nuevos", 0)
+                encontrados = data.get("encontrados", 0)
                 logger.info(
                     f"🌐 Scraper [{contexto}]: "
-                    f"{len(resultados)} encontrados, {insertados} nuevos en historico"
+                    f"{encontrados} encontrados, {insertados} nuevos en historico"
                 )
                 return insertados
             else:
-                logger.warning(f"⚠️ Scraper [{contexto}]: sin resultados — lotoven puede estar lento")
+                logger.warning(f"⚠️ Scraper [{contexto}]: HTTP {r.status_code}")
                 return 0
     except Exception as e:
         logger.error(f"❌ Error en scraper [{contexto}]: {e}")
