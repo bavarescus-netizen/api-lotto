@@ -70,10 +70,14 @@ async def migrar_columnas_tentativo(db: AsyncSession):
                 aciertos_top3     INT DEFAULT 0,
                 efectividad_top1  FLOAT DEFAULT 0,
                 efectividad_top3  FLOAT DEFAULT 0,
-                es_rentable       BOOLEAN DEFAULT FALSE,
-                updated_at        TIMESTAMP DEFAULT NOW()
+                es_rentable       BOOLEAN DEFAULT FALSE
             )
         """))
+        # Migración: updated_at puede no existir en tablas ya creadas
+        await db.execute(text(
+            "ALTER TABLE rentabilidad_hora "
+            "ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
+        ))
         for hora_lbl in HORAS_SORTEO.values():
             await db.execute(text(
                 "INSERT INTO rentabilidad_hora (hora) VALUES (:h) ON CONFLICT DO NOTHING"
@@ -249,13 +253,16 @@ async def _procesar_sorteo(hora_int: int):
             logger.error(f"❌ Error verificando predicción {hora_label}: {e}")
             await db.rollback()
 
-    # ── 2. FIX-5: Llamar al scraper ANTES de esperar ─────────────────────────
-    # Así historico ya tiene el dato cuando _capturar_resultado() lo busque
+    # ── 2. Esperar 2 min para que lotoven publique el resultado ──────────────
+    logger.info(f"⏳ Esperando 2 min para que lotoven publique {hora_label}...")
+    await asyncio.sleep(120)
+
+    # ── 3. FIX-5: Scraper tras 2 min — lotoven ya debería tener el dato ──────
     await _ejecutar_scraper(contexto=f"inicial-{hora_label}")
 
-    # ── 3. FIX-3: Esperar 8 min (margen para datos tardíos en lotoven) ────────
-    logger.info(f"⏳ Esperando 8 min para datos tardíos en lotoven — {hora_label}")
-    await asyncio.sleep(480)
+    # ── 4. Esperar 6 min más por si el dato llegó tarde ───────────────────────
+    logger.info(f"⏳ Esperando 6 min adicionales por si hay retraso — {hora_label}")
+    await asyncio.sleep(360)
 
     # ── 4 + 5. Capturar resultado y aprender ─────────────────────────────────
     async with AsyncSessionLocal() as db:
@@ -299,7 +306,6 @@ async def _procesar_sorteo(hora_int: int):
                                 (rentabilidad_hora.aciertos_top3 + :ac3)::float /
                                 NULLIF(rentabilidad_hora.total_sorteos + 1, 0) * 100
                             ) >= 10.0,
-                            updated_at = NOW()
                     """), {"hora": hora_label, "ac1": ac1, "ac3": ac3})
                     await db.commit()
                 except Exception as e_rent:
