@@ -164,6 +164,7 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
+@app.api_route("/cargar-ultimo", methods=["GET", "HEAD"])
 @app.on_event("startup")
 async def iniciar_bot():
     async for db in get_db():
