@@ -1,7 +1,7 @@
 """
 MOTOR V101 — LOTTOAI PRO 
 ========================
-VERSIÓN DINÁMICA COMPLETA
+VERSIÓN DINÁMICA COMPLETA 
 Todo se lee desde la BD — sin diccionarios hardcodeados.
 Los patrones se actualizan solos con cada ENTRENAR COMPLETO.
 
