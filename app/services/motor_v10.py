@@ -1938,12 +1938,18 @@ async def generar_prediccion(db, hora: str = None) -> dict:
 
         # ── V11.2: resultado_ayer para patrones dia_siguiente ──
         ayer = hoy - timedelta(days=1)
-        res_ayer = await db.execute(text("""
-            SELECT hora, LOWER(TRIM(animalito))
-            FROM historico
-            WHERE fecha = :ayer AND loteria = 'Lotto Activo'
-        """), {"ayer": ayer})
-        resultado_ayer = {r[0]: r[1] for r in res_ayer.fetchall()}
+        try:
+            await db.rollback()  # limpiar cualquier transacción pendiente
+            res_ayer = await db.execute(text("""
+                SELECT hora, LOWER(TRIM(animalito))
+                FROM historico
+                WHERE fecha = :ayer AND loteria = 'Lotto Activo'
+            """), {"ayer": ayer})
+            resultado_ayer = {r[0]: r[1] for r in res_ayer.fetchall()}
+        except Exception as e_ayer:
+            logger.warning(f"⚠️ Error cargando resultado_ayer: {e_ayer}")
+            await db.rollback()
+            resultado_ayer = {}
 
         deuda        = await calcular_deuda(db, hora_str)
         reciente     = await calcular_frecuencia_reciente(db, hora_str)
