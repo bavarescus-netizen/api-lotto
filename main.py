@@ -168,8 +168,7 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 @app.api_route("/cargar-ultimo", methods=["GET", "HEAD"])
 @app.on_event("startup")
 async def iniciar_bot():
-    async for db in get_db():
-
+    async with AsyncSessionLocal() as db:
         await migrar_schema(db)
 
         # [FIX-5] Limpiar duplicados ANTES de aplicar constraint UNIQUE
