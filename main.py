@@ -183,16 +183,17 @@ async def iniciar_bot():
         except Exception:
             await db.rollback()
 
-        # Aplicar constraint UNIQUE (ahora sin duplicados)
+# Aplicar constraint UNIQUE (ahora sin duplicados)
         try:
             await db.execute(text("""
-              DO $$ BEGIN
-                  ALTER TABLE auditoria_ia ADD CONSTRAINT auditoria_fecha_hora_unique UNIQUE (fecha, hora);
-                  EXCEPTION WHEN duplicate_table THEN NULL;
-                  END $$;
-                  """))
-await db.commit()
-
+DO $$ BEGIN
+    ALTER TABLE auditoria_ia ADD CONSTRAINT auditoria_fecha_hora_unique UNIQUE (fecha, hora);
+EXCEPTION WHEN duplicate_table THEN NULL;
+END $$;
+"""))
+            await db.commit()
+        except Exception:
+            await db.rollback()
         # V11: migrar columnas tentativo
         try:
             from app.core.scheduler import migrar_columnas_tentativo
