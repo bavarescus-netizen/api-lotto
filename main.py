@@ -176,6 +176,22 @@ async def debug_lotoven():
         if idx == -1:
             idx = html.find("circle")
         return {"html": html[max(0, idx-200):idx+3000], "idx": idx, "total_len": len(html)}
+
+@app.get("/fix-historico-hoy")
+async def fix_historico_hoy(db: AsyncSession = Depends(get_db)):
+    """Sobrescribe historico de hoy con datos frescos del scraper."""
+    from app.routes.scraper import obtener_resultados_hoy
+    resultados = await obtener_resultados_hoy()
+    corregidos = 0
+    for r in resultados:
+        res = await db.execute(text("""
+            UPDATE historico SET animalito = :animalito
+            WHERE fecha = :fecha AND hora = :hora AND loteria = :loteria
+        """), r)
+        await db.commit()
+        if res.rowcount > 0:
+            corregidos += 1
+    return {"corregidos": corregidos, "detalle": resultados}
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
