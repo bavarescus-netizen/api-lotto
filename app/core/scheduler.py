@@ -9,6 +9,8 @@ FIXES aplicados:
   FIX-5: Scraper integrado en _procesar_sorteo() — ya no depende de llamadas externas
   FIX-6: El scheduler se detiene solo después del último sorteo del día (19:00 VET)
          para no mantener Render ni Neon activos innecesariamente
+  FIX-7: Recalibración en tiempo real — tras cada sorteo regenera predicción
+         de la hora siguiente con el último resultado aprendido
 """
 
 import asyncio
@@ -38,10 +40,10 @@ HORAS_SORTEO = {
     16: "04:00 PM",
     17: "05:00 PM",
     18: "06:00 PM",
-    19: "07:00 PM",   # ← último sorteo del día
+    19: "07:00 PM",
 }
 
-HORA_ULTIMO_SORTEO = 19   # 07:00 PM — después de procesar este, el ciclo duerme hasta el día siguiente
+HORA_ULTIMO_SORTEO = 19
 
 
 # ─── Migración de columnas tentativo ─────────────────────────────────────────
@@ -73,7 +75,6 @@ async def migrar_columnas_tentativo(db: AsyncSession):
                 es_rentable       BOOLEAN DEFAULT FALSE
             )
         """))
-        # Migración: updated_at puede no existir en tablas ya creadas
         await db.execute(text(
             "ALTER TABLE rentabilidad_hora "
             "ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"
@@ -110,12 +111,6 @@ async def startup(db: AsyncSession):
 
 # ─── FIX-5: Scraper integrado vía HTTP interno ───────────────────────────────
 async def _ejecutar_scraper(contexto: str = "") -> int:
-    """
-    Llama al endpoint /cargar-ultimo vía HTTP localhost.
-    Evita problemas de import entre módulos — el scheduler llama al
-    scraper igual que un cliente externo, sin dependencia de paths.
-    Retorna cantidad de registros nuevos insertados.
-    """
     try:
         async with httpx.AsyncClient(timeout=25) as client:
             r = await client.get(
@@ -141,19 +136,12 @@ async def _ejecutar_scraper(contexto: str = "") -> int:
 
 # ─── FIX-1: Captura con 10 reintentos × 2 min + re-scraping en 2, 5, 8 ──────
 async def _capturar_resultado(db: AsyncSession, hora_label: str) -> str | None:
-    """
-    Busca el resultado real en historico.
-    - 10 reintentos × 2 min = hasta 20 min de margen.
-    - En los intentos 2, 5 y 8 vuelve a llamar al scraper por si el dato
-      llegó tarde a lotoven.com.
-    """
     hoy = date.today()
     MAX_INTENTOS = 10
-    ESPERA_SEGUNDOS = 120  # 2 minutos
+    ESPERA_SEGUNDOS = 120
 
     for intento in range(MAX_INTENTOS):
         try:
-            # Forzar lectura fresca desde Neon (evita caché de sesión async)
             await db.rollback()
             row = (await db.execute(text("""
                 SELECT animalito FROM historico
@@ -173,7 +161,6 @@ async def _capturar_resultado(db: AsyncSession, hora_label: str) -> str | None:
             logger.warning(f"⚠️ Error consultando resultado {hora_label}: {e}")
             await db.rollback()
 
-        # Re-scraping en intentos 2, 5 y 8 para refrescar historico
         if intento in (2, 5, 8):
             await _ejecutar_scraper(contexto=f"reintento-{intento}-{hora_label}")
 
@@ -193,16 +180,8 @@ async def _capturar_resultado(db: AsyncSession, hora_label: str) -> str | None:
     return None
 
 
-# ─── FIX-2 + FIX-3 + FIX-5: Ciclo de un sorteo ──────────────────────────────
+# ─── FIX-2 + FIX-3 + FIX-5 + FIX-7: Ciclo de un sorteo ─────────────────────
 async def _procesar_sorteo(hora_int: int):
-    """
-    Flujo completo para un sorteo:
-    1. Verificar/generar predicción
-    2. Llamar al scraper para poblar historico  ← FIX-5
-    3. Esperar 8 min (margen para datos tardíos en lotoven)
-    4. Buscar resultado con 10 reintentos × 2 min (re-scraping en 2, 5, 8)
-    5. Aprender usando aprender_sorteo() de motor_v10
-    """
     hora_label = HORAS_SORTEO[hora_int]
     ahora = datetime.now(VET)
     hoy = ahora.date()
@@ -245,9 +224,7 @@ async def _procesar_sorteo(hora_int: int):
                             "rent": bool(pred.get("hora_premium", False)),
                         })
                         await db.commit()
-                        logger.info(
-                            f"📌 Predicción generada: {hora_label} → {p1}/{p2}/{p3}"
-                        )
+                        logger.info(f"📌 Predicción generada: {hora_label} → {p1}/{p2}/{p3}")
                 except Exception as e_pred:
                     logger.error(f"❌ Error generando predicción {hora_label}: {e_pred}")
                     await db.rollback()
@@ -259,20 +236,20 @@ async def _procesar_sorteo(hora_int: int):
     logger.info(f"⏳ Esperando 2 min para que lotoven publique {hora_label}...")
     await asyncio.sleep(120)
 
-    # ── 3. FIX-5: Scraper tras 2 min — lotoven ya debería tener el dato ──────
+    # ── 3. Scraper tras 2 min ─────────────────────────────────────────────────
     await _ejecutar_scraper(contexto=f"inicial-{hora_label}")
 
-    # ── 4. Esperar 6 min más por si el dato llegó tarde ───────────────────────
+    # ── 4. Esperar 6 min más por si el dato llegó tarde ──────────────────────
     logger.info(f"⏳ Esperando 6 min adicionales por si hay retraso — {hora_label}")
     await asyncio.sleep(360)
 
-    # ── 4 + 5. Capturar resultado y aprender ─────────────────────────────────
+    # ── 5. Capturar resultado, aprender y recalibrar ──────────────────────────
     async with AsyncSessionLocal() as db:
         try:
             animal_real = await _capturar_resultado(db, hora_label)
 
             if animal_real:
-                # FIX-2: aprender_sorteo de motor_v10 directamente
+                # FIX-2: aprender
                 from app.services.motor_v10 import aprender_sorteo
                 resultado = await aprender_sorteo(db, hoy, hora_label, animal_real)
                 logger.info(
@@ -315,6 +292,54 @@ async def _procesar_sorteo(hora_int: int):
                         f"⚠️ Error actualizando rentabilidad_hora {hora_label}: {e_rent}"
                     )
                     await db.rollback()
+
+                # FIX-7: Recalibrar predicción de la hora siguiente ──────────
+                hora_siguiente_int = hora_int + 1
+                if hora_siguiente_int in HORAS_SORTEO:
+                    hora_siguiente_label = HORAS_SORTEO[hora_siguiente_int]
+                    try:
+                        from app.services.motor_v10 import generar_prediccion
+                        pred_sig = await generar_prediccion(db, hora_siguiente_label)
+                        if pred_sig and pred_sig.get("top3"):
+                            top3 = pred_sig["top3"]
+                            p1 = top3[0]["animal"].lower() if len(top3) > 0 else None
+                            p2 = top3[1]["animal"].lower() if len(top3) > 1 else None
+                            p3 = top3[2]["animal"].lower() if len(top3) > 2 else None
+                            await db.execute(text("""
+                                INSERT INTO auditoria_ia
+                                    (fecha, hora, animal_predicho, prediccion_1,
+                                     prediccion_2, prediccion_3, confianza_pct,
+                                     confianza_hora, es_hora_rentable, origen)
+                                VALUES
+                                    (:fecha, :hora, :p1, :p1, :p2, :p3,
+                                     :conf, :conf_h, :rent, 'RECALIBRADA')
+                                ON CONFLICT (fecha, hora) DO UPDATE SET
+                                    prediccion_1     = EXCLUDED.prediccion_1,
+                                    prediccion_2     = EXCLUDED.prediccion_2,
+                                    prediccion_3     = EXCLUDED.prediccion_3,
+                                    animal_predicho  = EXCLUDED.animal_predicho,
+                                    confianza_pct    = EXCLUDED.confianza_pct,
+                                    confianza_hora   = EXCLUDED.confianza_hora,
+                                    es_hora_rentable = EXCLUDED.es_hora_rentable,
+                                    origen           = 'RECALIBRADA'
+                            """), {
+                                "fecha": hoy, "hora": hora_siguiente_label,
+                                "p1": p1, "p2": p2, "p3": p3,
+                                "conf": float(pred_sig.get("confianza_idx", 0)),
+                                "conf_h": float(pred_sig.get("efectividad_hora_top3", 0)),
+                                "rent": bool(pred_sig.get("hora_premium", False)),
+                            })
+                            await db.commit()
+                            logger.info(
+                                f"🔄 Predicción recalibrada tras {hora_label}: "
+                                f"{hora_siguiente_label} → {p1}/{p2}/{p3}"
+                            )
+                    except Exception as e_recal:
+                        logger.warning(
+                            f"⚠️ Error recalibrando {hora_siguiente_label}: {e_recal}"
+                        )
+                        await db.rollback()
+
             else:
                 logger.warning(
                     f"⚠️ Sin resultado para {hora_label} tras todos los reintentos — "
@@ -327,7 +352,6 @@ async def _procesar_sorteo(hora_int: int):
 
 # ─── Recalibración semanal ────────────────────────────────────────────────────
 async def _recalibrar_semanal():
-    """Cada sábado a las 20:00 VET recalcula pesos con historia completa."""
     logger.info("📊 Iniciando recalibración semanal...")
     async with AsyncSessionLocal() as db:
         try:
@@ -348,11 +372,6 @@ async def _recalibrar_semanal():
 
 # ─── FIX-6: Calcular segundos hasta el próximo día 07:55 AM VET ──────────────
 def _segundos_hasta_manana_755() -> float:
-    """
-    Calcula cuántos segundos faltan para las 07:55 AM VET del día siguiente.
-    A esa hora el ciclo se reactiva para generar la predicción tentativa
-    del primer sorteo (08:00 AM).
-    """
     ahora = datetime.now(VET)
     manana = ahora.date() + timedelta(days=1)
     despertar = datetime(
@@ -361,28 +380,14 @@ def _segundos_hasta_manana_755() -> float:
         tzinfo=VET
     )
     delta = (despertar - ahora).total_seconds()
-    return max(delta, 60)   # mínimo 1 min por seguridad
+    return max(delta, 60)
 
 
 # ─── Ciclo principal ──────────────────────────────────────────────────────────
 async def ciclo_infinito():
-    """
-    Ciclo principal del scheduler.
-
-    Flujo diario:
-    - 07:55 AM    → predicción tentativa 08:00 AM
-    - 08:00 AM    → _procesar_sorteo (scraper + captura + aprendizaje)
-    - …repite cada hora hasta…
-    - 07:00 PM    → _procesar_sorteo del último sorteo
-    - ~07:30 PM+  → FIX-6: duerme hasta las 07:55 AM del día siguiente
-                    (no consume Neon ni Render hasta entonces)
-
-    Semanal:
-    - Sábado 20:00 VET → recalibración de pesos
-    """
     logger.info(
         "🚀 Scheduler LOTTOAI iniciado — "
-        "aprendizaje automático + scraper integrado (12x/día)"
+        "aprendizaje automático + scraper integrado + recalibración en tiempo real"
     )
 
     while True:
@@ -390,7 +395,7 @@ async def ciclo_infinito():
             ahora = datetime.now(VET)
             hora_int = ahora.hour
             minuto = ahora.minute
-            dia_semana = ahora.weekday()  # 5 = sábado
+            dia_semana = ahora.weekday()
 
             # ── Recalibración semanal (sábado 20:00 VET) ──────────────────────
             if dia_semana == 5 and hora_int == 20 and minuto == 0:
@@ -403,9 +408,6 @@ async def ciclo_infinito():
                 asyncio.create_task(_procesar_sorteo(hora_int))
 
                 if hora_int == HORA_ULTIMO_SORTEO:
-                    # FIX-6: último sorteo del día procesado
-                    # Dormir hasta 07:55 AM del día siguiente para no
-                    # consumir Neon ni mantener Render activo toda la noche
                     segundos = _segundos_hasta_manana_755()
                     horas_restantes = round(segundos / 3600, 1)
                     logger.info(
@@ -414,7 +416,6 @@ async def ciclo_infinito():
                     )
                     await asyncio.sleep(segundos)
                 else:
-                    # Dormir 50 min para evitar doble disparo en el mismo sorteo
                     await asyncio.sleep(50 * 60)
 
                 continue
@@ -470,7 +471,7 @@ async def ciclo_infinito():
                         )
                         await db.rollback()
 
-            # Pulso normal cada 30 seg — solo activo entre 07:55 y ~20:30 VET
+            # Pulso normal cada 30 seg
             await asyncio.sleep(30)
 
         except Exception as e:
