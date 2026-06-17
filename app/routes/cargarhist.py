@@ -214,11 +214,11 @@ async def guardar_resultados(db: AsyncSession, resultados: list) -> int:
     insertados = 0
     for r in resultados:
         try:
-            res = await db.execute(text("""
-                INSERT INTO historico (fecha, hora, animalito, loteria)
-                VALUES (:fecha, :hora, :animalito, :loteria)
-                ON CONFLICT (fecha, hora) DO NOTHING
-            """), r)
+           res = await db.execute(text("""
+    INSERT INTO historico (fecha, hora, animalito, loteria)
+    VALUES (:fecha, :hora, :animalito, :loteria)
+    ON CONFLICT (fecha, hora) DO UPDATE SET animalito = EXCLUDED.animalito
+"""), r)
             await db.commit()
             if res.rowcount > 0:
                 insertados += 1
