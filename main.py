@@ -169,7 +169,13 @@ async def debug_lotoven():
             "https://lotoven.com/animalito/lottoactivo/resultados/",
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         )
-        return {"html": r.text[:5000]}
+        # Buscar donde están los resultados
+        html = r.text
+        # Encontrar el índice donde aparece "12:00" o "PM"
+        idx = html.find("12:00")
+        if idx == -1:
+            idx = html.find("circle")
+        return {"html": html[max(0, idx-200):idx+3000], "idx": idx, "total_len": len(html)}
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
