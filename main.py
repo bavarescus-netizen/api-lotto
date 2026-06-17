@@ -180,18 +180,73 @@ async def debug_lotoven():
 @app.get("/fix-historico-hoy")
 async def fix_historico_hoy(db: AsyncSession = Depends(get_db)):
     """Sobrescribe historico de hoy con datos frescos del scraper."""
-    from app.routes.scraper import obtener_resultados_hoy
-    resultados = await obtener_resultados_hoy()
+    import httpx
+    from bs4 import BeautifulSoup
+    import re
+    from datetime import date
+    
+    url = "https://lotoven.com/animalito/lottoactivo/resultados/"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        r = await client.get(url, headers=headers)
+        soup = BeautifulSoup(r.text, "html.parser")
+    
+    HORAS_VALIDAS = {
+        "08:00 AM","09:00 AM","10:00 AM","11:00 AM",
+        "12:00 PM","01:00 PM","02:00 PM","03:00 PM",
+        "04:00 PM","05:00 PM","06:00 PM","07:00 PM",
+    }
+    ANIMALES_VALIDOS = {
+        "ballena","toro","ciempies","chivo","tigre","leon","rana","perico",
+        "gato","raton","paloma","perro","carnero","caballo","gallo","gallina",
+        "zamuro","camello","mono","oso","alacran","iguana","vaca","lapa",
+        "ardilla","cochino","elefante","pavo","aguila","delfin","jirafa",
+        "pescado","caiman","cebra","venado","burro","zorro","culebra",
+        "cangrejo","pato","loro","conejo","tortuga","murcielago",
+    }
+    
+    hoy = date.today()
     corregidos = 0
-    for r in resultados:
+    detalle = []
+    
+    for wrapper in soup.find_all("div", class_="counter-wrapper"):
+        info2 = wrapper.find("span", class_="info2")
+        info  = wrapper.find("span", class_="info")
+        if not info2 or not info:
+            continue
+        texto_info2 = info2.get_text(strip=True)
+        if "Lotto Activo" not in texto_info2:
+            continue
+        match_hora = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', texto_info2, re.IGNORECASE)
+        if not match_hora:
+            continue
+        hora_raw = match_hora.group(1).strip().upper()
+        hora_raw = re.sub(r'\s+', ' ', hora_raw)
+        hora_raw = re.sub(r'(\d)(AM|PM)', r'\1 \2', hora_raw)
+        partes = hora_raw.split(':')
+        hora = f"{partes[0].zfill(2)}:{':'.join(partes[1:])}"
+        if hora not in HORAS_VALIDAS:
+            continue
+        texto_animal = info.get_text(strip=True).lower()
+        animal = ""
+        for palabra in reversed(texto_animal.split()):
+            if palabra in ANIMALES_VALIDOS:
+                animal = palabra
+                break
+        if not animal:
+            continue
+        
         res = await db.execute(text("""
-            UPDATE historico SET animalito = :animalito
-            WHERE fecha = :fecha AND hora = :hora AND loteria = :loteria
-        """), r)
+            UPDATE historico SET animalito = :animal
+            WHERE fecha = :fecha AND hora = :hora AND loteria = 'Lotto Activo'
+        """), {"animal": animal, "fecha": hoy, "hora": hora})
         await db.commit()
         if res.rowcount > 0:
             corregidos += 1
-    return {"corregidos": corregidos, "detalle": resultados}
+        detalle.append({"hora": hora, "animal": animal})
+    
+    return {"corregidos": corregidos, "detalle": detalle}
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
