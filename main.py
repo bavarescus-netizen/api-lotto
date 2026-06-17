@@ -161,7 +161,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/imagenes", StaticFiles(directory=os.path.join(BASE_DIR, "imagenes")), name="imagenes")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "app", "routes"))
 
-
+@app.get("/debug-lotoven")
+async def debug_lotoven():
+    import httpx
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        r = await client.get(
+            "https://lotoven.com/animalito/lottoactivo/resultados/",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        return {"html": r.text[:5000]}
 # ═══════════════════════════════════════════════════════════
 # STARTUP
 # ═══════════════════════════════════════════════════════════
