@@ -1,4 +1,4 @@
-  """
+"""
 main.py — LOTTOAI PRO V11
 ==========================
 CORRECCIONES APLICADAS:
