@@ -1,4 +1,4 @@
-"""
+  """
 main.py — LOTTOAI PRO V11
 ==========================
 CORRECCIONES APLICADAS:
@@ -186,12 +186,12 @@ async def iniciar_bot():
         # Aplicar constraint UNIQUE (ahora sin duplicados)
         try:
             await db.execute(text("""
-                ALTER TABLE auditoria_ia
-                ADD CONSTRAINT IF NOT EXISTS auditoria_fecha_hora_unique UNIQUE (fecha, hora)
-            """))
-            await db.commit()
-        except Exception:
-            await db.rollback()
+              DO $$ BEGIN
+                  ALTER TABLE auditoria_ia ADD CONSTRAINT auditoria_fecha_hora_unique UNIQUE (fecha, hora);
+                  EXCEPTION WHEN duplicate_table THEN NULL;
+                  END $$;
+                  """))
+await db.commit()
 
         # V11: migrar columnas tentativo
         try:
@@ -295,7 +295,6 @@ async def iniciar_bot():
             await db.rollback()
             logger.warning(f"Warning aprendizaje_sorteo: {e}")
 
-        break
 
     # V11.2: inicializar scheduler
     async with AsyncSessionLocal() as db_startup:
