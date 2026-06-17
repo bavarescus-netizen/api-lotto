@@ -82,40 +82,32 @@ async def obtener_resultados_hoy() -> list:
             resultados = []
 
             # Lotoven usa tabla con filas de hora + animal
-            # Buscar patrones de hora + animal en el HTML
-            # Patrón 1: divs con clase circle-legend o similar
-            for leyenda in soup.find_all(["div", "li"], class_=re.compile(r'circle|result|sorteo|animal', re.I)):
-                texto = leyenda.get_text(" ", strip=True)
-                match_hora = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', texto, re.IGNORECASE)
-                match_animal = re.search(r'\b([A-Za-záéíóúñ]{4,})\b', texto)
-                if match_hora and match_animal:
-                    hora = normalizar_hora(match_hora.group(1))
-                    animal = normalizar_animal(match_animal.group(1))
-                    if hora in HORAS_VALIDAS and animal:
-                        resultados.append({
-                            "fecha": fecha_hoy,
-                            "hora": hora,
-                            "animalito": animal,
-                            "loteria": LOTERIA
-                        })
-
-            # Patrón 2: texto plano con hora + número + animal (formato lotoven)
-            if not resultados:
-                texto_completo = soup.get_text(" ", strip=True)
-                patron = re.finditer(
-                    r'(\d{1,2}:\d{2}\s*[AP]M)\s*[·\-]?\s*\d{0,2}\s*([A-Za-záéíóúñ]{4,})',
-                    texto_completo, re.IGNORECASE
-                )
-                for m in patron:
-                    hora = normalizar_hora(m.group(1))
-                    animal = normalizar_animal(m.group(2))
-                    if hora in HORAS_VALIDAS and animal:
-                        resultados.append({
-                            "fecha": fecha_hoy,
-                            "hora": hora,
-                            "animalito": animal,
-                            "loteria": LOTERIA
-                        })
+            # Buscar patrones de hora + animal en el HTML# Patrón REAL de lotoven.com:
+            # <span class="info negro">20 Cochino</span>
+            # <span class="info2">Lotto Activo 12:00 PM</span>
+            counter_wrappers = soup.find_all("div", class_="counter-wrapper")
+            for wrapper in counter_wrappers:
+                info2 = wrapper.find("span", class_="info2")
+                info  = wrapper.find("span", class_="info")
+                if not info2 or not info:
+                    continue
+                texto_info2 = info2.get_text(strip=True)  # "Lotto Activo 12:00 PM"
+                if "Lotto Activo" not in texto_info2:
+                    continue
+                match_hora = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', texto_info2, re.IGNORECASE)
+                if not match_hora:
+                    continue
+                hora = normalizar_hora(match_hora.group(1))
+                if hora not in HORAS_VALIDAS:
+                    continue
+                animal = normalizar_animal(info.get_text(strip=True))  # "20 Cochino" → "cochino"
+                if animal:
+                    resultados.append({
+                        "fecha": fecha_hoy,
+                        "hora": hora,
+                        "animalito": animal,
+                        "loteria": LOTERIA
+                    })
 
             # Deduplicar por hora (quedarse con el primero)
             vistos = set()
