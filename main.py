@@ -13,6 +13,7 @@ CORRECCIONES APLICADAS:
 """
 
 import os, re, asyncio, datetime, logging
+logger = logging.getLogger(__name__)  # ← AÑADIR
 from fastapi import FastAPI, Request, Depends, Query, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
