@@ -818,7 +818,175 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "checks": checks
     }
 
+# ═══════════════════════════════════════════════════════════
+# V13 — ENDPOINTS PLAN DEL DÍA
+# ═══════════════════════════════════════════════════════════
 
+@app.get("/dashboard/dia")
+async def api_dashboard_dia(
+    fecha: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.services.motor_v13 import dashboard_dia, migrar_tabla_plan_dia
+    from datetime import date as _date
+    await migrar_tabla_plan_dia(db)
+    if fecha:
+        try:
+            fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+        except Exception:
+            return {"status": "error", "message": "Formato inválido. Use YYYY-MM-DD"}
+    else:
+        fecha_obj = datetime.now(ZoneInfo("America/Caracas")).date()
+    return await dashboard_dia(db, fecha_obj)
+
+
+@app.get("/plan/dia")
+async def api_plan_dia(
+    fecha: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.services.motor_v13 import generar_plan_dia, migrar_tabla_plan_dia
+    from datetime import date as _date
+    await migrar_tabla_plan_dia(db)
+    if fecha:
+        try:
+            fecha_obj = datetime.strptime(fecha, "%Y-%m-%d").date()
+        except Exception:
+            return {"status": "error", "message": "Formato inválido. Use YYYY-MM-DD"}
+    else:
+        tz = ZoneInfo("America/Caracas")
+        fecha_obj = (datetime.now(tz) + timedelta(days=1)).date()
+    return await generar_plan_dia(db, fecha_obj)
+
+
+@app.get("/historial/plan")
+async def api_historial_plan(
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+    estado: str = Query(default=None),
+    ajustada: str = Query(default=None),
+    hora: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    from app.services.motor_v13 import migrar_tabla_plan_dia
+    await migrar_tabla_plan_dia(db)
+
+    condiciones = []
+    params = {"limit": limit, "offset": offset}
+
+    if estado and estado != "todos":
+        if estado == "acierto":
+            condiciones.append("acierto_pos != 'ninguna' AND acierto_pos IS NOT NULL")
+        elif estado == "fallo":
+            condiciones.append("acierto_pos = 'ninguna'")
+        elif estado == "pendiente":
+            condiciones.append("resultado_real IS NULL")
+
+    if ajustada and ajustada != "todos":
+        if ajustada == "con":
+            condiciones.append("fue_ajustada = true")
+        elif ajustada == "sin":
+            condiciones.append("fue_ajustada = false")
+
+    if hora and hora != "todas":
+        condiciones.append("hora = :hora")
+        params["hora"] = hora
+
+    where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
+
+    try:
+        rows = (await db.execute(text(f"""
+            SELECT fecha, hora,
+                   pred1_original, pred2_original, pred3_original,
+                   pred1_ajustada, pred2_ajustada, pred3_ajustada,
+                   resultado_real, acierto_pos,
+                   fue_ajustada, motivo_ajuste,
+                   confianza, ef_hora_ponderada
+            FROM plan_dia
+            {where}
+            ORDER BY fecha DESC, hora DESC
+            LIMIT :limit OFFSET :offset
+        """), params)).fetchall()
+
+        total = (await db.execute(text(f"""
+            SELECT COUNT(*) FROM plan_dia {where}
+        """), params)).scalar() or 0
+
+        from app.services.motor_v13 import PAGO_LOTERIA
+        registros = []
+        for r in rows:
+            (fecha, hora_r, p1o, p2o, p3o,
+             p1a, p2a, p3a, resultado, pos,
+             ajustada_r, motivo, conf, ef) = r
+
+            estado_r = "pendiente"
+            ganancia = 0
+            if resultado:
+                if pos and pos != "ninguna":
+                    estado_r = f"✅ {pos}"
+                    ganancia = PAGO_LOTERIA * 100 - 100
+                else:
+                    estado_r = "❌ fallo"
+                    ganancia = -300
+
+            registros.append({
+                "fecha":          str(fecha),
+                "hora":           hora_r,
+                "pred_original":  f"{p1o}/{p2o}/{p3o}",
+                "pred_ajustada":  f"{p1a}/{p2a}/{p3a}",
+                "resultado_real": resultado or "—",
+                "estado":         estado_r,
+                "ajustada":       bool(ajustada_r),
+                "motivo":         motivo or "—",
+                "confianza":      round(float(conf or 0), 1),
+                "ef_ponderada":   round(float(ef or 0), 1),
+                "ganancia":       ganancia,
+            })
+
+        aciertos = sum(1 for r in registros if "✅" in r["estado"])
+        fallos   = sum(1 for r in registros if "❌" in r["estado"])
+        total_jugados = aciertos + fallos
+        ganancia_total = sum(r["ganancia"] for r in registros)
+
+        return {
+            "status":        "success",
+            "total":         total,
+            "limit":         limit,
+            "offset":        offset,
+            "registros":     registros,
+            "resumen": {
+                "aciertos":        aciertos,
+                "fallos":          fallos,
+                "ef_real":         round(aciertos / max(total_jugados, 1) * 100, 1),
+                "ganancia_total":  round(ganancia_total, 0),
+                "inversion_total": total_jugados * 300,
+            }
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "registros": []}
+
+
+@app.post("/ajustar-sorteo")
+async def api_ajustar_sorteo(
+    hora: str = Query(...),
+    resultado: str = Query(...),
+    fecha: str = Query(default=None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Llamar después de cada sorteo real para que V13 ajuste
+    las predicciones de las horas siguientes.
+    """
+    from app.services.motor_v13 import ajustar_tras_sorteo, migrar_tabla_plan_dia
+    await migrar_tabla_plan_dia(db)
+    fecha_override = None
+    if fecha:
+        try:
+            from datetime import date as _date
+            fecha_override = datetime.strptime(fecha, "%Y-%m-%d").date()
+        except Exception:
+            pass
+    return await ajustar_tras_sorteo(db, hora, resultado, fecha_override)
 # ═══════════════════════════════════════════════════════════
 # PREDECIR
 # ═══════════════════════════════════════════════════════════
