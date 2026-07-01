@@ -300,27 +300,37 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
     if fecha_limite is None:
         fecha_limite = date.today()
     res = await db.execute(text("""
-        WITH apariciones AS (
-            SELECT animalito, fecha,
-                LAG(fecha) OVER (PARTITION BY animalito ORDER BY fecha) AS fa
+        WITH sorteos_seq AS (
+            SELECT
+                fecha, animalito,
+                ROW_NUMBER() OVER (ORDER BY fecha ASC) AS num_sorteo
             FROM historico
             WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
         ),
-        gaps AS (SELECT animalito, (fecha-fa) AS gap FROM apariciones WHERE fa IS NOT NULL),
+        apariciones AS (
+            SELECT animalito, num_sorteo,
+                LAG(num_sorteo) OVER (PARTITION BY animalito ORDER BY num_sorteo) AS na
+            FROM sorteos_seq
+        ),
+        gaps AS (SELECT animalito, (num_sorteo-na) AS gap FROM apariciones WHERE na IS NOT NULL),
         ciclos AS (
             SELECT animalito, AVG(gap) AS ciclo, STDDEV(gap) AS varianza
             FROM gaps GROUP BY animalito HAVING COUNT(*)>=3
         ),
         ultima AS (
-            SELECT animalito, :hoy-MAX(fecha) AS dias
-            FROM historico WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
-            GROUP BY animalito
+            SELECT animalito, MAX(num_sorteo) AS ultimo_num
+            FROM sorteos_seq GROUP BY animalito
+        ),
+        total AS (
+            SELECT MAX(num_sorteo) AS total_num FROM sorteos_seq
         )
-        SELECT u.animalito, u.dias,
+        SELECT u.animalito, (t.total_num - u.ultimo_num) AS sorteos_ausente,
             ROUND(c.ciclo::numeric,1),
-            ROUND((u.dias/NULLIF(c.ciclo,0)*100)::numeric,1),
+            ROUND(((t.total_num - u.ultimo_num)::float/NULLIF(c.ciclo,0)*100)::numeric,1),
             ROUND(COALESCE(c.varianza,0)::numeric,1)
-        FROM ultima u JOIN ciclos c ON u.animalito=c.animalito
+        FROM ultima u
+        JOIN ciclos c ON u.animalito=c.animalito
+        CROSS JOIN total t
         ORDER BY 4 DESC
     """), {"hora": hora_str, "hoy": fecha_limite})
     rows = res.fetchall()
