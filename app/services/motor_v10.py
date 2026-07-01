@@ -956,26 +956,35 @@ async def calcular_ciclo_exacto(db, hora_str, fecha_limite=None):
     if fecha_limite is None:
         fecha_limite = date.today()
     res = await db.execute(text("""
-        WITH apariciones AS (
-            SELECT animalito, fecha,
-                LAG(fecha) OVER (PARTITION BY animalito ORDER BY fecha) AS fa
+        WITH sorteos_seq AS (
+            SELECT fecha, animalito,
+                ROW_NUMBER() OVER (ORDER BY fecha ASC) AS num_sorteo
             FROM historico
             WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
         ),
-        gaps AS (SELECT animalito, (fecha-fa) AS gap FROM apariciones WHERE fa IS NOT NULL),
+        apariciones AS (
+            SELECT animalito, num_sorteo,
+                LAG(num_sorteo) OVER (PARTITION BY animalito ORDER BY num_sorteo) AS na
+            FROM sorteos_seq
+        ),
+        gaps AS (SELECT animalito, (num_sorteo-na) AS gap FROM apariciones WHERE na IS NOT NULL),
         estadisticas AS (
             SELECT animalito, AVG(gap) AS ciclo_prom, MIN(gap) AS ciclo_min,
                 MAX(gap) AS ciclo_max, COUNT(*) AS n_ap
             FROM gaps GROUP BY animalito HAVING COUNT(*)>=5
         ),
-        ultima_vez AS (
-            SELECT animalito, MAX(fecha) AS ultima_fecha
-            FROM historico WHERE hora=:hora AND fecha<:hoy AND loteria='Lotto Activo'
-            GROUP BY animalito
+        ultima AS (
+            SELECT animalito, MAX(num_sorteo) AS ultimo_num
+            FROM sorteos_seq GROUP BY animalito
+        ),
+        total AS (
+            SELECT MAX(num_sorteo) AS total_num FROM sorteos_seq
         )
         SELECT e.animalito, e.ciclo_prom, e.ciclo_min, e.ciclo_max,
-            e.n_ap, (:hoy - u.ultima_fecha) AS dias_aus
-        FROM estadisticas e JOIN ultima_vez u ON e.animalito=u.animalito
+            e.n_ap, (t.total_num - u.ultimo_num) AS sorteos_ausente
+        FROM estadisticas e
+        JOIN ultima u ON e.animalito=u.animalito
+        CROSS JOIN total t
     """), {"hora": hora_str, "hoy": fecha_limite})
     rows = res.fetchall()
     resultado = {}
@@ -983,8 +992,8 @@ async def calcular_ciclo_exacto(db, hora_str, fecha_limite=None):
         animal    = _normalizar(r[0])
         ciclo_prom = float(r[1])
         n_ap      = int(r[4])
-        dias_aus  = int(r[5])
-        pct_ciclo = dias_aus / ciclo_prom if ciclo_prom > 0 else 0
+        sorteos_aus = int(r[5])
+        pct_ciclo = sorteos_aus / ciclo_prom if ciclo_prom > 0 else 0
 
         if pct_ciclo < 0.5:      score = 0.05
         elif pct_ciclo < 0.8:    score = 0.3 + (pct_ciclo - 0.5) * 1.5
@@ -996,10 +1005,10 @@ async def calcular_ciclo_exacto(db, hora_str, fecha_limite=None):
         resultado[animal] = {
             "score": round(score * (0.7 + 0.3 * confiabilidad), 4),
             "ciclo_prom_dias": round(ciclo_prom, 1),
-            "dias_ausente": dias_aus,
+            "dias_ausente": sorteos_aus,
             "pct_ciclo": round(pct_ciclo * 100, 1),
             "n_apariciones": n_ap,
-            "ventana": f"{round(float(r[2]),0)}-{round(float(r[3]),0)} días",
+            "ventana": f"{round(float(r[2]),0)}-{round(float(r[3]),0)} sorteos",
         }
     return resultado
 
