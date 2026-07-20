@@ -352,7 +352,52 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
             }
     return resultado
 
+async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
+    """Devuelve {animal: factor} basado en precisión histórica real."""
+    query = text("""
+        SELECT 
+            animal,
+            COUNT(*) FILTER (WHERE acertado = true) AS aciertos,
+            COUNT(*) AS veces_predicho
+        FROM predicciones
+        GROUP BY animal
+    """)
+    result = await db.execute(query)
+    factores = {}
+    for row in result:
+        # suavizado bayesiano: arranca en la media global (0.064) y se ajusta con evidencia
+        factores[row.animal] = (row.aciertos + 2.0) / (row.veces_predicho + 2.0 / 0.064)
+    return factores
 
+async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
+    """Devuelve {animal: penalizacion} para animales con 4+ fallos seguidos como PRED1 en esa hora."""
+    query = text("""
+        WITH top_pred AS (
+          SELECT DISTINCT ON (fecha, hora) fecha, hora, animal, acertado
+          FROM predicciones
+          WHERE hora = :hora
+          ORDER BY fecha, hora, score DESC
+        ),
+        ordenado AS (
+          SELECT animal, fecha, acertado,
+            ROW_NUMBER() OVER (PARTITION BY animal ORDER BY fecha) 
+              - ROW_NUMBER() OVER (PARTITION BY animal, acertado ORDER BY fecha) AS grupo
+          FROM top_pred
+        )
+        SELECT animal, COUNT(*) AS racha, MAX(fecha) AS ultima_fecha
+        FROM ordenado
+        WHERE acertado = false
+        GROUP BY animal, grupo
+        HAVING COUNT(*) >= 4
+    """)
+    result = await db.execute(query, {"hora": hora})
+    penalizaciones = {}
+    fecha_max_query = await db.execute(text("SELECT MAX(fecha) FROM predicciones WHERE hora = :hora"), {"hora": hora})
+    fecha_max = fecha_max_query.scalar()
+    for row in result:
+        if row.ultima_fecha == fecha_max:  # solo si la racha sigue activa hoy
+            penalizaciones[row.animal] = 0.5 ** (row.racha - 3)
+    return penalizaciones
 # ══════════════════════════════════════════════════════
 # SEÑAL 2: FRECUENCIA RECIENTE
 # ══════════════════════════════════════════════════════
