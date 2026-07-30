@@ -11,6 +11,10 @@ FIXES aplicados:
          para no mantener Render ni Neon activos innecesariamente
   FIX-7: Recalibración en tiempo real — tras cada sorteo regenera predicción
          de la hora siguiente con el último resultado aprendido
+  FIX-8: Referencia fuerte a tareas asyncio.create_task() (evita que el
+         garbage collector las destruya a mitad de camino sin excepción
+         visible — causa raíz de los huecos intermitentes en auditoria_ia
+         detectados entre el 20 y el 29 de julio de 2026)
 """
 
 import asyncio
@@ -44,6 +48,29 @@ HORAS_SORTEO = {
 }
 
 HORA_ULTIMO_SORTEO = 19
+
+
+# ─── FIX-8: Referencia fuerte a tareas asyncio (evita que el GC las mate) ────
+_tareas_en_curso: set[asyncio.Task] = set()
+
+def _lanzar_tarea(coro):
+    """Crea una tarea y mantiene una referencia fuerte para que asyncio
+    no la destruya a mitad de camino. Sin esto, create_task() suelto
+    solo tiene una referencia débil y puede ser recolectado por el GC
+    antes de terminar, matando la tarea sin ninguna excepción visible."""
+    task = asyncio.create_task(coro)
+    _tareas_en_curso.add(task)
+
+    def _on_done(t: asyncio.Task):
+        _tareas_en_curso.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc:
+            logger.error(f"❌ Tarea terminó con excepción no capturada: {exc}")
+
+    task.add_done_callback(_on_done)
+    return task
 
 
 # ─── Migración de columnas tentativo ─────────────────────────────────────────
@@ -284,7 +311,7 @@ async def _procesar_sorteo(hora_int: int):
                             es_rentable = (
                                 (rentabilidad_hora.aciertos_top3 + :ac3)::float /
                                 NULLIF(rentabilidad_hora.total_sorteos + 1, 0) * 100
-                            ) >= 10.0,
+                            ) >= 10.0
                     """), {"hora": hora_label, "ac1": ac1, "ac3": ac3})
                     await db.commit()
                 except Exception as e_rent:
@@ -399,13 +426,13 @@ async def ciclo_infinito():
 
             # ── Recalibración semanal (sábado 20:00 VET) ──────────────────────
             if dia_semana == 5 and hora_int == 20 and minuto == 0:
-                asyncio.create_task(_recalibrar_semanal())
+                _lanzar_tarea(_recalibrar_semanal())
                 await asyncio.sleep(60)
                 continue
 
             # ── Sorteos: activar proceso en el minuto exacto ──────────────────
             if hora_int in HORAS_SORTEO and minuto == 0:
-                asyncio.create_task(_procesar_sorteo(hora_int))
+                _lanzar_tarea(_procesar_sorteo(hora_int))
 
                 if hora_int == HORA_ULTIMO_SORTEO:
                     segundos = _segundos_hasta_manana_755()
