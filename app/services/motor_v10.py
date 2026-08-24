@@ -353,8 +353,13 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
     return resultado
 
 async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
-    """Devuelve {animal: factor} basado en precisión histórica real,
-    usando auditoria_ia (la tabla que el scheduler sí llena cada hora)."""
+    """Devuelve {animal: factor} basado en precisión histórica real.
+    FIX (ago 2026): la versión original leía de 'predicciones', una tabla
+    que nunca recibe INSERTs en todo el codebase — siempre devolvía {}.
+    Esta versión lee de 'auditoria_ia', que sí se llena cada hora desde
+    el scheduler (generar_prediccion). Cada una de prediccion_1/2/3 cuenta
+    como un intento; se compara contra resultado_real en minúscula/trim
+    para evitar problemas de casing."""
     query = text("""
         WITH candidatos AS (
             SELECT fecha, hora, LOWER(TRIM(prediccion_1)) AS animal
@@ -384,13 +389,15 @@ async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
     result = await db.execute(query)
     factores = {}
     for row in result:
+        # suavizado bayesiano: arranca en la media global (0.064) y se ajusta con evidencia
         factores[row.animal] = (row.aciertos + 2.0) / (row.veces_predicho + 2.0 / 0.064)
     return factores
 
-
 async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
-    """Penaliza animales con 4+ fallos seguidos como PRED1 en una hora,
-    usando auditoria_ia."""
+    """Devuelve {animal: penalizacion} para animales con 4+ fallos seguidos
+    como PRED1 en esa hora. FIX (ago 2026): reescrita para usar
+    'auditoria_ia' (prediccion_1 / resultado_real) en vez de 'predicciones',
+    que nunca se llenaba — ver nota en calcular_factor_confiabilidad()."""
     query = text("""
         WITH top_pred AS (
             SELECT fecha, hora,
@@ -420,7 +427,7 @@ async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
     )
     fecha_max = fecha_max_query.scalar()
     for row in result:
-        if row.ultima_fecha == fecha_max:
+        if row.ultima_fecha == fecha_max:  # solo si la racha sigue activa hoy
             penalizaciones[row.animal] = 0.5 ** (row.racha - 3)
     return penalizaciones
 # ══════════════════════════════════════════════════════
@@ -2081,6 +2088,21 @@ async def generar_prediccion(db, hora: str = None) -> dict:
             animal: score * _pen_dia_actual.get(animal, 1.0)
             for animal, score in scores_raw.items()
         }
+
+        # ── FIX (ago 2026): factor de confiabilidad histórica + penalización
+        # de racha — antes se calculaban pero nunca se aplicaban al score.
+        # Baja automáticamente a animales que el motor sobrepredice sin que
+        # acierten (ej. lapa, delfin, alacran) y sube a los que sí acierta
+        # con frecuencia pero el motor ignoraba (ej. carnero). ──
+        try:
+            factor_confiab = await calcular_factor_confiabilidad(db)
+            pen_racha      = await calcular_penalizacion_racha(db, hora_str)
+            scores = {
+                animal: score * factor_confiab.get(animal, 1.0) * pen_racha.get(animal, 1.0)
+                for animal, score in scores.items()
+            }
+        except Exception as e_conf:
+            logger.warning(f"⚠️ Error aplicando factor_confiabilidad/racha: {e_conf}")
 
         racha_fallos = 0
         ef_top3_reciente = None
