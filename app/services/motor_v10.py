@@ -353,36 +353,59 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
     return resultado
 
 async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
-    """Devuelve {animal: factor} basado en precisión histórica real."""
+    """Devuelve {animal: factor} basado en precisión histórica real,
+    usando auditoria_ia (la tabla que el scheduler sí llena cada hora)."""
     query = text("""
-        SELECT 
-            animal,
-            COUNT(*) FILTER (WHERE acertado = true) AS aciertos,
-            COUNT(*) AS veces_predicho
-        FROM predicciones
-        GROUP BY animal
+        WITH candidatos AS (
+            SELECT fecha, hora, LOWER(TRIM(prediccion_1)) AS animal
+            FROM auditoria_ia
+            WHERE prediccion_1 IS NOT NULL
+              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
+            UNION ALL
+            SELECT fecha, hora, LOWER(TRIM(prediccion_2))
+            FROM auditoria_ia
+            WHERE prediccion_2 IS NOT NULL
+              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
+            UNION ALL
+            SELECT fecha, hora, LOWER(TRIM(prediccion_3))
+            FROM auditoria_ia
+            WHERE prediccion_3 IS NOT NULL
+              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
+        )
+        SELECT c.animal,
+               COUNT(*) FILTER (
+                   WHERE c.animal = LOWER(TRIM(a.resultado_real))
+               ) AS aciertos,
+               COUNT(*) AS veces_predicho
+        FROM candidatos c
+        JOIN auditoria_ia a ON a.fecha = c.fecha AND a.hora = c.hora
+        GROUP BY c.animal
     """)
     result = await db.execute(query)
     factores = {}
     for row in result:
-        # suavizado bayesiano: arranca en la media global (0.064) y se ajusta con evidencia
         factores[row.animal] = (row.aciertos + 2.0) / (row.veces_predicho + 2.0 / 0.064)
     return factores
 
+
 async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
-    """Devuelve {animal: penalizacion} para animales con 4+ fallos seguidos como PRED1 en esa hora."""
+    """Penaliza animales con 4+ fallos seguidos como PRED1 en una hora,
+    usando auditoria_ia."""
     query = text("""
         WITH top_pred AS (
-          SELECT DISTINCT ON (fecha, hora) fecha, hora, animal, acertado
-          FROM predicciones
-          WHERE hora = :hora
-          ORDER BY fecha, hora, score DESC
+            SELECT fecha, hora,
+                   LOWER(TRIM(prediccion_1)) AS animal,
+                   (LOWER(TRIM(prediccion_1)) = LOWER(TRIM(resultado_real))) AS acertado
+            FROM auditoria_ia
+            WHERE hora = :hora
+              AND prediccion_1 IS NOT NULL
+              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
         ),
         ordenado AS (
-          SELECT animal, fecha, acertado,
-            ROW_NUMBER() OVER (PARTITION BY animal ORDER BY fecha) 
-              - ROW_NUMBER() OVER (PARTITION BY animal, acertado ORDER BY fecha) AS grupo
-          FROM top_pred
+            SELECT animal, fecha, acertado,
+                ROW_NUMBER() OVER (PARTITION BY animal ORDER BY fecha)
+                  - ROW_NUMBER() OVER (PARTITION BY animal, acertado ORDER BY fecha) AS grupo
+            FROM top_pred
         )
         SELECT animal, COUNT(*) AS racha, MAX(fecha) AS ultima_fecha
         FROM ordenado
@@ -392,10 +415,12 @@ async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
     """)
     result = await db.execute(query, {"hora": hora})
     penalizaciones = {}
-    fecha_max_query = await db.execute(text("SELECT MAX(fecha) FROM predicciones WHERE hora = :hora"), {"hora": hora})
+    fecha_max_query = await db.execute(
+        text("SELECT MAX(fecha) FROM auditoria_ia WHERE hora = :hora"), {"hora": hora}
+    )
     fecha_max = fecha_max_query.scalar()
     for row in result:
-        if row.ultima_fecha == fecha_max:  # solo si la racha sigue activa hoy
+        if row.ultima_fecha == fecha_max:
             penalizaciones[row.animal] = 0.5 ** (row.racha - 3)
     return penalizaciones
 # ══════════════════════════════════════════════════════
