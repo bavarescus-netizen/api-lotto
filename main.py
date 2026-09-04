@@ -750,10 +750,21 @@ async def ultimos(limit: int = Query(default=15), db: AsyncSession = Depends(get
 
 
 # ═══════════════════════════════════════════════════════════
-# HEALTH
+# HEALTH — liveness puro, SIN tocar Neon. Esto es lo que golpea
+# el cron de uptime cada 10 min; debe ser instantáneo y gratis.
 # ═══════════════════════════════════════════════════════════
 @app.get("/health")
-async def health_check(db: AsyncSession = Depends(get_db)):
+async def health_check():
+    return {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════════════
+# DIAGNOSTICO — el chequeo completo (markov, pesos, aprendizaje,
+# efectividad). Úsalo tú manualmente cuando quieras revisar el
+# estado del motor. NUNCA lo apuntes desde el cron de uptime.
+# ═══════════════════════════════════════════════════════════
+@app.get("/diagnostico")
+async def diagnostico_completo(db: AsyncSession = Depends(get_db)):
     from zoneinfo import ZoneInfo
     ahora = datetime.datetime.now(ZoneInfo("America/Caracas"))
     hoy = ahora.date()
@@ -817,7 +828,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         "hora": ahora.strftime("%H:%M:%S"),
         "checks": checks
     }
-
 # ═══════════════════════════════════════════════════════════
 # V13 — ENDPOINTS PLAN DEL DÍA
 # ═══════════════════════════════════════════════════════════
