@@ -1,0 +1,14 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Cada 5 min, de 12:00 a 23:59 UTC = 8am-7:59pm hora de Venezuela (UTC-4)
+    - cron: '*/5 12-23 * * *'
+  workflow_dispatch:  # permite lanzarlo manualmente para probar
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -f https://api-lotto-goj5.onrender.com/health
