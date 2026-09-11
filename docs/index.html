@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>LottoAI - Redirigiendo</title>
+</head>
+<body>
+  <p id="msg">Detectando servidor activo...</p>
+  <script>
+    const SERVIDOR_A = "https://api-lotto-goj5.onrender.com";  // activo 28 al 9
+    const SERVIDOR_B = "https://api-lotto-kkkm.onrender.com";  // activo 10 al 27
+
+    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Caracas" }));
+    const dia = ahora.getDate();
+
+    const destino = (dia >= 10 && dia <= 27) ? SERVIDOR_B : SERVIDOR_A;
+
+    document.getElementById("msg").innerText = "Redirigiendo a: " + destino;
+    window.location.href = destino;
+  </script>
+</body>
+</html>
