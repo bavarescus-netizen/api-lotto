@@ -2,13 +2,41 @@ name: Keep Render Alive
 
 on:
   schedule:
-    # Cada 5 min, de 12:00 a 23:59 UTC = 8am-7:59pm hora de Venezuela (UTC-4)
-    - cron: '*/5 12-23 * * *'
-  workflow_dispatch:  # permite lanzarlo manualmente para probar
+    - cron: '*/7 * * * *'
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping health endpoint
-        run: curl -f https://api-lotto-goj5.onrender.com/health
+      - name: Ping servidores según turno y ventana de transición
+        run: |
+          export TZ="America/Caracas"
+          DIA=$(date +%-d)
+          HORA=$(date +%-H)
+          A="https://api-lotto-goj5.onrender.com/health"
+          B="https://api-lotto-kkkm.onrender.com/health"
+
+          PING_A=false
+          PING_B=false
+
+          if [ "$DIA" -ge 10 ] && [ "$DIA" -le 26 ]; then
+            PING_B=true
+          elif [ "$DIA" -eq 27 ]; then
+            PING_B=true
+            if [ "$HORA" -ge 22 ]; then PING_A=true; fi
+          elif [ "$DIA" -eq 9 ]; then
+            PING_A=true
+            if [ "$HORA" -ge 22 ]; then PING_B=true; fi
+          else
+            PING_A=true
+          fi
+
+          if [ "$PING_A" = true ]; then
+            echo "→ Ping Servidor A"
+            curl -f "$A" || echo "⚠️ A no respondió"
+          fi
+          if [ "$PING_B" = true ]; then
+            echo "→ Ping Servidor B"
+            curl -f "$B" || echo "⚠️ B no respondió"
+          fi
