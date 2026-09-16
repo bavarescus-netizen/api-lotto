@@ -279,6 +279,21 @@ async def _procesar_sorteo(hora_int: int):
                 # FIX-2: aprender
                 from app.services.motor_v10 import aprender_sorteo
                 resultado = await aprender_sorteo(db, hoy, hora_label, animal_real)
+
+                # FIX-9: si aprender_sorteo() ya había sido procesado por otra
+                # instancia (Servidor A / Servidor B corriendo en paralelo por
+                # un solape de rotación), viene con status "skip" — en ese caso
+                # NO hay que tocar rentabilidad_hora ni recalibrar de nuevo,
+                # porque inflaría total_sorteos con un "fallo" falso cada vez
+                # que las dos instancias procesan el mismo sorteo.
+                if resultado.get("status") == "skip":
+                    logger.info(
+                        f"⏭️ {hora_label} ya fue aprendido por otra instancia "
+                        f"({resultado.get('message')}) — omitiendo rentabilidad_hora "
+                        f"y recalibración para no duplicar el conteo"
+                    )
+                    return
+
                 logger.info(
                     f"🧠 Aprendizaje {hora_label}: "
                     f"real={animal_real} "
