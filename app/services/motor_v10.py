@@ -354,12 +354,9 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
 
 async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
     """Devuelve {animal: factor} basado en precisión histórica real.
-    FIX (ago 2026): la versión original leía de 'predicciones', una tabla
-    que nunca recibe INSERTs en todo el codebase — siempre devolvía {}.
-    Esta versión lee de 'auditoria_ia', que sí se llena cada hora desde
-    el scheduler (generar_prediccion). Cada una de prediccion_1/2/3 cuenta
-    como un intento; se compara contra resultado_real en minúscula/trim
-    para evitar problemas de casing."""
+    FIX (sep 2026): lee de 'auditoria_ia' — la tabla que el scheduler sí
+    llena cada hora — en vez de 'predicciones', que nunca recibe INSERTs
+    en todo el codebase y siempre devolvía {} (sin efecto real)."""
     query = text("""
         WITH candidatos AS (
             SELECT fecha, hora, LOWER(TRIM(prediccion_1)) AS animal
@@ -394,10 +391,12 @@ async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
     return factores
 
 async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
-    """Devuelve {animal: penalizacion} para animales con 4+ fallos seguidos
-    como PRED1 en esa hora. FIX (ago 2026): reescrita para usar
-    'auditoria_ia' (prediccion_1 / resultado_real) en vez de 'predicciones',
-    que nunca se llenaba — ver nota en calcular_factor_confiabilidad()."""
+    """Devuelve {animal: penalizacion} para animales con 3+ fallos seguidos
+    como PRED1 en esa hora. FIX (sep 2026): lee de 'auditoria_ia' en vez de
+    'predicciones' (tabla muerta). Umbral bajado de 4 a 3 fallos seguidos
+    para que reaccione más rápido ante rachas frías reales (ej. CARNERO,
+    ARDILLA, BALLENA en sep 2026 — sin respaldo histórico ni reciente,
+    confirmado con datos de historico 2018-2025 contra señal_dominante)."""
     query = text("""
         WITH top_pred AS (
             SELECT fecha, hora,
@@ -418,7 +417,7 @@ async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
         FROM ordenado
         WHERE acertado = false
         GROUP BY animal, grupo
-        HAVING COUNT(*) >= 4
+        HAVING COUNT(*) >= 3
     """)
     result = await db.execute(query, {"hora": hora})
     penalizaciones = {}
@@ -428,7 +427,7 @@ async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
     fecha_max = fecha_max_query.scalar()
     for row in result:
         if row.ultima_fecha == fecha_max:  # solo si la racha sigue activa hoy
-            penalizaciones[row.animal] = 0.5 ** (row.racha - 3)
+            penalizaciones[row.animal] = 0.5 ** (row.racha - 2)
     return penalizaciones
 # ══════════════════════════════════════════════════════
 # SEÑAL 2: FRECUENCIA RECIENTE
@@ -2089,11 +2088,12 @@ async def generar_prediccion(db, hora: str = None) -> dict:
             for animal, score in scores_raw.items()
         }
 
-        # ── FIX (ago 2026): factor de confiabilidad histórica + penalización
-        # de racha — antes se calculaban pero nunca se aplicaban al score.
-        # Baja automáticamente a animales que el motor sobrepredice sin que
-        # acierten (ej. lapa, delfin, alacran) y sube a los que sí acierta
-        # con frecuencia pero el motor ignoraba (ej. carnero). ──
+        # ── FIX (sep 2026): factor de confiabilidad histórica + penalización
+        # de racha — antes se calculaban pero nunca se aplicaban al score
+        # (leían de una tabla muerta y no estaban conectadas). Baja
+        # automáticamente a animales sobrepredichos sin respaldo real
+        # (ej. carnero, ardilla, ballena) y sube a los subpredichos que sí
+        # acertaban con frecuencia. ──
         try:
             factor_confiab = await calcular_factor_confiabilidad(db)
             pen_racha      = await calcular_penalizacion_racha(db, hora_str)
