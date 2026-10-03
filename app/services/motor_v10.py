@@ -235,9 +235,17 @@ async def cargar_config_dinamica(db) -> dict:
 # PESOS POR HORA — lee motor_pesos_hora
 # ══════════════════════════════════════════════════════
 async def obtener_pesos_para_hora(db, hora_str: str) -> dict:
+    """FIX (oct 2026): el mapeo columna→señal estaba desalineado con lo que
+    la función de escritura (aprender_sorteo, sección 9) realmente guarda:
+    peso_decay=anti, peso_markov=secuencia, peso_gap=deuda, peso_reciente=
+    reciente. Antes, esta función devolvía 'patron' leyendo de peso_markov
+    (que en realidad es secuencia) y dejaba 'secuencia' fija en 0.10 sin
+    leer nada de la BD — con eso, 'secuencia' nunca aprendía y 'patron'
+    tomaba el valor equivocado. Ahora se lee cada señal de la columna que
+    de verdad la contiene, y 'patron' usa su propia columna (peso_patron)."""
     try:
         res = await db.execute(text("""
-            SELECT peso_decay, peso_markov, peso_gap, peso_reciente
+            SELECT peso_decay, peso_markov, peso_gap, peso_reciente, peso_patron
             FROM motor_pesos_hora
             WHERE hora = :hora
             ORDER BY generacion DESC LIMIT 1
@@ -247,9 +255,9 @@ async def obtener_pesos_para_hora(db, hora_str: str) -> dict:
             return {
                 "reciente":  float(row[3] or 0.25),
                 "deuda":     float(row[2] or 0.25),
-                "anti":      float(row[0] or 0.25),
-                "patron":    float(row[1] or 0.15),
-                "secuencia": 0.10,
+                "anti":      float(row[0] or 0.22),
+                "secuencia": float(row[1] or 0.24),
+                "patron":    float(row[4] or 0.15),
             }
     except Exception:
         pass
@@ -353,35 +361,14 @@ async def calcular_deuda(db, hora_str, fecha_limite=None):
     return resultado
 
 async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
-    """Devuelve {animal: factor} basado en precisión histórica real.
-    FIX (sep 2026): lee de 'auditoria_ia' — la tabla que el scheduler sí
-    llena cada hora — en vez de 'predicciones', que nunca recibe INSERTs
-    en todo el codebase y siempre devolvía {} (sin efecto real)."""
+    """Devuelve {animal: factor} basado en precisión histórica real."""
     query = text("""
-        WITH candidatos AS (
-            SELECT fecha, hora, LOWER(TRIM(prediccion_1)) AS animal
-            FROM auditoria_ia
-            WHERE prediccion_1 IS NOT NULL
-              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
-            UNION ALL
-            SELECT fecha, hora, LOWER(TRIM(prediccion_2))
-            FROM auditoria_ia
-            WHERE prediccion_2 IS NOT NULL
-              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
-            UNION ALL
-            SELECT fecha, hora, LOWER(TRIM(prediccion_3))
-            FROM auditoria_ia
-            WHERE prediccion_3 IS NOT NULL
-              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
-        )
-        SELECT c.animal,
-               COUNT(*) FILTER (
-                   WHERE c.animal = LOWER(TRIM(a.resultado_real))
-               ) AS aciertos,
-               COUNT(*) AS veces_predicho
-        FROM candidatos c
-        JOIN auditoria_ia a ON a.fecha = c.fecha AND a.hora = c.hora
-        GROUP BY c.animal
+        SELECT 
+            animal,
+            COUNT(*) FILTER (WHERE acertado = true) AS aciertos,
+            COUNT(*) AS veces_predicho
+        FROM predicciones
+        GROUP BY animal
     """)
     result = await db.execute(query)
     factores = {}
@@ -391,43 +378,33 @@ async def calcular_factor_confiabilidad(db: AsyncSession) -> dict:
     return factores
 
 async def calcular_penalizacion_racha(db: AsyncSession, hora: str) -> dict:
-    """Devuelve {animal: penalizacion} para animales con 3+ fallos seguidos
-    como PRED1 en esa hora. FIX (sep 2026): lee de 'auditoria_ia' en vez de
-    'predicciones' (tabla muerta). Umbral bajado de 4 a 3 fallos seguidos
-    para que reaccione más rápido ante rachas frías reales (ej. CARNERO,
-    ARDILLA, BALLENA en sep 2026 — sin respaldo histórico ni reciente,
-    confirmado con datos de historico 2018-2025 contra señal_dominante)."""
+    """Devuelve {animal: penalizacion} para animales con 4+ fallos seguidos como PRED1 en esa hora."""
     query = text("""
         WITH top_pred AS (
-            SELECT fecha, hora,
-                   LOWER(TRIM(prediccion_1)) AS animal,
-                   (LOWER(TRIM(prediccion_1)) = LOWER(TRIM(resultado_real))) AS acertado
-            FROM auditoria_ia
-            WHERE hora = :hora
-              AND prediccion_1 IS NOT NULL
-              AND resultado_real IS NOT NULL AND resultado_real <> 'PENDIENTE'
+          SELECT DISTINCT ON (fecha, hora) fecha, hora, animal, acertado
+          FROM predicciones
+          WHERE hora = :hora
+          ORDER BY fecha, hora, score DESC
         ),
         ordenado AS (
-            SELECT animal, fecha, acertado,
-                ROW_NUMBER() OVER (PARTITION BY animal ORDER BY fecha)
-                  - ROW_NUMBER() OVER (PARTITION BY animal, acertado ORDER BY fecha) AS grupo
-            FROM top_pred
+          SELECT animal, fecha, acertado,
+            ROW_NUMBER() OVER (PARTITION BY animal ORDER BY fecha) 
+              - ROW_NUMBER() OVER (PARTITION BY animal, acertado ORDER BY fecha) AS grupo
+          FROM top_pred
         )
         SELECT animal, COUNT(*) AS racha, MAX(fecha) AS ultima_fecha
         FROM ordenado
         WHERE acertado = false
         GROUP BY animal, grupo
-        HAVING COUNT(*) >= 3
+        HAVING COUNT(*) >= 4
     """)
     result = await db.execute(query, {"hora": hora})
     penalizaciones = {}
-    fecha_max_query = await db.execute(
-        text("SELECT MAX(fecha) FROM auditoria_ia WHERE hora = :hora"), {"hora": hora}
-    )
+    fecha_max_query = await db.execute(text("SELECT MAX(fecha) FROM predicciones WHERE hora = :hora"), {"hora": hora})
     fecha_max = fecha_max_query.scalar()
     for row in result:
         if row.ultima_fecha == fecha_max:  # solo si la racha sigue activa hoy
-            penalizaciones[row.animal] = 0.5 ** (row.racha - 2)
+            penalizaciones[row.animal] = 0.5 ** (row.racha - 3)
     return penalizaciones
 # ══════════════════════════════════════════════════════
 # SEÑAL 2: FRECUENCIA RECIENTE
@@ -2088,22 +2065,6 @@ async def generar_prediccion(db, hora: str = None) -> dict:
             for animal, score in scores_raw.items()
         }
 
-        # ── FIX (sep 2026): factor de confiabilidad histórica + penalización
-        # de racha — antes se calculaban pero nunca se aplicaban al score
-        # (leían de una tabla muerta y no estaban conectadas). Baja
-        # automáticamente a animales sobrepredichos sin respaldo real
-        # (ej. carnero, ardilla, ballena) y sube a los subpredichos que sí
-        # acertaban con frecuencia. ──
-        try:
-            factor_confiab = await calcular_factor_confiabilidad(db)
-            pen_racha      = await calcular_penalizacion_racha(db, hora_str)
-            scores = {
-                animal: score * factor_confiab.get(animal, 1.0) * pen_racha.get(animal, 1.0)
-                for animal, score in scores.items()
-            }
-        except Exception as e_conf:
-            logger.warning(f"⚠️ Error aplicando factor_confiabilidad/racha: {e_conf}")
-
         racha_fallos = 0
         ef_top3_reciente = None
         try:
@@ -3341,23 +3302,30 @@ async def aprender_sorteo(db, fecha, hora: str, animal_real: str) -> dict:
         })
       
         # 9. Actualizar motor_pesos_hora
+        # FIX (oct 2026): se agrega peso_patron (antes esa señal se perdía
+        # por completo — nunca se guardaba en ningún lado). El resto de las
+        # columnas conserva su nombre original en la tabla (peso_decay,
+        # peso_markov, peso_gap) pero ahora el mapeo escribe y lee la misma
+        # señal consistentemente en cada una (ver obtener_pesos_para_hora).
         await db.execute(text("""
             INSERT INTO motor_pesos_hora
                 (hora, generacion, peso_decay, peso_markov, peso_gap, peso_reciente,
-                 efectividad, total_evaluados, aciertos_top3)
-            VALUES (:hora, :gen, :anti, :markov, :deuda, :rec, 0, 0, 0)
+                 peso_patron, efectividad, total_evaluados, aciertos_top3)
+            VALUES (:hora, :gen, :anti, :secuencia, :deuda, :rec, :patron, 0, 0, 0)
             ON CONFLICT (hora, generacion) DO UPDATE SET
                 peso_decay    = EXCLUDED.peso_decay,
                 peso_markov   = EXCLUDED.peso_markov,
                 peso_gap      = EXCLUDED.peso_gap,
                 peso_reciente = EXCLUDED.peso_reciente,
+                peso_patron   = EXCLUDED.peso_patron,
                 fecha         = NOW()
         """), {
-            "hora":   hora, "gen": generacion,
-            "anti":   pesos_despues.get("anti",      0.22),
-            "markov": pesos_despues.get("secuencia", 0.24),
-            "deuda":  pesos_despues.get("deuda",     0.20),
-            "rec":    pesos_despues.get("reciente",  0.20),
+            "hora":      hora, "gen": generacion,
+            "anti":      pesos_despues.get("anti",      0.22),
+            "secuencia": pesos_despues.get("secuencia", 0.24),
+            "deuda":     pesos_despues.get("deuda",     0.15),
+            "rec":       pesos_despues.get("reciente",  0.20),
+            "patron":    pesos_despues.get("patron",    0.15),
         })
         await db.commit()
 
