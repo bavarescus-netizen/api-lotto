@@ -3,777 +3,409 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOTTOAI — Paper Trading Tracker</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<title>LOTTOAI — Paper trading</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#07080d;
-  --panel:#0d0f17;
-  --panel2:#11131f;
-  --border:#1a1d2e;
-  --border2:#232640;
-  --g:#00e87a;
-  --g2:rgba(0,232,122,.1);
-  --r:#ff3355;
-  --r2:rgba(255,51,85,.1);
-  --y:#ffc233;
-  --y2:rgba(255,194,51,.08);
-  --b:#38b6ff;
-  --b2:rgba(56,182,255,.08);
-  --p:#a855f7;
-  --text:#dde1f5;
-  --muted:#8b90b0;
-  --dim:#4a4f6e;
-  --mono:'IBM Plex Mono',monospace;
-  --display:'Bebas Neue',sans-serif;
-  --body:'DM Sans',sans-serif;
+  --bg:#07080d; --panel:#0d0f17; --panel2:#11131f;
+  --line:#1a1d2e; --line2:#2a2e4a;
+  --text:#dde1f5; --muted:#9a9fc0; --dim:#5d6384;
+  --gain:#00e87a; --gain-bg:rgba(0,232,122,.12);
+  --loss:#ff4466; --loss-bg:rgba(255,68,102,.12);
+  --warn:#ffc233; --info:#38b6ff;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --body:'DM Sans',system-ui,sans-serif;
 }
-body{background:var(--bg);color:var(--text);font-family:var(--body);min-height:100vh;font-size:14px}
+html{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.5;min-height:100vh}
+a{color:var(--info)}
+:focus-visible{outline:2px solid var(--info);outline-offset:2px}
 
-/* TOPBAR */
-.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--border);background:var(--panel)}
-.logo{font-family:var(--display);font-size:22px;letter-spacing:2px;color:var(--g)}
-.logo span{color:var(--text);opacity:.5}
-.topbar-right{display:flex;align-items:center;gap:16px;font-family:var(--mono);font-size:11px;color:var(--muted)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--g);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.wrap{max-width:1080px;margin:0 auto;padding:20px 20px 60px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 20px;margin-bottom:18px}
+h1{font-size:22px;font-weight:700;letter-spacing:.2px}
+h1 small{font-weight:400;color:var(--muted);font-size:14px;margin-left:8px}
+.back{font-size:13px;color:var(--muted);text-decoration:none}
+.back:hover{color:var(--text)}
 
-/* REGLAS BANNER */
-.rules-banner{background:var(--panel);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;gap:24px;align-items:center;overflow-x:auto}
-.rule-pill{font-family:var(--mono);font-size:10px;padding:4px 10px;border-radius:3px;white-space:nowrap}
-.rp-g{background:var(--g2);color:var(--g);border:1px solid rgba(0,232,122,.3)}
-.rp-r{background:var(--r2);color:var(--r);border:1px solid rgba(255,51,85,.3)}
-.rp-y{background:var(--y2);color:var(--y);border:1px solid rgba(255,194,51,.3)}
-.rp-b{background:var(--b2);color:var(--b);border:1px solid rgba(56,182,255,.3)}
+/* Configuración */
+.config{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:var(--muted)}
+.field input{background:var(--bg);border:1px solid var(--line2);color:var(--text);font-family:var(--mono);font-size:14px;padding:8px 10px;border-radius:6px;width:130px}
+.field input[type=date]{width:160px}
+.field input:focus{border-color:var(--info);outline:none}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button{font-family:var(--body);font-size:14px;font-weight:500;padding:9px 14px;border-radius:6px;border:1px solid var(--line2);background:transparent;color:var(--text);cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--text);color:var(--bg);border-color:var(--text)}
+button.primary:hover{opacity:.9}
+button:disabled{opacity:.45;cursor:not-allowed}
+.cfg-note{flex-basis:100%;font-size:13px;color:var(--muted)}
+.cfg-note:empty{display:none}
+.cfg-note.sim{color:var(--warn)}
 
-/* LAYOUT */
-.main{display:grid;grid-template-columns:340px 1fr;gap:0;height:calc(100vh - 95px)}
-.sidebar{border-right:1px solid var(--border);overflow-y:auto;background:var(--panel)}
-.content{overflow-y:auto;padding:20px}
+/* Estado de carga */
+#estado{margin:22px 0;color:var(--muted)}
+#estado.err{color:var(--loss)}
+#estado button{margin-left:10px}
 
-/* FORM NUEVA JUGADA */
-.form-header{padding:16px 20px;border-bottom:1px solid var(--border);font-family:var(--display);font-size:18px;letter-spacing:1px;color:var(--g)}
-.form-body{padding:16px 20px;display:flex;flex-direction:column;gap:12px}
-.field label{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px}
-.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:12px;padding:8px 10px;border-radius:4px;outline:none;transition:border .15s}
-.field input:focus,.field select:focus{border-color:var(--g)}
-.field select option{background:var(--bg)}
-.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.field-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+/* Resultado principal */
+.hero{margin-top:22px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px 20px 12px}
+.hero-top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:12px 24px;margin-bottom:6px}
+.hero-top h2{font-size:15px;font-weight:500;color:var(--muted)}
+.acum{text-align:right}
+.acum .n{font-family:var(--mono);font-size:34px;font-weight:500;line-height:1.1}
+.acum .s{font-size:13px;color:var(--muted)}
+.pos{color:var(--gain)} .neg{color:var(--loss)}
+.chart-wrap{width:100%;overflow-x:auto}
+svg.chart{display:block;height:auto}
+svg text{font-family:var(--mono);fill:var(--muted);font-size:11px}
+svg .zero{stroke:var(--line2);stroke-width:1}
+svg .b-pos{fill:var(--gain)} svg .b-neg{fill:var(--loss)}
+svg .b-open{opacity:.45}
+svg .lbl-pos{fill:var(--gain)} svg .lbl-neg{fill:var(--loss)}
+.legend{font-size:12px;color:var(--dim);margin:2px 0 6px}
 
-/* RESULTADO SELECTOR */
-.res-btns{display:flex;gap:6px}
-.res-btn{flex:1;padding:7px;border:1px solid var(--border2);background:transparent;color:var(--muted);font-family:var(--mono);font-size:10px;border-radius:3px;cursor:pointer;transition:all .15s;letter-spacing:.5px}
-.res-btn:hover{color:var(--text);border-color:var(--muted)}
-.res-btn.top1{border-color:var(--g);color:var(--g);background:var(--g2)}
-.res-btn.top3{border-color:var(--y);color:var(--y);background:var(--y2)}
-.res-btn.fallo{border-color:var(--r);color:var(--r);background:var(--r2)}
+/* Veredicto */
+.verdict{margin-top:14px;display:grid;grid-template-columns:1.2fr 1fr;gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+.card h3{font-size:14px;font-weight:500;color:var(--muted);margin-bottom:8px}
+.verdict-text{font-size:16px;line-height:1.45}
+.scale{position:relative;height:34px;margin:18px 4px 6px}
+.scale .track{position:absolute;left:0;right:0;top:15px;height:4px;background:var(--line2);border-radius:2px}
+.mark{position:absolute;top:6px;width:4px;height:22px;border-radius:2px;transform:translateX(-50%)}
+.m-azar{background:var(--muted)} .m-eq{background:var(--warn)} .m-tu{background:var(--info)} .m-tu.sobre{background:var(--gain)}
+.axis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--dim);margin:0 4px 10px}
+.keys{list-style:none;display:flex;flex-wrap:wrap;gap:6px 18px;margin:4px 0 10px}
+.keys li{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+.keys i{display:inline-block;width:4px;height:16px;border-radius:2px}
+.keys b{font-family:var(--mono);font-weight:500;color:var(--text)}
+.scale-note{font-size:12px;color:var(--dim)}
 
-/* BOTÓN REGISTRAR */
-.btn-registrar{width:100%;padding:11px;background:var(--g);color:#000;font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:2px;border:none;border-radius:4px;cursor:pointer;transition:opacity .15s;text-transform:uppercase}
-.btn-registrar:hover{opacity:.85}
-.btn-registrar:disabled{opacity:.4;cursor:not-allowed}
+/* Tablas */
+.tables{margin-top:14px;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:start}
+.verdict>*,.tables>*{min-width:0}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-weight:500;color:var(--muted);font-size:12px;text-align:right;padding:6px 8px;border-bottom:1px solid var(--line2);white-space:nowrap}
+td{font-family:var(--mono);text-align:right;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td:first-child{font-family:var(--body)}
+.chip{display:inline-block;font-family:var(--body);font-size:11px;padding:1px 6px;border-radius:10px;margin-left:6px;border:1px solid var(--line2);color:var(--muted)}
+.tw-note{font-size:12px;color:var(--dim);margin-top:8px}
 
-/* STATS CARDS */
-.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
-.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:14px 16px}
-.stat-label{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px}
-.stat-val{font-family:var(--display);font-size:28px;letter-spacing:1px}
-.stat-sub{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px}
-.sv-g{color:var(--g)}
-.sv-r{color:var(--r)}
-.sv-y{color:var(--y)}
-.sv-b{color:var(--b)}
-
-/* SECCIÓN */
-.section-title{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
-
-/* TABLA JUGADAS */
-.tabla-wrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse}
-th{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
-td{font-family:var(--mono);font-size:11px;padding:9px 10px;border-bottom:1px solid rgba(26,29,46,.7);vertical-align:middle}
-tr:hover td{background:rgba(255,255,255,.02)}
-.badge{display:inline-block;padding:2px 7px;border-radius:2px;font-size:9px;font-weight:500;letter-spacing:.5px}
-.bg{background:var(--g2);color:var(--g)}
-.by{background:var(--y2);color:var(--y)}
-.br{background:var(--r2);color:var(--r)}
-.bb{background:var(--b2);color:var(--b)}
-
-/* HORA CHIPS */
-.hora-chip{display:inline-block;padding:2px 6px;border-radius:2px;font-size:9px;background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
-.hora-chip.rentable{color:var(--g);border-color:rgba(0,232,122,.3);background:var(--g2)}
-.hora-chip.peligro{color:var(--r);border-color:rgba(255,51,85,.3);background:var(--r2)}
-
-/* CHARTS AREA */
-.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
-.chart-card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px}
-.chart-title{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px}
-
-/* BARRA HORIZONTAL */
-.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
-.bar-label{font-family:var(--mono);font-size:10px;color:var(--muted);width:70px;text-align:right;flex-shrink:0}
-.bar-track{flex:1;height:6px;background:var(--border2);border-radius:3px;overflow:hidden}
-.bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
-.bar-val{font-family:var(--mono);font-size:10px;color:var(--text);width:38px;flex-shrink:0}
-
-/* VACÍO */
-.empty{text-align:center;padding:40px 20px;color:var(--dim);font-family:var(--mono);font-size:11px}
-
-/* BOTÓN BORRAR */
-.btn-del{background:none;border:none;color:var(--dim);cursor:pointer;font-size:12px;padding:2px 5px;transition:color .15s}
-.btn-del:hover{color:var(--r)}
-
-/* TABS */
-.tabs{display:flex;gap:0;margin-bottom:18px;border-bottom:1px solid var(--border)}
-.tab{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 16px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;transition:all .15s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--g);border-bottom-color:var(--g)}
-
-/* RESUMEN SEMANAL */
-.semana-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:16px}
-.dia-card{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:8px 6px;text-align:center}
-.dia-nombre{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:4px}
-.dia-ef{font-family:var(--display);font-size:20px}
-.dia-n{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:2px}
-
-/* EXPORT */
-.btn-export{background:transparent;border:1px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:10px;padding:6px 14px;border-radius:3px;cursor:pointer;letter-spacing:1px;transition:all .15s}
-.btn-export:hover{border-color:var(--b);color:var(--b)}
-
-/* CONFIANZA */
-.conf-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
-.conf-alta{background:var(--g)}
-.conf-med{background:var(--y)}
-.conf-baja{background:var(--r)}
-
-/* NOTA */
-.nota-field{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:4px;outline:none;resize:none}
-.nota-field:focus{border-color:var(--g)}
+@media (max-width:820px){
+  .verdict{grid-template-columns:minmax(0,1fr)}
+  .acum{text-align:left}
+  .acum .n{font-size:28px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
+<div class="wrap">
+  <header>
+    <h1>Paper trading <small>apuestas simuladas, calculadas solas</small></h1>
+    <a class="back" href="/">Volver al dashboard</a>
+  </header>
 
-<div class="topbar">
-  <div class="logo">LOTTOAI <span>PRO</span> — PAPER TRADING</div>
-  <div class="topbar-right">
-    <div class="dot"></div>
-    <span id="topFecha">—</span>
-    <span>|</span>
-    <span>V11 SEMANA <span id="semanaNum">—</span></span>
-    <button class="btn-export" onclick="exportarCSV()">⬇ EXPORT CSV</button>
-    <button class="btn-export" onclick="borrarTodo()" style="color:var(--r);border-color:rgba(255,51,85,.3)">✕ RESET</button>
-  </div>
-</div>
-
-<div class="rules-banner">
-  <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">REGLAS ACTIVAS:</span>
-  <span class="rule-pill rp-g">CONF ≥ 33 → EF 19.23%</span>
-  <span class="rule-pill rp-b">11AM 15.18% · 08AM 10.71% · 01PM 9.91% · 02PM 9.91%</span>
-  <span class="rule-pill rp-g">JUEVES TODAS · DOM 02PM · SÁB 12PM</span>
-  <span class="rule-pill rp-r">NUNCA: 09AM · 10AM · 05PM · 07PM</span>
-  <span class="rule-pill rp-r">LUNES = PEOR (5.73%)</span>
-</div>
-
-<div class="main">
-  <!-- SIDEBAR: FORMULARIO -->
-  <div class="sidebar">
-    <div class="form-header">+ REGISTRAR JUGADA</div>
-    <div class="form-body">
-
-      <div class="field-row">
-        <div class="field">
-          <label>Fecha</label>
-          <input type="date" id="fFecha">
-        </div>
-        <div class="field">
-          <label>Hora sorteo</label>
-          <select id="fHora">
-            <option value="08:00 AM">08:00 AM ⭐</option>
-            <option value="09:00 AM">09:00 AM ⚠</option>
-            <option value="10:00 AM">10:00 AM ⚠</option>
-            <option value="11:00 AM" selected>11:00 AM ⭐</option>
-            <option value="12:00 PM">12:00 PM</option>
-            <option value="01:00 PM">01:00 PM ⭐</option>
-            <option value="02:00 PM">02:00 PM ⭐</option>
-            <option value="03:00 PM">03:00 PM</option>
-            <option value="04:00 PM">04:00 PM</option>
-            <option value="05:00 PM">05:00 PM ⚠</option>
-            <option value="06:00 PM">06:00 PM</option>
-            <option value="07:00 PM">07:00 PM ⚠</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="field-3">
-        <div class="field">
-          <label>Pred 1 (TOP1)</label>
-          <input type="text" id="fP1" placeholder="JIRAFA" style="text-transform:uppercase">
-        </div>
-        <div class="field">
-          <label>Pred 2</label>
-          <input type="text" id="fP2" placeholder="DELFIN" style="text-transform:uppercase">
-        </div>
-        <div class="field">
-          <label>Pred 3</label>
-          <input type="text" id="fP3" placeholder="OSO" style="text-transform:uppercase">
-        </div>
-      </div>
-
-      <div class="field">
-        <label>Confianza motor (%)</label>
-        <input type="number" id="fConf" placeholder="ej: 35" min="0" max="100">
-      </div>
-
-      <div class="field">
-        <label>Resultado real</label>
-        <input type="text" id="fReal" placeholder="Animal que salió" style="text-transform:uppercase">
-      </div>
-
-      <div class="field">
-        <label>Resultado</label>
-        <div class="res-btns">
-          <button class="res-btn" id="rb-top1" onclick="setResultado('TOP1')">✓ TOP1</button>
-          <button class="res-btn" id="rb-top3" onclick="setResultado('TOP3')">≈ TOP3</button>
-          <button class="res-btn" id="rb-fallo" onclick="setResultado('FALLO')">✗ FALLO</button>
-        </div>
-      </div>
-
-      <div class="field">
-        <label>¿Fue tentativo nocturno o corregido intraday?</label>
-        <select id="fOrigen">
-          <option value="TENTATIVO">Tentativo nocturno</option>
-          <option value="INTRADAY">Corrección intraday</option>
-          <option value="MANUAL">Calculado manual</option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>Nota (opcional)</label>
-        <textarea class="nota-field" id="fNota" rows="2" placeholder="ej: conf alta, jueves, patrón Markov fuerte..."></textarea>
-      </div>
-
-      <button class="btn-registrar" onclick="registrar()">REGISTRAR JUGADA</button>
-
-      <!-- Mini resumen del día -->
-      <div style="margin-top:6px;padding:10px;background:var(--bg);border-radius:4px;border:1px solid var(--border)">
-        <div style="font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:6px">RESUMEN HOY</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px" id="resumenHoy">
-          <div style="text-align:center"><div style="font-family:var(--display);font-size:20px;color:var(--g)" id="rhTop1">0</div><div style="font-family:var(--mono);font-size:9px;color:var(--dim)">TOP1</div></div>
-          <div style="text-align:center"><div style="font-family:var(--display);font-size:20px;color:var(--y)" id="rhTop3">0</div><div style="font-family:var(--mono);font-size:9px;color:var(--dim)">TOP3</div></div>
-          <div style="text-align:center"><div style="font-family:var(--display);font-size:20px;color:var(--r)" id="rhFallo">0</div><div style="font-family:var(--mono);font-size:9px;color:var(--dim)">FALLO</div></div>
-        </div>
-      </div>
-
+  <form class="config" id="cfg" aria-label="Configuración de la apuesta simulada">
+    <div class="field">
+      <label for="monto">Monto por número</label>
+      <input id="monto" type="number" min="0.01" step="any" inputmode="decimal" required>
     </div>
-  </div>
-
-  <!-- CONTENT -->
-  <div class="content">
-    <div class="tabs">
-      <div class="tab active" onclick="showTab('jugadas')">JUGADAS</div>
-      <div class="tab" onclick="showTab('analisis')">ANÁLISIS</div>
-      <div class="tab" onclick="showTab('semanal')">SEMANAL</div>
+    <div class="field">
+      <label for="mult">Cada acierto paga ×</label>
+      <input id="mult" type="number" min="0.01" step="any" inputmode="decimal" required>
     </div>
+    <div class="field">
+      <label for="desde">Desde (opcional)</label>
+      <input id="desde" type="date">
+    </div>
+    <div class="btns">
+      <button type="submit" class="primary" id="btnSim">Simular</button>
+      <button type="button" id="btnSave">Guardar este monto</button>
+    </div>
+    <div class="cfg-note" id="cfgNote" aria-live="polite"></div>
+  </form>
 
-    <!-- TAB: JUGADAS -->
-    <div id="tab-jugadas">
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Total jugadas</div>
-          <div class="stat-val sv-b" id="sTotal">0</div>
-          <div class="stat-sub" id="sConfianza">conf ≥33: 0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Ef. TOP1</div>
-          <div class="stat-val sv-g" id="sTop1">0%</div>
-          <div class="stat-sub" id="sTop1n">0 aciertos</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Ef. TOP3</div>
-          <div class="stat-val sv-y" id="sTop3">0%</div>
-          <div class="stat-sub" id="sTop3n">0 aciertos</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Fallos</div>
-          <div class="stat-val sv-r" id="sFallo">0%</div>
-          <div class="stat-sub" id="sFallon">0 jugadas</div>
+  <div id="estado" role="status" aria-live="polite">Cargando resultados…</div>
+  <div id="app" hidden>
+    <section class="hero" aria-labelledby="hTitle">
+      <div class="hero-top">
+        <h2 id="hTitle">Resultado de cada semana (lunes a domingo)</h2>
+        <div class="acum">
+          <div class="n" id="acumN">—</div>
+          <div class="s" id="acumS"></div>
         </div>
       </div>
+      <div class="chart-wrap"><div id="chart"></div></div>
+      <div class="legend" id="legend"></div>
+    </section>
 
-      <div class="section-title">REGISTRO DE JUGADAS</div>
-      <div class="tabla-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Hora</th>
-              <th>Pred 1</th>
-              <th>Pred 2</th>
-              <th>Pred 3</th>
-              <th>Real</th>
-              <th>Conf</th>
-              <th>Origen</th>
-              <th>Resultado</th>
-              <th>Nota</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="jugadasBody"></tbody>
-        </table>
-        <div class="empty" id="emptyMsg">Sin jugadas registradas — añade la primera arriba</div>
+    <section class="verdict">
+      <div class="card">
+        <h3>¿Hay ventaja sobre el azar?</h3>
+        <p class="verdict-text" id="verdict"></p>
       </div>
-    </div>
-
-    <!-- TAB: ANÁLISIS -->
-    <div id="tab-analisis" style="display:none">
-      <div class="charts-grid" style="grid-template-columns:1fr 1fr">
-
-        <div class="chart-card">
-          <div class="chart-title">Efectividad por hora (TOP3 %)</div>
-          <div id="chartHoras"><div class="empty">Sin datos suficientes</div></div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Efectividad por día de semana</div>
-          <div id="chartDias"><div class="empty">Sin datos suficientes</div></div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Tentativo vs Intraday</div>
-          <div id="chartOrigen"><div class="empty">Sin datos suficientes</div></div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Confianza ≥33 vs &lt;33</div>
-          <div id="chartConf"><div class="empty">Sin datos suficientes</div></div>
-        </div>
-
+      <div class="card">
+        <h3>Porcentaje de acierto en el top 3</h3>
+        <div class="scale" id="scale"></div>
+        <div class="axis"><span>0%</span><span id="axisMax"></span></div>
+        <ul class="keys" id="keys"></ul>
+        <div class="scale-note" id="scaleNote"></div>
       </div>
+    </section>
 
-      <div style="margin-top:14px">
-        <div class="section-title">ALERTAS Y PATRONES DETECTADOS</div>
-        <div id="alertas" style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:10px 0"></div>
+    <section class="tables">
+      <div class="card">
+        <h3>Cierre semanal</h3>
+        <div class="tw">
+          <table>
+            <thead><tr>
+              <th scope="col">Semana</th><th scope="col">Sorteos</th><th scope="col">Aciertos</th>
+              <th scope="col">%</th><th scope="col">1ª/2ª/3ª</th>
+              <th scope="col">Apostado</th><th scope="col">Cobrado</th>
+              <th scope="col">Neto</th><th scope="col">Acumulado</th>
+            </tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <p class="tw-note" id="twNote"></p>
       </div>
-    </div>
-
-    <!-- TAB: SEMANAL -->
-    <div id="tab-semanal" style="display:none">
-      <div class="section-title">EFECTIVIDAD POR DÍA — ESTA SEMANA</div>
-      <div class="semana-grid" id="semanaGrid"></div>
-
-      <div class="section-title" style="margin-top:16px">COMPARATIVA: TENTATIVO vs CORREGIDO</div>
-      <div id="comparativa" style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px 0"></div>
-
-      <div class="section-title" style="margin-top:16px">MEJORES Y PEORES HORAS (ESTA SEMANA)</div>
-      <div id="rankHoras" style="font-family:var(--mono);font-size:11px"></div>
-    </div>
-
+      <div class="card">
+        <h3>¿Cuál posición acierta más?</h3>
+        <div class="tw">
+          <table>
+            <thead><tr>
+              <th scope="col">Posición</th><th scope="col">Aciertos</th>
+              <th scope="col">%</th><th scope="col">Neto si solo jugaras esa</th>
+            </tr></thead>
+            <tbody id="posRows"></tbody>
+          </table>
+        </div>
+        <p class="tw-note" id="posNote"></p>
+      </div>
+    </section>
   </div>
 </div>
 
 <script>
-// ─── STORAGE ───
-const KEY = 'lottoai_paper_v11';
-let jugadas = [];
-let resultadoActual = null;
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var saved = null;      // configuración guardada en el servidor
+  var MINUS = '\u2212';
 
-function cargar() {
-  try { jugadas = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { jugadas = []; }
-}
-function guardar() {
-  localStorage.setItem(KEY, JSON.stringify(jugadas));
-}
+  function fmt(n, dec){
+    return Number(n).toLocaleString('es-VE', {minimumFractionDigits: dec||0, maximumFractionDigits: dec||0});
+  }
+  function signed(n){
+    var r = Math.round(n);
+    if (r > 0) return '+' + fmt(r);
+    if (r < 0) return MINUS + fmt(-r);
+    return '0';
+  }
+  function cls(n){ return n > 0 ? 'pos' : n < 0 ? 'neg' : ''; }
+  function fechaCorta(iso){ var p = iso.split('-'); return p[2] + '/' + p[1]; }
 
-// ─── INIT ───
-function init() {
-  cargar();
-  const hoy = new Date();
-  document.getElementById('fFecha').value = hoy.toISOString().split('T')[0];
-  document.getElementById('topFecha').textContent =
-    hoy.toLocaleDateString('es-VE', {weekday:'long', day:'numeric', month:'long'}).toUpperCase();
-  // Número de semana del año
-  const inicio = new Date(hoy.getFullYear(), 0, 1);
-  const sem = Math.ceil(((hoy - inicio) / 86400000 + inicio.getDay() + 1) / 7);
-  document.getElementById('semanaNum').textContent = sem;
-  render();
-}
-
-// ─── RESULTADO SELECTOR ───
-function setResultado(val) {
-  resultadoActual = val;
-  ['top1','top3','fallo'].forEach(k => {
-    document.getElementById('rb-' + k).className = 'res-btn';
-  });
-  const map = {TOP1:'top1', TOP3:'top3', FALLO:'fallo'};
-  document.getElementById('rb-' + map[val]).className = 'res-btn ' + map[val];
-}
-
-// ─── HORAS RENTABLES ───
-const HORAS_OK  = ['08:00 AM','11:00 AM','01:00 PM','02:00 PM','12:00 PM','04:00 PM','06:00 PM'];
-const HORAS_MAL = ['09:00 AM','10:00 AM','05:00 PM','07:00 PM'];
-const DIAS_OK   = ['Jueves','Domingo','Sábado'];
-
-function clasificarHora(h) {
-  if (HORAS_MAL.includes(h)) return 'peligro';
-  if (HORAS_OK.includes(h))  return 'rentable';
-  return '';
-}
-
-// ─── REGISTRAR ───
-function registrar() {
-  const fecha  = document.getElementById('fFecha').value;
-  const hora   = document.getElementById('fHora').value;
-  const p1     = document.getElementById('fP1').value.trim().toUpperCase();
-  const p2     = document.getElementById('fP2').value.trim().toUpperCase();
-  const p3     = document.getElementById('fP3').value.trim().toUpperCase();
-  const conf   = parseFloat(document.getElementById('fConf').value) || 0;
-  const real   = document.getElementById('fReal').value.trim().toUpperCase();
-  const origen = document.getElementById('fOrigen').value;
-  const nota   = document.getElementById('fNota').value.trim();
-
-  if (!fecha || !hora || !p1 || !resultadoActual) {
-    alert('Rellena: fecha, hora, pred1 y resultado'); return;
+  function setEstado(msg, esError, conReintento){
+    var e = $('estado');
+    e.hidden = false;
+    e.className = esError ? 'err' : '';
+    e.textContent = msg;
+    if (conReintento){
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = 'Reintentar';
+      b.addEventListener('click', function(){ cargar(true); });
+      e.appendChild(b);
+    }
   }
 
-  // Auto-detectar resultado si hay real
-  let resultado = resultadoActual;
-  if (real) {
-    if (real === p1) resultado = 'TOP1';
-    else if ([p2,p3].includes(real)) resultado = 'TOP3';
-    else resultado = 'FALLO';
+  function leerForm(){
+    var m = parseFloat($('monto').value), x = parseFloat($('mult').value);
+    return { monto: m, mult: x, desde: $('desde').value };
   }
 
-  jugadas.unshift({ id: Date.now(), fecha, hora, p1, p2, p3, conf, real, resultado, origen, nota });
-  guardar();
-
-  // Reset form
-  document.getElementById('fP1').value = '';
-  document.getElementById('fP2').value = '';
-  document.getElementById('fP3').value = '';
-  document.getElementById('fConf').value = '';
-  document.getElementById('fReal').value = '';
-  document.getElementById('fNota').value = '';
-  resultadoActual = null;
-  ['top1','top3','fallo'].forEach(k => document.getElementById('rb-' + k).className = 'res-btn');
-
-  render();
-}
-
-// ─── BORRAR JUGADA ───
-function borrar(id) {
-  if (!confirm('¿Eliminar esta jugada?')) return;
-  jugadas = jugadas.filter(j => j.id !== id);
-  guardar(); render();
-}
-
-function borrarTodo() {
-  if (!confirm('¿Borrar TODAS las jugadas? Esto no se puede deshacer.')) return;
-  jugadas = [];
-  guardar(); render();
-}
-
-// ─── RENDER ───
-function render() {
-  renderStats();
-  renderTabla();
-  renderResumenHoy();
-  renderAnalisis();
-  renderSemanal();
-}
-
-function efStr(n, total) {
-  if (!total) return '0%';
-  return (n / total * 100).toFixed(1) + '%';
-}
-
-function renderStats() {
-  const total = jugadas.length;
-  const top1 = jugadas.filter(j => j.resultado === 'TOP1').length;
-  const top3 = jugadas.filter(j => ['TOP1','TOP3'].includes(j.resultado)).length;
-  const fallo = jugadas.filter(j => j.resultado === 'FALLO').length;
-  const confAlta = jugadas.filter(j => j.conf >= 33).length;
-
-  document.getElementById('sTotal').textContent = total;
-  document.getElementById('sConfianza').textContent = `conf ≥33: ${confAlta}`;
-  document.getElementById('sTop1').textContent = efStr(top1, total);
-  document.getElementById('sTop1n').textContent = `${top1} aciertos`;
-  document.getElementById('sTop3').textContent = efStr(top3, total);
-  document.getElementById('sTop3n').textContent = `${top3} aciertos`;
-  document.getElementById('sFallo').textContent = efStr(fallo, total);
-  document.getElementById('sFallon').textContent = `${fallo} jugadas`;
-}
-
-function renderTabla() {
-  const body = document.getElementById('jugadasBody');
-  const empty = document.getElementById('emptyMsg');
-  if (!jugadas.length) { body.innerHTML = ''; empty.style.display = 'block'; return; }
-  empty.style.display = 'none';
-
-  const clsOrigen = { TENTATIVO: 'bb', INTRADAY: 'bg', MANUAL: 'by' };
-  const clsRes    = { TOP1: 'bg', TOP3: 'by', FALLO: 'br' };
-
-  body.innerHTML = jugadas.map(j => {
-    const clsH = clasificarHora(j.hora);
-    const confDot = j.conf >= 33 ? 'conf-alta' : j.conf >= 20 ? 'conf-med' : 'conf-baja';
-    return `<tr>
-      <td>${j.fecha}</td>
-      <td><span class="hora-chip ${clsH}">${j.hora}</span></td>
-      <td style="color:var(--text);font-weight:500">${j.p1}</td>
-      <td style="color:var(--muted)">${j.p2||'—'}</td>
-      <td style="color:var(--muted)">${j.p3||'—'}</td>
-      <td style="color:${j.resultado==='TOP1'?'var(--g)':j.resultado==='TOP3'?'var(--y)':'var(--r)'};font-weight:${j.resultado!=='FALLO'?'500':'400'}">${j.real||'—'}</td>
-      <td><span class="conf-dot ${confDot}"></span>${j.conf||'—'}%</td>
-      <td><span class="badge ${clsOrigen[j.origen]||'bb'}">${j.origen}</span></td>
-      <td><span class="badge ${clsRes[j.resultado]}">${j.resultado}</span></td>
-      <td style="color:var(--dim);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${j.nota||'—'}</td>
-      <td><button class="btn-del" onclick="borrar(${j.id})">✕</button></td>
-    </tr>`;
-  }).join('');
-}
-
-function renderResumenHoy() {
-  const hoy = new Date().toISOString().split('T')[0];
-  const hoyJ = jugadas.filter(j => j.fecha === hoy);
-  document.getElementById('rhTop1').textContent = hoyJ.filter(j => j.resultado==='TOP1').length;
-  document.getElementById('rhTop3').textContent = hoyJ.filter(j => ['TOP1','TOP3'].includes(j.resultado)).length;
-  document.getElementById('rhFallo').textContent = hoyJ.filter(j => j.resultado==='FALLO').length;
-}
-
-// ─── ANÁLISIS ───
-function renderAnalisis() {
-  renderBarras('chartHoras', getEfPorHora(), 'hora');
-  renderBarras('chartDias', getEfPorDia(), 'dia');
-  renderBarras2('chartOrigen', getEfPorOrigen());
-  renderBarras2('chartConf', getEfPorConf());
-  renderAlertas();
-}
-
-function getEfPorHora() {
-  const horas = {};
-  jugadas.forEach(j => {
-    if (!horas[j.hora]) horas[j.hora] = {t:0,a:0};
-    horas[j.hora].t++;
-    if (['TOP1','TOP3'].includes(j.resultado)) horas[j.hora].a++;
-  });
-  return Object.entries(horas)
-    .map(([k,v]) => ({ label: k, ef: v.t ? v.a/v.t*100 : 0, n: v.t }))
-    .sort((a,b) => b.ef - a.ef);
-}
-
-function getEfPorDia() {
-  const dias = {};
-  const nombres = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  jugadas.forEach(j => {
-    const d = nombres[new Date(j.fecha+'T12:00:00').getDay()];
-    if (!dias[d]) dias[d] = {t:0,a:0};
-    dias[d].t++;
-    if (['TOP1','TOP3'].includes(j.resultado)) dias[d].a++;
-  });
-  return Object.entries(dias)
-    .map(([k,v]) => ({ label: k, ef: v.t ? v.a/v.t*100 : 0, n: v.t }))
-    .sort((a,b) => b.ef - a.ef);
-}
-
-function getEfPorOrigen() {
-  const orig = {};
-  jugadas.forEach(j => {
-    if (!orig[j.origen]) orig[j.origen] = {t:0,a:0};
-    orig[j.origen].t++;
-    if (['TOP1','TOP3'].includes(j.resultado)) orig[j.origen].a++;
-  });
-  return [
-    { label:'TENTATIVO', ...orig['TENTATIVO']||{t:0,a:0} },
-    { label:'INTRADAY',  ...orig['INTRADAY']||{t:0,a:0} },
-    { label:'MANUAL',    ...orig['MANUAL']||{t:0,a:0} },
-  ].filter(x => x.t > 0);
-}
-
-function getEfPorConf() {
-  const alta = jugadas.filter(j => j.conf >= 33);
-  const baja = jugadas.filter(j => j.conf > 0 && j.conf < 33);
-  const acierta = arr => arr.filter(j => ['TOP1','TOP3'].includes(j.resultado)).length;
-  return [
-    { label: 'CONF ≥33',  ef: alta.length ? acierta(alta)/alta.length*100 : 0, n: alta.length },
-    { label: 'CONF <33',  ef: baja.length ? acierta(baja)/baja.length*100 : 0, n: baja.length },
-  ].filter(x => x.n > 0);
-}
-
-function colorBarra(ef) {
-  if (ef >= 25) return 'var(--g)';
-  if (ef >= 15) return 'var(--y)';
-  return 'var(--r)';
-}
-
-function renderBarras(id, data, tipo) {
-  const el = document.getElementById(id);
-  if (!data.length) { el.innerHTML = '<div class="empty">Sin datos suficientes</div>'; return; }
-  const maxEf = Math.max(...data.map(d => d.ef), 20);
-  el.innerHTML = data.map(d => `
-    <div class="bar-row">
-      <div class="bar-label">${d.label.replace(' AM','a').replace(' PM','p')}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${d.ef/maxEf*100}%;background:${colorBarra(d.ef)}"></div></div>
-      <div class="bar-val" style="color:${colorBarra(d.ef)}">${d.ef.toFixed(1)}%</div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--dim)">(${d.n})</div>
-    </div>`).join('');
-}
-
-function renderBarras2(id, data) {
-  const el = document.getElementById(id);
-  if (!data.length) { el.innerHTML = '<div class="empty">Sin datos suficientes</div>'; return; }
-  const maxEf = Math.max(...data.map(d => d.ef), 20);
-  el.innerHTML = data.map(d => `
-    <div class="bar-row">
-      <div class="bar-label" style="width:80px">${d.label}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${d.ef/maxEf*100}%;background:${colorBarra(d.ef)}"></div></div>
-      <div class="bar-val" style="color:${colorBarra(d.ef)}">${d.ef.toFixed(1)}%</div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--dim)">(${d.t})</div>
-    </div>`).join('');
-}
-
-function renderAlertas() {
-  const el = document.getElementById('alertas');
-  if (!jugadas.length) { el.textContent = 'Sin datos aún — las alertas aparecen automáticamente.'; return; }
-
-  const alerts = [];
-
-  // ¿Conf>=33 mejora la efectividad?
-  const ef = getEfPorConf();
-  const alta = ef.find(x => x.label === 'CONF ≥33');
-  const baja = ef.find(x => x.label === 'CONF <33');
-  if (alta && baja && alta.n >= 3 && baja.n >= 3) {
-    const diff = alta.ef - baja.ef;
-    if (diff > 5)
-      alerts.push(`✅ CONF ≥33 rinde ${diff.toFixed(1)}pp más que CONF <33 — filtro confirmado`);
-    else if (diff < -3)
-      alerts.push(`⚠️ CONF ≥33 NO mejora vs <33 (${diff.toFixed(1)}pp) — revisar umbral`);
-    else
-      alerts.push(`ℹ️ CONF ≥33 vs <33: diferencia mínima (${diff.toFixed(1)}pp) — más datos necesarios`);
+  function nota(msg, esSim){
+    var n = $('cfgNote'); n.textContent = msg; n.className = 'cfg-note' + (esSim ? ' sim' : '');
   }
 
-  // ¿Horas "peligro" realmente fallan?
-  const porHora = getEfPorHora();
-  const horasMalas = porHora.filter(h => HORAS_MAL.includes(h.label) && h.n >= 2);
-  horasMalas.forEach(h => {
-    if (h.ef > 20) alerts.push(`⚠️ ${h.label} marcada como EVITAR pero rinde ${h.ef.toFixed(0)}% — verificar`);
-    else alerts.push(`✅ ${h.label} (EVITAR) confirmada: ${h.ef.toFixed(0)}% — regla válida`);
-  });
-
-  // Tentativo vs Intraday
-  const orig = getEfPorOrigen();
-  const tent = orig.find(x => x.label === 'TENTATIVO');
-  const intr = orig.find(x => x.label === 'INTRADAY');
-  if (tent && intr && tent.t >= 3 && intr.t >= 3) {
-    const ef_t = tent.a/tent.t*100, ef_i = intr.a/intr.t*100;
-    if (ef_i > ef_t + 5)
-      alerts.push(`✅ INTRADAY (${ef_i.toFixed(0)}%) supera TENTATIVO (${ef_t.toFixed(0)}%) — correcciones mejoran`);
-    else
-      alerts.push(`ℹ️ TENTATIVO (${ef_t.toFixed(0)}%) vs INTRADAY (${ef_i.toFixed(0)}%) — sin ventaja clara aún`);
+  async function cargar(inicial){
+    var f = inicial ? {} : leerForm();
+    var qs = new URLSearchParams();
+    if (!inicial){
+      if (f.monto > 0) qs.set('monto', f.monto);
+      if (f.mult > 0)  qs.set('mult', f.mult);
+    }
+    var desde = $('desde').value;
+    if (desde) qs.set('desde', desde);
+    setEstado('Cargando resultados…');
+    $('btnSim').disabled = true;
+    try{
+      var r = await fetch('/paper/semanal' + (qs.toString() ? '?' + qs.toString() : ''));
+      if (!r.ok) throw new Error('El servidor respondió ' + r.status);
+      var d = await r.json();
+      if (d.status !== 'success') throw new Error(d.message || 'Respuesta inesperada del servidor');
+      if (inicial || !saved){
+        saved = d.config;
+        $('monto').value = d.config.monto;
+        $('mult').value  = d.config.mult;
+      }
+      $('estado').hidden = true;
+      $('app').hidden = false;      // primero mostrar, para poder medir el ancho real del gráfico
+      pintar(d);
+      var dist = saved && (Number(d.config.monto) !== Number(saved.monto) || Number(d.config.mult) !== Number(saved.mult));
+      nota(dist ? 'Simulación con otros valores: no se guardó. Usa "Guardar este monto" para dejarlos fijos.' : '', dist);
+    }catch(err){
+      $('app').hidden = true;
+      setEstado('No se pudieron cargar los resultados. ' + err.message + '. Si el servidor estaba dormido, espera unos segundos y reintenta.', true, true);
+    }finally{
+      $('btnSim').disabled = false;
+    }
   }
 
-  if (!alerts.length) alerts.push('📊 Acumula más jugadas para ver patrones estadísticos significativos.');
-  el.innerHTML = alerts.map(a => `<div style="margin-bottom:8px;padding:7px 10px;background:var(--panel);border-left:2px solid var(--border2);border-radius:2px">${a}</div>`).join('');
-}
+  function pintar(d){
+    var t = d.totales, cfg = d.config;
+    // Acumulado
+    var n = $('acumN');
+    n.textContent = signed(t.neto);
+    n.className = 'n ' + cls(t.neto);
+    $('acumS').textContent = t.sorteos
+      ? 'acumulado en ' + fmt(t.sorteos) + ' sorteos, sobre ' + fmt(t.apostado) + ' apostados (' +
+        (t.roi_pct > 0 ? '+' : t.roi_pct < 0 ? MINUS : '') + fmt(Math.abs(t.roi_pct), 1) + '%)'
+      : 'todavía no hay sorteos resueltos en este rango';
+    $('legend').textContent = 'Apostando ' + fmt(cfg.monto) + ' a cada uno de los 3 números (' + fmt(cfg.monto * 3) +
+      ' por sorteo); cada acierto paga ' + fmt(cfg.monto * cfg.mult) + '.';
 
-// ─── SEMANAL ───
-function renderSemanal() {
-  const grid = document.getElementById('semanaGrid');
-  const dias = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    pintarGrafico(d.semanas);
 
-  // Semana actual (lun-dom)
-  const hoy = new Date();
-  const lunes = new Date(hoy);
-  lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+    $('verdict').textContent = t.veredicto;
+    pintarEscala(t);
 
-  grid.innerHTML = dias.map((d, i) => {
-    const fecha = new Date(lunes);
-    fecha.setDate(lunes.getDate() + ((i + 1) % 7));
-    const fechaStr = fecha.toISOString().split('T')[0];
-    const jDia = jugadas.filter(j => j.fecha === fechaStr);
-    const aciertos = jDia.filter(j => ['TOP1','TOP3'].includes(j.resultado)).length;
-    const ef = jDia.length ? aciertos/jDia.length*100 : null;
-    const color = ef === null ? 'var(--dim)' : ef >= 25 ? 'var(--g)' : ef >= 15 ? 'var(--y)' : 'var(--r)';
-    const esHoy = fechaStr === hoy.toISOString().split('T')[0];
-    return `<div class="dia-card" style="${esHoy?'border-color:var(--g)':''}">
-      <div class="dia-nombre">${d}</div>
-      <div class="dia-ef" style="color:${color}">${ef !== null ? ef.toFixed(0)+'%' : '—'}</div>
-      <div class="dia-n">${jDia.length ? jDia.length+'J' : '—'}</div>
-    </div>`;
-  }).join('');
-
-  // Comparativa tentativo vs intraday
-  const comp = document.getElementById('comparativa');
-  const orig = getEfPorOrigen();
-  if (!orig.length) { comp.textContent = 'Sin datos suficientes.'; }
-  else {
-    comp.innerHTML = orig.map(o => {
-      const ef = o.t ? (o.a/o.t*100).toFixed(1) : '0.0';
-      const color = parseFloat(ef) >= 20 ? 'var(--g)' : parseFloat(ef) >= 12 ? 'var(--y)' : 'var(--r)';
-      return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px;background:var(--panel);border-radius:4px">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:90px">${o.label}</span>
-        <span style="font-family:var(--display);font-size:22px;color:${color}">${ef}%</span>
-        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">${o.t} jugadas · ${o.a} aciertos</span>
-      </div>`;
-    }).join('');
-  }
-
-  // Ranking horas
-  const rank = document.getElementById('rankHoras');
-  const porHora = getEfPorHora();
-  if (!porHora.length) { rank.innerHTML = '<span style="color:var(--dim)">Sin datos.</span>'; return; }
-  const mejores = porHora.slice(0, 3);
-  const peores  = [...porHora].sort((a,b) => a.ef - b.ef).slice(0, 3);
-  rank.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-      <div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--g);letter-spacing:1px;margin-bottom:8px">TOP HORAS</div>
-        ${mejores.map((h,i) => `<div style="font-family:var(--mono);font-size:11px;margin-bottom:6px">
-          <span style="color:var(--dim)">#${i+1}</span>
-          <span style="color:var(--text);margin:0 8px">${h.label}</span>
-          <span style="color:var(--g)">${h.ef.toFixed(1)}%</span>
-          <span style="color:var(--dim);font-size:9px"> (${h.n}j)</span>
-        </div>`).join('')}
-      </div>
-      <div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--r);letter-spacing:1px;margin-bottom:8px">PEORES HORAS</div>
-        ${peores.map((h,i) => `<div style="font-family:var(--mono);font-size:11px;margin-bottom:6px">
-          <span style="color:var(--dim)">#${i+1}</span>
-          <span style="color:var(--text);margin:0 8px">${h.label}</span>
-          <span style="color:var(--r)">${h.ef.toFixed(1)}%</span>
-          <span style="color:var(--dim);font-size:9px"> (${h.n}j)</span>
-        </div>`).join('')}
-      </div>
-    </div>`;
-}
-
-// ─── TABS ───
-function showTab(id) {
-  ['jugadas','analisis','semanal'].forEach(t => {
-    document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
-    document.querySelectorAll('.tab').forEach((el, i) => {
-      const ids = ['jugadas','analisis','semanal'];
-      el.className = 'tab' + (ids[i]===id ? ' active' : '');
+    // Tabla semanal (más reciente primero)
+    var body = $('rows'); body.textContent = '';
+    d.semanas.slice().reverse().forEach(function(s){
+      var tr = document.createElement('tr');
+      var c0 = document.createElement('td');
+      c0.textContent = fechaCorta(s.semana_inicio) + ' al ' + fechaCorta(s.semana_fin);
+      if (s.en_curso){ var ch = document.createElement('span'); ch.className = 'chip'; ch.textContent = 'en curso'; c0.appendChild(ch); }
+      else if (s.incompleta){ var ch2 = document.createElement('span'); ch2.className = 'chip'; ch2.textContent = 'incompleta'; c0.appendChild(ch2); }
+      tr.appendChild(c0);
+      [fmt(s.sorteos), fmt(s.aciertos), fmt(s.pct_acierto, 1) + '%',
+       s.pos1 + ' / ' + s.pos2 + ' / ' + s.pos3,
+       fmt(s.apostado), fmt(s.cobrado)].forEach(function(v){
+        var td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+      });
+      var tn = document.createElement('td'); tn.textContent = signed(s.neto); tn.className = cls(s.neto); tr.appendChild(tn);
+      var ta = document.createElement('td'); ta.textContent = signed(s.acumulado); ta.className = cls(s.acumulado); tr.appendChild(ta);
+      body.appendChild(tr);
     });
+    $('twNote').textContent = d.semanas.some(function(s){ return s.incompleta; })
+      ? 'Una semana completa tiene 84 sorteos. Las marcadas como incompletas tienen menos porque faltan resultados o la semana sigue en curso.'
+      : '';
+
+    // Por posición
+    var pb = $('posRows'); pb.textContent = '';
+    d.por_posicion.forEach(function(p){
+      var tr = document.createElement('tr');
+      [p.posicion + 'ª', fmt(p.aciertos), fmt(p.pct, 2) + '%'].forEach(function(v){
+        var td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+      });
+      var tn = document.createElement('td'); tn.textContent = signed(p.neto_solo_esta); tn.className = cls(p.neto_solo_esta);
+      tr.appendChild(tn);
+      pb.appendChild(tr);
+    });
+    $('posNote').textContent = 'Jugar una sola posición cuesta ' + fmt(cfg.monto) + ' por sorteo. Para no perder tendría que acertar más de ' +
+      fmt(100 / cfg.mult, 2) + '%; el azar da ' + fmt(100 / 38, 2) + '%.';
+  }
+
+  function pintarEscala(t){
+    var max = Math.max(15, Math.ceil(Math.max(t.pct_acierto, t.equilibrio_pct, t.azar_pct) + 2));
+    var sobre = t.pct_acierto >= t.equilibrio_pct;
+    var items = [
+      { v: t.azar_pct,       t: 'azar',                m: 'm-azar' },
+      { v: t.equilibrio_pct, t: 'punto de equilibrio', m: 'm-eq' },
+      { v: t.pct_acierto,    t: 'tu acierto',          m: 'm-tu' + (sobre ? ' sobre' : '') }
+    ];
+    var box = $('scale'); box.textContent = '';
+    var track = document.createElement('div'); track.className = 'track'; box.appendChild(track);
+    var keys = $('keys'); keys.textContent = '';
+    items.forEach(function(it){
+      var mk = document.createElement('div');
+      mk.className = 'mark ' + it.m;
+      mk.style.left = Math.min(99, Math.max(1, it.v / max * 100)) + '%';
+      box.appendChild(mk);
+      var li = document.createElement('li');
+      var sw = document.createElement('i'); sw.className = it.m; sw.style.background = getComputedStyle(mk).backgroundColor;
+      var b = document.createElement('b'); b.textContent = fmt(it.v, 1) + '%';
+      li.appendChild(sw); li.appendChild(b); li.appendChild(document.createTextNode(' ' + it.t));
+      keys.appendChild(li);
+    });
+    $('axisMax').textContent = max + '%';
+    $('scaleNote').textContent = 'Para ganar dinero hay que quedar a la derecha del punto de equilibrio, de forma sostenida.';
+  }
+
+  var ultimasSemanas = [];
+  function pintarGrafico(semanas){
+    ultimasSemanas = semanas;
+    var cont = $('chart');
+    if (!semanas.length){ cont.textContent = 'Sin datos para graficar.'; return; }
+    var cw = ($('chart').parentNode.clientWidth || 800);
+    var W = Math.max(cw, semanas.length * 56), H = 210, padT = 20, padB = 28, padX = 12;
+    var vals = semanas.map(function(s){ return s.neto; });
+    var maxAbs = Math.max.apply(null, vals.map(Math.abs).concat([1]));
+    var mid = padT + (H - padT - padB) / 2, half = (H - padT - padB) / 2;
+    var bw = Math.min(40, (W - 2 * padX) / semanas.length * 0.6);
+    var paso = (W - 2 * padX) / semanas.length;
+    var out = '<svg class="chart" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Resultado neto de cada semana: ' +
+      semanas.map(function(s){ return fechaCorta(s.semana_inicio) + ' ' + signed(s.neto); }).join(', ') + '">';
+    out += '<line class="zero" x1="0" x2="' + W + '" y1="' + mid + '" y2="' + mid + '"/>';
+    semanas.forEach(function(s, i){
+      var cx = padX + paso * i + paso / 2;
+      var h = Math.abs(s.neto) / maxAbs * (half - 14);
+      var pos = s.neto >= 0;
+      var y = pos ? mid - h : mid;
+      out += '<rect class="' + (pos ? 'b-pos' : 'b-neg') + (s.en_curso ? ' b-open' : '') + '" x="' + (cx - bw / 2).toFixed(1) +
+             '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(h, 1).toFixed(1) + '" rx="2"/>';
+      var ly = pos ? y - 5 : y + h + 12;
+      out += '<text class="' + (pos ? 'lbl-pos' : 'lbl-neg') + '" x="' + cx.toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="middle">' + signed(s.neto) + '</text>';
+      out += '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">' + fechaCorta(s.semana_inicio) + '</text>';
+    });
+    out += '</svg>';
+    cont.innerHTML = out;   // solo números y fechas generados arriba, sin texto externo
+    cont.parentNode.scrollLeft = cont.parentNode.scrollWidth;   // en pantallas chicas, mostrar las semanas más recientes
+  }
+
+  $('cfg').addEventListener('submit', function(e){ e.preventDefault(); cargar(false); });
+
+  $('btnSave').addEventListener('click', async function(){
+    var f = leerForm();
+    if (!(f.monto > 0) || !(f.mult > 0)){ nota('Escribe un monto y un multiplicador mayores que 0.', true); return; }
+    var b = $('btnSave'); b.disabled = true;
+    try{
+      var r = await fetch('/paper/config?monto=' + encodeURIComponent(f.monto) + '&mult=' + encodeURIComponent(f.mult), { method: 'POST' });
+      var d = await r.json();
+      if (!r.ok || d.status !== 'success') throw new Error(d.message || ('El servidor respondió ' + r.status));
+      saved = { monto: f.monto, mult: f.mult };
+      await cargar(false);
+      nota('Guardado: ' + fmt(f.monto) + ' por número, paga ×' + fmt(f.mult) + '.', false);
+    }catch(err){
+      nota('No se pudo guardar: ' + err.message, true);
+    }finally{
+      b.disabled = false;
+    }
   });
-  if (id === 'analisis' || id === 'semanal') renderAnalisis(), renderSemanal();
-}
 
-// ─── EXPORT CSV ───
-function exportarCSV() {
-  if (!jugadas.length) { alert('Sin jugadas para exportar'); return; }
-  const headers = 'fecha,hora,pred1,pred2,pred3,real,confianza,origen,resultado,nota';
-  const rows = jugadas.map(j =>
-    `${j.fecha},${j.hora},${j.p1},${j.p2||''},${j.p3||''},${j.real||''},${j.conf||''},${j.origen},${j.resultado},"${j.nota||''}"`
-  );
-  const blob = new Blob([headers+'\n'+rows.join('\n')], {type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `lottoai_paper_${new Date().toISOString().split('T')[0]}.csv`;
-  a.click();
-}
+  var rt = null;
+  window.addEventListener('resize', function(){
+    clearTimeout(rt);
+    rt = setTimeout(function(){ if (ultimasSemanas.length && !$('app').hidden) pintarGrafico(ultimasSemanas); }, 150);
+  });
 
-init();
+  cargar(true);
+})();
 </script>
 </body>
 </html>
