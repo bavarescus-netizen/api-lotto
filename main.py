@@ -1461,3 +1461,202 @@ async def fix_markov_directo(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         await db.rollback()
         return {"status": "error", "mensaje": str(e)}
+# ═══════════════════════════════════════════════════════════
+# PAPER TRADING AUTOMÁTICO
+# Se calcula en vivo desde auditoria_ia (prediccion_1/2/3 vs resultado_real).
+# No hay tabla de jugadas ni tareas del scheduler: no puede duplicarse con
+# la rotación A/B, y si cambias el monto se recalcula todo el historial.
+# Única tabla nueva: apuestas_config (monto y multiplicador de pago).
+# PEGAR AL FINAL DE main.py (usa app, Query, Depends, get_db, text, AsyncSession
+# que main.py ya importa).
+# ═══════════════════════════════════════════════════════════
+
+PAPER_ANIMALES = 38        # animalitos posibles en Lotto Activo
+PAPER_SORTEOS_SEMANA = 84  # 12 sorteos x 7 días
+
+
+async def _paper_config(db):
+    """Devuelve (monto_por_numero, multiplicador). Crea la tabla si no existe."""
+    await db.execute(text("""
+        CREATE TABLE IF NOT EXISTS apuestas_config (
+            id                 SERIAL PRIMARY KEY,
+            monto_por_numero   NUMERIC NOT NULL DEFAULT 100,
+            multiplicador_pago NUMERIC NOT NULL DEFAULT 30,
+            actualizado        TIMESTAMP DEFAULT NOW()
+        )
+    """))
+    await db.execute(text("""
+        INSERT INTO apuestas_config (monto_por_numero, multiplicador_pago)
+        SELECT 100, 30
+        WHERE NOT EXISTS (SELECT 1 FROM apuestas_config)
+    """))
+    await db.commit()
+    row = (await db.execute(text("""
+        SELECT monto_por_numero, multiplicador_pago
+        FROM apuestas_config ORDER BY id DESC LIMIT 1
+    """))).fetchone()
+    return float(row[0]), float(row[1])
+
+
+def _paper_agregar(filas, monto, mult, hoy=None):
+    """filas: lista de (fecha, pos) con una entrada por sorteo ya resuelto.
+    pos = 1, 2 o 3 si el animal real era la predicción 1, 2 o 3; None si falló.
+    Se apuesta `monto` a cada uno de los 3 números (monto*3 por sorteo) y cada
+    acierto paga monto*mult."""
+    from collections import defaultdict
+    from datetime import timedelta
+    from math import sqrt
+
+    semanas = defaultdict(lambda: {"sorteos": 0, "pos": [0, 0, 0]})
+    pos_tot = [0, 0, 0]
+    for fecha, pos in filas:
+        lunes = fecha - timedelta(days=fecha.weekday())
+        s = semanas[lunes]
+        s["sorteos"] += 1
+        if pos in (1, 2, 3):
+            s["pos"][pos - 1] += 1
+            pos_tot[pos - 1] += 1
+
+    costo_sorteo = monto * 3
+    pago_acierto = monto * mult
+
+    lista, acumulado = [], 0.0
+    for lunes in sorted(semanas):
+        s = semanas[lunes]
+        aciertos = sum(s["pos"])
+        apostado = s["sorteos"] * costo_sorteo
+        cobrado = aciertos * pago_acierto
+        neto = cobrado - apostado
+        acumulado += neto
+        domingo = lunes + timedelta(days=6)
+        lista.append({
+            "semana_inicio": lunes.isoformat(),
+            "semana_fin": domingo.isoformat(),
+            "sorteos": s["sorteos"],
+            "aciertos": aciertos,
+            "pct_acierto": round(100 * aciertos / s["sorteos"], 1) if s["sorteos"] else 0,
+            "pos1": s["pos"][0], "pos2": s["pos"][1], "pos3": s["pos"][2],
+            "apostado": round(apostado, 2),
+            "cobrado": round(cobrado, 2),
+            "neto": round(neto, 2),
+            "acumulado": round(acumulado, 2),
+            "en_curso": bool(hoy and domingo >= hoy),
+            "incompleta": s["sorteos"] < PAPER_SORTEOS_SEMANA,
+        })
+
+    n = sum(s["sorteos"] for s in semanas.values())
+    aciertos = sum(pos_tot)
+    apostado = n * costo_sorteo
+    cobrado = aciertos * pago_acierto
+    neto = cobrado - apostado
+
+    p_azar = 3 / PAPER_ANIMALES
+    esperado = n * p_azar
+    desv = sqrt(n * p_azar * (1 - p_azar)) if n else 0
+    z = round((aciertos - esperado) / desv, 2) if desv else 0.0
+    equilibrio = 3 / mult * 100
+
+    pct = 100 * aciertos / n if n else 0
+    if n < 100:
+        veredicto = (f"Muestra muy chica ({n} sorteos): todavía no se puede "
+                     f"concluir nada, ni a favor ni en contra.")
+    elif abs(z) < 2:
+        veredicto = (f"Acierto de {pct:.1f}% contra {p_azar*100:.1f}% que da el azar "
+                     f"(z={z}): por ahora es indistinguible del azar.")
+    elif z >= 2:
+        veredicto = (f"Acierto de {pct:.1f}%, por encima del azar de {p_azar*100:.1f}% (z={z}). "
+                     f"Para ganar dinero hace falta sostener más de {equilibrio:.1f}%.")
+    else:
+        veredicto = (f"Acierto de {pct:.1f}%, por debajo del azar de {p_azar*100:.1f}% (z={z}).")
+
+    por_posicion = []
+    for i in range(3):
+        h = pos_tot[i]
+        # Neto si solo se apostara a esa posición (monto por sorteo, no por 3)
+        solo = h * pago_acierto - n * monto
+        por_posicion.append({
+            "posicion": i + 1,
+            "aciertos": h,
+            "pct": round(100 * h / n, 2) if n else 0,
+            "neto_solo_esta": round(solo, 2),
+        })
+
+    return {
+        "status": "success",
+        "config": {"monto": monto, "mult": mult},
+        "totales": {
+            "sorteos": n, "aciertos": aciertos,
+            "pct_acierto": round(pct, 2),
+            "apostado": round(apostado, 2),
+            "cobrado": round(cobrado, 2),
+            "neto": round(neto, 2),
+            "roi_pct": round(100 * neto / apostado, 1) if apostado else 0,
+            "azar_pct": round(p_azar * 100, 2),
+            "equilibrio_pct": round(equilibrio, 2),
+            "z": z,
+            "veredicto": veredicto,
+        },
+        "por_posicion": por_posicion,
+        "semanas": lista,
+    }
+
+
+@app.get("/paper/semanal")
+async def paper_semanal(
+    monto: float = Query(default=None),
+    mult: float = Query(default=None),
+    desde: str = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cierre semanal simulado. monto/mult opcionales para probar otros valores
+    sin guardarlos; desde=YYYY-MM-DD acota el histórico."""
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    cfg_monto, cfg_mult = await _paper_config(db)
+    monto = monto if (monto is not None and monto > 0) else cfg_monto
+    mult = mult if (mult is not None and mult > 0) else cfg_mult
+
+    filtro, params = "", {}
+    if desde:
+        try:
+            params["desde"] = _dt.strptime(desde, "%Y-%m-%d").date()
+            filtro = "AND fecha >= :desde"
+        except Exception:
+            return {"status": "error", "message": "Formato inválido. Use YYYY-MM-DD"}
+
+    rows = (await db.execute(text(f"""
+        SELECT fecha,
+               CASE
+                 WHEN LOWER(TRIM(resultado_real)) = LOWER(TRIM(prediccion_1)) THEN 1
+                 WHEN LOWER(TRIM(resultado_real)) = LOWER(TRIM(prediccion_2)) THEN 2
+                 WHEN LOWER(TRIM(resultado_real)) = LOWER(TRIM(prediccion_3)) THEN 3
+               END AS pos
+        FROM auditoria_ia
+        WHERE resultado_real IS NOT NULL
+          AND UPPER(TRIM(resultado_real)) NOT IN ('', 'PENDIENTE')
+          AND prediccion_1 IS NOT NULL
+          {filtro}
+        ORDER BY fecha, hora
+    """), params)).fetchall()
+
+    hoy = _dt.now(_ZI("America/Caracas")).date()
+    return _paper_agregar([(r[0], r[1]) for r in rows], monto, mult, hoy)
+
+
+@app.post("/paper/config")
+async def paper_config(
+    monto: float = Query(...),
+    mult: float = Query(default=30),
+    db: AsyncSession = Depends(get_db),
+):
+    """Guarda el monto por número y el multiplicador de pago."""
+    if monto <= 0 or mult <= 0:
+        return {"status": "error", "message": "monto y mult deben ser mayores que 0"}
+    await _paper_config(db)  # asegura que la tabla exista
+    await db.execute(text("""
+        INSERT INTO apuestas_config (monto_por_numero, multiplicador_pago)
+        VALUES (:m, :x)
+    """), {"m": monto, "x": mult})
+    await db.commit()
+    return {"status": "success", "monto": monto, "mult": mult}
